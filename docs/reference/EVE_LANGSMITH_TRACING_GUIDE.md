@@ -16,6 +16,8 @@
 > Verified versions: eve **0.25.3**, `ai` (Vercel AI SDK) **7.0.34**. Re-verify span behavior after major upgrades (see §13).
 >
 > **Validation status:** on 2026-07-27 this guide was followed from scratch, start to finish, to build the integration in `example/kb-agent-langsmith-starter/` — every §14 checkbox was confirmed live against LangSmith EU (one trace per request, root with real IO, 85,901-char system prompt intact, cost on every llm run, story-form failure run). Corrections discovered during that run are folded in and marked with dates.
+>
+> **Re-validated 2026-07-31 against `partner-recommendation-agent/` (eve 0.25.2, ai 7.x), and this is the first pass over a codebase that had implemented the guide *incompletely*** — a materially different exercise from building it fresh, and the one that surfaced the guide's own errors. Four independent defects were found and fixed; two of them existed because this document said the wrong thing. **Corrections marked "CORRECTED 2026-07-31" overrule anything earlier in the text.** New material from that pass: §6.1 (turns that ask instead of answering), §7.1 (recognising a missing Part C, and the `app.trace_shape` sentinel), Step 0.2b (gitignore `.data/`), the shared-`recordInputs` warning in Step A2, attribute-level span debugging in Step A3, and Lessons 16–23. Verified end state: 9/9 API checks green on a live turn — one trace, 28,411-char system prompt, 2,318-char reply, 10 llm children all with tokens *and* cost, 3 tool runs with full arguments and results, `total_cost` rolled up onto the root.
 
 ---
 
@@ -187,6 +189,7 @@ You do not have to start from a blank page. Two working implementations exist:
 
 - **`example/langsmith-observability-agent/`** — the minimal reference: instrumentation, hook, span filter, renaming, trace anchors, four demo tools, live-check script (its library module is named `lib/langsmith-agent.ts`). Note: it predates Part D — it has **no** system-prompt capture.
 - **`example/kb-agent-langsmith-starter/`** — the complete implementation produced by following this guide end-to-end (2026-07-27 validation run), including Part D system-prompt capture, the consolidated `lib/langsmith.ts` module, vitest unit tests, and the `scripts/verify-langsmith.ts` API verifier from §11 V4.
+- **`partner-recommendation-agent/`** — the **production** implementation, and the most complete one as of 2026-07-31. Read this one when your situation is not greenfield. It is the only reference that shows: LangSmith **coexisting with another OTel backend** (Sentry) on a single shared provider rather than registering its own (see its `agent/instrumentation.ts` header comment for why `registerOTel()` would silently lose); the `app.trace_shape` anchor sentinel (§7.1); `input.requested` capture and the `asked_user` outcome (§6.1); cache-token and finish-reason capture; and a nine-assertion [scripts/verify-langsmith.ts](partner-recommendation-agent/scripts/verify-langsmith.ts) that polls through the ingestion window and exits non-zero.
 
 When in doubt about any code detail below, read the corresponding file in those projects — they are the verified ground truth.
 
@@ -233,6 +236,18 @@ LANGSMITH_RECORD_IO=false
 Mirror the variable *names* (never real values) in a committed `.env.example` so the next developer knows what to configure.
 
 > 🛑 **Never commit a real API key anywhere** — not in markdown, not in `.env.example`, not in MCP config committed to the repo. Placeholders only. If a key does leak into git history, revoke and rotate it in the LangSmith UI immediately; deleting the file afterwards does not un-leak it.
+
+### Step 0.2b — Gitignore `.data/` before you create the file stores
+
+This integration writes two file stores under `.data/` (trace anchors in Part C, the assembled system prompt in Part D) plus the span-debug log. **The prompt store contains the full assembled system prompt, and the stores sit in the agent root where nothing ignores them by default.** Add the rule when you add the first store, not after the first accidental commit:
+
+```gitignore
+# Runtime observability state: LangSmith trace anchors and captured system
+# prompt (lib/langsmith.ts file stores), span-debug logs, load-test output.
+.data/
+```
+
+Checked on this repo 2026-07-31: `.gitignore` covered `.eve/` but not `.data/`. Nothing had been committed yet only because the whole agent directory was still untracked — that is luck, not a safeguard.
 
 ### Step 0.3 — Install dependencies
 
@@ -370,6 +385,16 @@ export default defineInstrumentation({
 - **`registerOTel({ serviceName, spanProcessors })` with a `BatchSpanProcessor`-wrapped `OTLPHttpProtoTraceExporter({ url, headers })`** is exactly the custom-exporter pattern in the official `@vercel/otel` docs (verified 2026-07-27). `BatchSpanProcessor` batches spans before export — the production-appropriate choice.
 - **`/otel/v1/traces` path suffix:** per the official LangSmith OTel docs, the OTLP base is `<host>/otel` and you append `/v1/traces` when the exporter sends traces only — ours does.
 - **`x-api-key` and `Langsmith-Project` headers:** the documented auth and project-routing headers. Without the project header, spans land in the `default` project.
+
+> 🛑 **`recordInputs`/`recordOutputs` are ONE eve-wide switch, not a per-backend one (learned the hard way 2026-07-31).** They govern the AI SDK spans that *every* backend on the provider reads. In a project where instrumentation is shared with another vendor (this repo shares it with Sentry), gating them on that other vendor's env var — `SENTRY_RECORD_IO` — silently disables content capture for LangSmith too. The partner agent ran that way for its entire history: `LANGSMITH_RECORD_IO=true` was set, but `SENTRY_RECORD_IO` was not, so eve was told not to record.
+>
+> **Its diagnostic signature is highly specific, so learn to recognise it:** the **system prompt is present** on the root run while **every llm run has `inputs: {}`** and every tool run has no arguments or results. That combination is *only* possible with this bug, because the system prompt travels the separate file-store path of §8.1 which does not consult `recordInputs` at all. It reads like "LangSmith is dropping messages"; it is really "eve was never asked to emit them". Gate the switch on the union of every backend's opt-in:
+>
+> ```ts
+> const RECORD_IO = process.env.SENTRY_RECORD_IO === "true" || langsmithRecordIo();
+> ```
+>
+> Fast confirmation without waiting for ingestion: run with the span-debug log at attribute level (§Step A3) and check whether the `invoke_agent` span carries `gen_ai.input.messages` / `gen_ai.output.messages`. If those keys are absent from the span, no amount of LangSmith-side configuration will make the content appear.
 
 > ⚠️ **This naive version is deliberately incomplete.** Run it as-is and it *works* — but floods your project with ~20× workflow-infrastructure noise spans (`workflow.stream.flush`, `fetch POST .../workflow-world`, ...). Step A3 fixes that. Do not skip A3, and do not fix it with a naive filter — that fails worse, as explained there.
 
@@ -511,6 +536,15 @@ spanProcessors: [
 
 - **`LANGSMITH_EXPORT_ALL=true` escape hatch:** lets you compare filtered vs unfiltered export when debugging tree problems.
 - **`EVE_LS_SPAN_DEBUG=1` local recorder:** writes a KEEP/DROP verdict per span to `.data/spans.log`. This is the tool that distinguishes "my filter dropped it" from "LangSmith hasn't ingested it yet" — the two failure modes that look identical from the UI. Instrument the boundary you control independently of the backend you don't.
+- **Add a level 2 that also dumps attribute keys** (added 2026-07-31 — it paid for itself immediately):
+
+  ```ts
+  const attrs = spanDebug === "2" ? ` | ${Object.keys(span.attributes).join(",")}` : "";
+  appendFileSync(logPath, `${keep ? "KEEP" : "DROP"}${ai ? " ai" : ""} | ${span.name}${attrs}\n`);
+  ```
+
+  Attribute keys answer, in seconds and with zero ingestion latency, the three questions that otherwise cost a ten-minute round trip each: *is content capture actually on?* (`gen_ai.input.messages` / `gen_ai.output.messages` present), *can LangSmith compute cost?* (`gen_ai.request.model`, `gen_ai.usage.*` present), and *can the Part C anchor find its key?* (`eve.session.id` on the turn span). Note the shape difference while reading it: eve's own attributes sit bare on the turn span (`eve.session.id`), while runtime-context values arrive on AI spans under an `ai.settings.context.` prefix (`ai.settings.context.eve.session.id`) — do not read the prefixed copy and conclude the bare one is missing.
+- **Careful with the `if` guard when adding levels.** `if (process.env.EVE_LS_SPAN_DEBUG === "1")` narrows the type to the literal `"1"`, so a nested `=== "2"` check is a TypeScript error (TS2367), not a runtime bug. Hoist it: `const spanDebug = process.env.EVE_LS_SPAN_DEBUG; if (spanDebug === "1" || spanDebug === "2")`.
 - **The `(infrastructure)` ancestor spans that remain** (`workflow.execute` etc.) are *deliberate*: they carry no AI data but removing them would erase the whole trace (orphan rule). They will show `io=--` in LangSmith; token/cost numbers on them are subtree rollups, not their own usage. That's the expected shape.
 
 > 🛑 **Never tighten `shouldExportSpan` to exclude `gen_ai.*`/`ai.*` spans, and never strip or rewrite span *attributes* at export time.** Dropping llm spans (or orphaning them) means no cost ever appears; stripping `gen_ai.*` attributes means LangSmith can't derive the model/provider and shows tokens but no cost. Only span *names* may be rewritten (§9).
@@ -707,13 +741,27 @@ Add to `lib/langsmith.ts` (shape verified live; see the full version in [example
 ```ts
 interface TurnState {
   userMessage?: string;
-  reply?: string;
+  reply?: string;          // from message.completed
+  streamedReply?: string;  // from message.appended — fallback for a null `message`
+  question?: string;       // from input.requested — the turn asked instead of answering (§6.1)
   startedAt?: number;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;   // often the MAJORITY of input on a long-prompt agent
+  cacheWriteTokens: number;
   modelSteps: number;
   toolsUsed: string[];
   toolErrors: number;
+  finishReason?: string;     // the fastest triage field there is — see Lesson 22
+}
+
+/** One place to construct it, so adding a counter can't silently skip a
+ *  reset site. There are two: `stateFor` and the `message.received` reset. */
+function emptyTurnState(): TurnState {
+  return {
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    modelSteps: 0, toolsUsed: [], toolErrors: 0,
+  };
 }
 
 export class TurnJournal {
@@ -722,7 +770,7 @@ export class TurnJournal {
   private stateFor(sessionId: string): TurnState {
     let s = this.sessions.get(sessionId);
     if (!s) {
-      s = { inputTokens: 0, outputTokens: 0, modelSteps: 0, toolsUsed: [], toolErrors: 0 };
+      s = emptyTurnState();
       this.sessions.set(sessionId, s);
     }
     return s;
@@ -734,7 +782,7 @@ export class TurnJournal {
       // ⚠️ A new user message must RESET this session's state — sessions are
       // multi-turn, and without the reset tokens/steps/tools accumulate
       // across turns and every later summary is wrong.
-      const fresh: TurnState = { inputTokens: 0, outputTokens: 0, modelSteps: 0, toolsUsed: [], toolErrors: 0 };
+      const fresh = emptyTurnState();
       fresh.userMessage = typeof data?.message === "string" ? data.message : undefined;
       fresh.startedAt = now;
       this.sessions.set(sessionId, fresh);
@@ -743,12 +791,25 @@ export class TurnJournal {
       s.inputTokens += usage?.inputTokens ?? 0;
       s.outputTokens += usage?.outputTokens ?? 0;
       s.modelSteps += 1;
+    } else if (event === "message.appended") {
+      // Cumulative text of the current block. Kept as the fallback for a
+      // `null` message.completed (see the corrected note below).
+      const soFar = (data as { messageSoFar?: unknown })?.messageSoFar;
+      if (typeof soFar === "string" && soFar.trim() !== "") s.streamedReply = soFar;
     } else if (event === "message.completed") {
-      // ⚠️ Field name verified live: the assistant text arrives as `text`
-      // (NOT `message`). It fires per text block; the last non-empty one is
-      // the reply. Accept fallback spellings defensively.
-      const text = (data?.text ?? data?.message ?? data?.content) as unknown;
+      // ⚠️ CORRECTED 2026-07-31 — the field is `message`, NOT `text`.
+      // Earlier versions of this guide asserted `text` here; the eve protocol
+      // types are unambiguous (node_modules/eve/dist/src/protocol/message.d.ts:
+      // `MessageCompletedStreamEvent.data.message: string | null`). The old
+      // ordering only ever worked because `message` was the second fallback.
+      // Note the `| null`: read it FIRST but never assume it is populated.
+      const text = (data?.message ?? data?.text ?? data?.content) as unknown;
       if (typeof text === "string" && text.trim() !== "") s.reply = text;
+    } else if (event === "input.requested") {
+      // ⚠️ A turn can end by ASKING instead of answering — see §6.1 below.
+      // Such a turn emits NO assistant text block at all.
+      const first = (data as { requests?: ReadonlyArray<Record<string, unknown>> })?.requests?.[0];
+      if (typeof first?.prompt === "string" && first.prompt.trim() !== "") s.question = first.prompt;
     } else if (event === "action.result") {
       const r = (data as { result?: { toolName?: string; isError?: boolean } })?.result;
       if (r?.toolName) s.toolsUsed.push(r.toolName);
@@ -807,7 +868,33 @@ export class TurnJournal {
 **Semantics to get right:**
 
 - A turn where a tool failed but the agent recovered and answered is `outcome: "answered"` with `app.tool_errors: 1` — the tool failure still gets its own story-form failure run. Only `turn.failed` marks the summary itself failed.
-- Token counts come from `step.completed.data.usage` (`inputTokens`/`outputTokens` — field names verified live).
+- Token counts come from `step.completed.data.usage`. The full field set on eve 0.25.x is `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `costUsd` — the last three were missing from earlier versions of this guide. Capture them: `cacheReadTokens` is often the majority of a long-prompt agent's input (measured here: 45,696 of 51,375), and a summary that ignores it makes cache behaviour invisible. `step.completed.data.finishReason` is worth recording too — it is what distinguishes a turn that replied from one that ended on a tool call.
+
+### 6.1 The turn that asks instead of answering (added 2026-07-31)
+
+> 🛑 **A turn can end with no assistant text at all.** When the agent calls eve's built-in `ask_question` tool, the question is delivered on the **`input.requested`** stream event — not `message.completed`, not `message.appended`. A TurnJournal that listens only for assistant text files that turn with an **empty output** and, worse, labels it `outcome: "answered"`.
+
+This was live on the partner agent for its whole history and read as an intermittent bug ("sometimes `agent_reply` is missing"). It is not intermittent — it is deterministic for every clarifying-question turn. The tell in the trace: `app.model_steps: 1`, `app.tools_used: ""`, and `app.finish_reason: "tool-calls"` with no tool run anywhere in the trace. `ask_question` produces no `action.result` until the user answers, which is why it leaves no other trace.
+
+The payload (`node_modules/eve/dist/src/runtime/input/types.d.ts`) is worth capturing in full — `requests[0].prompt` is the question text and `requests[0].options[].label` are the offered choices:
+
+```ts
+"input.requested": guard(async (e, ctx) =>
+  journal.record(ctx.session.id, "input.requested", e.data, now()),
+),
+```
+
+...and in `finalize`, let it drive a truthful outcome rather than fabricating an answer:
+
+```ts
+const reply = s.reply ?? s.streamedReply;
+const outcome = args.outcome === "answered" && !reply && s.question ? "asked_user" : args.outcome;
+outputs = { agent_reply: reply ?? s.question, agent_question: s.question, outcome };
+```
+
+Add `asked_user` to your outcome vocabulary. Without it, "the agent asked for a city" and "the agent answered" are the same row in every dashboard you will ever build on this data — and the eval datasets in the follow-on guides inherit the same blind spot.
+
+**Related trap:** the same event makes the session park in `session.waiting`, which hangs a naive `live-check.ts` that only breaks on `turn.completed`. Wrap live-check calls in `timeout 180` rather than debugging a "hung agent".
 - With `recordContent` off, IO is redacted but timing/token/tool numbers remain — the privacy gate degrades gracefully instead of all-or-nothing.
 - ⚠️ **Do not** set LangSmith's native usage fields on this chain-type run to "show cost faster" — cost rolls up from the OTLP llm children on its own (§8.2); manual values risk double counting. The `app.tokens.*` metadata is the sanctioned immediate-visibility channel.
 
@@ -1027,8 +1114,8 @@ In `AiSpanFilter.onStart` (instrumentation side): when the span named `ai.eve.tu
 // inside onStart, after this.state.onStart(...):
 const [sec, nanos] = span.startTime;
 this.open.set(id, { parent, sec, nanos });          // open: Map<spanId, {parent?, sec, nanos}>
-if (span.name === "ai.eve.turn") {
-  const sessionId = span.attributes["eve.session.id"];
+if (span.name === "eve.turn" || span.name === "ai.eve.turn") {   // BOTH — see §9.1
+  const sessionId = span.attributes["eve.session.id"];           // confirmed present on this span
   if (typeof sessionId === "string") {
     let rootId = id, guard = 0;
     for (let e = this.open.get(rootId); e?.parent && guard++ < 100; e = this.open.get(rootId)) {
@@ -1062,6 +1149,30 @@ Failure runs get `trace_id: anchor.rootRunId`, `parent_run_id: anchor.rootRunId`
 > ⚠️ **Known edge case (accepted, never observed):** if a hook fired *after* OTLP ingestion completed (extreme lag inversion), the pre-create would be rejected and that turn's root would fall back to the bare OTLP root — children still form a tree. In practice OTLP lags by minutes and the hook fires in seconds, so the hook always wins the race.
 
 **✅ Checkpoint:** after a live turn (§11), the LangSmith trace list shows **one** row per request, whose root is `Customer Request: "..."` with real inputs/outputs immediately; the llm/tool children appear under the *same* trace minutes later. If you instead see two rows (summary + separate OTLP tree), the anchor bridge is broken — check that `.data/anchors/` files appear during a turn and that the hook runs in the same working directory.
+
+### 7.1 Recognising "Part C was never implemented" (added 2026-07-31)
+
+Skipping Part C does not look like a broken integration. It looks like a **working integration that is mysteriously missing half its data**, and which half depends on which row you happen to click. That ambiguity is the whole problem, so learn the fingerprint — a single API query over root runs shows it:
+
+| Row in the trace list | Has | Missing |
+|---|---|---|
+| `Customer Request: "…"` (hook, REST) | system prompt, user message, agent reply | `total_cost: null`, `total_tokens: 0`, **no children** |
+| `Agent Run (infrastructure)` (OTLP) | tokens, dollar cost, the full llm/tool tree | `inputs: {}`, `outputs: null` everywhere |
+
+Two root runs, seconds apart, same request. Measured on the partner agent before the fix: run `e406c5f2…` held the conversation, run `00000000-0000-0000-5aa1-f8b8562d7ee8` held the $0.216. Anyone looking at the first concludes "cost tracking is broken"; anyone looking at the second concludes "prompts and outputs are broken". Both are the same missing bridge.
+
+**Make the regression queryable, not visual.** Put a sentinel on the summary run that states whether the graft happened:
+
+```ts
+"app.trace_shape": args.anchor ? "anchored" : "standalone",
+```
+
+Now "did Part C fire?" is one filter (`app.trace_shape = standalone`) instead of an eyeball comparison of the trace list, and any future change that breaks the bridge — an eve upgrade renaming the turn span, a working-directory change, a file-store permission failure — shows up as a metadata value rather than as a slow drift back into two rows. Every degradation path in Part C is deliberately silent, so this is the only cheap alarm.
+
+**Two implementation details worth getting right the first time:**
+
+- **The summary run must adopt the anchor's `start_time`** (`rootStartMs`), not the hook's own first-event timestamp. The root's `dotted_order` stamp is derived from the root *span's* start; a `start_time` that disagrees with it produces a run whose displayed duration excludes the request's first ~600 ms of workflow setup.
+- **Sanitise the session id before using it as a filename.** Both file stores key on it, and while eve's ids (`wrun_01K…`) are path-safe today, a store that concatenates an external id straight into a path is one id-format change away from writing outside its directory. `sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 128)` costs nothing.
 
 ---
 
@@ -1129,7 +1240,10 @@ Every row below was individually observed to be **missing without its fix**. Thi
 
 | Goal | What delivers it |
 |---|---|
-| User/assistant messages on llm runs | `recordInputs`/`recordOutputs: true`, env-gated by `LANGSMITH_RECORD_IO` (Step A2) |
+| User/assistant messages on llm runs, and tool arguments/results on tool runs | `recordInputs`/`recordOutputs: true` — gated on the **union** of every backend's opt-in, not one backend's alone (Step A2) |
+| The agent's clarifying question, when a turn asks instead of answers | `input.requested` capture + the `asked_user` outcome (§6.1) |
+| Proof the trace was assembled correctly, rather than hope | `app.trace_shape` sentinel on the summary run (§7.1) |
+| Cache-token and finish-reason visibility | `step.completed.data.usage.cacheReadTokens`/`cacheWriteTokens` and `.finishReason` (Part B3) |
 | System prompt visible | `step.started` → file store → hook writes `inputs.system_prompt` on the root (§8.1) |
 | Cost on every llm run | OTLP: automatic from `gen_ai.*`. Hand-authored: explicit `ls_model_name` + `ls_provider` (§8.2) |
 | Root run with real IO + rollups | TurnJournal summary run as trace root via the anchor mechanism (Parts B + C) |
@@ -1149,8 +1263,10 @@ Every row below was individually observed to be **missing without its fix**. Thi
 | Name seen in LangSmith | Producer | Renameable? |
 |---|---|---|
 | `workflow.route.flow`, `fetch POST ...` | Workflow SDK infrastructure spans (kept only as tree ancestors) | Not at source — **export-time rewrite only** |
-| `ai.eve.turn` | eve framework | Export-time rewrite only |
-| `invoke_agent gpt-4.1`, `chat gpt-4.1`, `step 1` | AI SDK v7 native spans (eve owns these calls) | Export-time rewrite only |
+| `ai.eve.turn` **and** `eve.turn` | eve framework | Export-time rewrite only |
+| `invoke_agent gpt-4.1`, `chat gpt-4.1`, `generate_content gpt-4.1`, `step 1` | AI SDK v7 native spans (eve owns these calls) | Export-time rewrite only |
+
+> ⚠️ **CORRECTED 2026-07-31 — match BOTH turn-span spellings.** Both `eve.turn` and `ai.eve.turn` were observed in `.data/*-spans.log` on eve 0.25.2, so a rule anchored on `/^ai\.eve\.turn$/` alone silently fails to rename (and, worse, a Part C anchor keyed on that exact string silently never fires — see §7). Match `/^(ai\.)?eve\.turn$/` everywhere the turn span is identified. Two further names the original rules table missed: `generate_content <model>` (a third llm-span shape) and the AI SDK's bare `step 1`, `step 2`, … — the latter are meaningless in a trace list and deserve a rule of their own.
 | Tool run named after your tool | **Your tool file's name** | **Yes — at source. Fix the source.** |
 | Failure/summary runs | **Your hook code** | **Yes — fully yours.** |
 
@@ -1288,11 +1404,20 @@ Verify **via the API, not by eyeballing the UI** — a small `scripts/verify-lan
 
 > 📌 **Query-scope fact (measured):** the `eve.session.id` metadata filter matches **only the hook-authored runs** — OTLP-ingested spans do not surface their span attributes as queryable metadata (§Step A4). The working pattern is two-stage: find the hook root by session metadata, take its `trace_id`, then list the full trace by `traceId`. Resolve the project by **name**, never by stored id.
 
-1. Exactly **one trace** for the session (root run id = trace id).
+1. Exactly **one trace** for the session (root run id = trace id, and `app.trace_shape = anchored`).
 2. Root has `inputs.user_message` (+ `inputs.system_prompt` if `LANGSMITH_RECORD_IO=true`) and `outputs.agent_reply`.
 3. ≥1 child with `run_type=llm`, non-zero token counts, and — after ingestion — `total_cost != null`.
 4. The tool run appears with `run_type=tool` and your verb+object name.
+4b. **llm children actually carry content** (`Object.keys(run.inputs).length > 0`) and tool runs carry arguments/results. Assert this separately from "the llm run exists" — the shared-`recordInputs` bug of Step A2 passes checks 1–4 and fails only this one.
+4c. **Trace-level cost rolled up onto the root** (`total_cost > 0` on the root run). This is the single check that proves Part C worked end to end: it can only be true if the summary run and the llm subtree are in the same trace.
 5. The failing session additionally has the story-form failure run with `status=error` and full metadata.
+
+**Working implementation:** [partner-recommendation-agent/scripts/verify-langsmith.ts](partner-recommendation-agent/scripts/verify-langsmith.ts) implements all of the above as nine polling assertions and exits non-zero on failure, so it drops straight into CI or a pre-ship check. Run it as `npx tsx scripts/verify-langsmith.ts <sessionId>`, or with no argument to check the project's most recent `Customer Request` trace.
+
+Two things that will bite when writing your own:
+
+- **Scripts do not inherit the agent's env.** `eve dev` loads `.env.local`; a bare `npx tsx` does not, and the script then reports "LANGSMITH_API_KEY is not set" while the agent beside it is happily tracing. Import the project's env loader first (`import "../lib/load-env";`) before anything that reads `process.env`.
+- **`total_cost` / `total_tokens` are absent from the SDK's `Run` type.** They are server-computed rollups the API returns but the TypeScript interface does not declare, so `client.readRun()` needs a widening cast. Do not conclude the fields do not exist because `tsc` says so.
 
 **If something is missing**, branch on the evidence — in this order:
 
@@ -1344,6 +1469,17 @@ flowchart TD
 | `eve build` fails with `EPERM: operation not permitted, rename '.output' ...` (Windows) | A process (previous preview/dev, editor, indexer) holds a lock on `.output` | Delete `.output` and any `.output.eve-backup-*` directories, rebuild |
 | Rolldown warns `Use of direct eval` in `@vercel/otel` during `eve dev`/`eve build` | Upstream `@vercel/otel` bundling artifact | Benign — ignore |
 | `live-check` prints `status=waiting` although the reply is complete | eve client result status observed as `waiting` on eve 0.25.3 even for finished turns | Judge by the reply text and the LangSmith runs, not this status string |
+| **System prompt present on the root, but every llm run has `inputs: {}` and tool runs have no args/results** | `recordInputs`/`recordOutputs` gated on another backend's env var (`SENTRY_RECORD_IO`) that isn't set — eve was never asked to record. The prompt still appears because it uses the separate file-store path of §8.1 | Gate on the union of all backends' opt-ins (Step A2). Confirm at the span level: no `gen_ai.input.messages` key ⇒ the problem is upstream of LangSmith |
+| **Two root runs per request: one with IO and `total_cost: null`, one named `Agent Run (infrastructure)` with the cost and no IO** | Part C never implemented (not "broken") | Implement trace anchors (§7); add the `app.trace_shape` sentinel (§7.1) so the regression stays queryable |
+| Anchor never written; `.data/anchors/` stays empty during a turn | The anchor trigger is keyed on `span.name === "ai.eve.turn"` but eve emitted `eve.turn` | Match both spellings (§9.1). Verify with `EVE_LS_SPAN_DEBUG=2` that the turn span carries `eve.session.id` |
+| `agent_reply` missing on *some* turns, present on others — looks intermittent | Not intermittent: those turns ended by **asking the user** via `ask_question`, which emits no assistant text, only `input.requested` | Subscribe to `input.requested`; record the question and set `outcome: "asked_user"` (§6.1) |
+| `agent_reply` missing and the agent definitely replied | `message.completed.data.message` is typed `string \| null`, and earlier guide versions read a non-existent `text` field first | Read `message` first; keep `message.appended.data.messageSoFar` as the fallback (§B3) |
+| `live-check.ts` hangs forever on a turn that asked a question | The session parked in `session.waiting`; a loop that only breaks on `turn.completed` never exits | Wrap in `timeout 180`; treat `session.waiting` as terminal |
+| Summary run's duration is shorter than the request really took | Summary used the hook's first-event time instead of the anchor's `rootStartMs` | Adopt `anchor.rootStartMs` as `start_time` (§7.1) |
+| `tsc` TS2367 "types '\"1\"' and '\"2\"' have no overlap" in the span-debug block | The outer `=== "1"` guard narrowed `process.env.X` to that literal | Hoist to a local before comparing (§Step A3) |
+| Verification script reports no API key while the agent traces fine | `npx tsx` does not load `.env.local`; only the eve runtime does | `import "../lib/load-env";` at the top of the script |
+| `tsc` says `total_cost` does not exist on `Run` | Server-computed rollup fields are returned by the API but undeclared in the SDK type | Widening cast on the `readRun` result; the data is there |
+| Restarted `eve dev` and the old `EVE_HOST` stops working | eve picks a **new free port on every start** (observed 2002 → 2003 → 2004 in one session); `.eve/dev-server-state.v1.json` can also point at a dead port | Re-read the `server listening at` line after *every* restart; delete the stale state file |
 
 ---
 
@@ -1360,6 +1496,11 @@ flowchart TD
 - ✅ Name for humans: business-intent roots, action-phrase spans, verb+object tools, story-form failures.
 - ✅ Re-measure span behavior after every eve / AI SDK / vendor-SDK upgrade — the "AI SDK v7 emits gen_ai spans natively" fact is version-specific (measured on eve 0.25.3 / ai 7.0.34).
 - ✅ Verify each configuration against the current official docs before relying on it — this guide was checked against the LangSmith OTel ingestion docs, the `@vercel/otel` docs, and the `langsmith` JS SDK docs on 2026-07-27.
+- ✅ **Read eve's protocol types, not this guide, for event payload field names.** `node_modules/eve/dist/src/protocol/message.d.ts` is the ground truth and takes thirty seconds to check. Two field-name claims in earlier versions of this guide were wrong, and both produced *silently incomplete* runs rather than errors.
+- ✅ **Give every silent degradation path a queryable sentinel.** `app.trace_shape`, `app.model_steps`, `app.tools_used`, `app.finish_reason` each turn "did the pipeline do its job?" into a metadata filter. This integration has no loud failures by design — that safety is only affordable if the quiet failures are still visible.
+- ✅ **Enumerate how a turn can END, not just how it succeeds.** Answered, failed, and *asked the user a question* are three different terminal shapes; a journal built for the first two mislabels the third.
+
+
 
 **Don't:**
 
@@ -1371,6 +1512,9 @@ flowchart TD
 - ❌ Don't hardcode LangSmith project ids anywhere.
 - ❌ Don't quote LangSmith cost figures for billing without checking the provider's numbers (known potential ~2× rollup inflation, §8.2).
 - ❌ Don't commit real API keys anywhere — including `.env.example` and MCP config files.
+- ❌ Don't gate a **shared** eve setting (`recordInputs`/`recordOutputs`) on one backend's private env var — it disables the others without saying so.
+- ❌ Don't treat Parts C and D as optional polish. Skipping Part C does not degrade the integration evenly; it splits every request into two half-traces and leaves whoever reads them convinced that a *different* feature is broken.
+- ❌ Don't diagnose from the LangSmith UI when a two-line API query answers it. "Missing cost" and "missing prompts" were the same bug here, and only a query over root runs made that visible.
 
 ---
 
@@ -1390,8 +1534,12 @@ Work through every line. The integration is complete only when all boxes check.
 - [ ] Within seconds: root summary run with real inputs/outputs; failure run (`status=error`, story-form name, full metadata) for the failing turn
 - [ ] Within minutes: llm + tool children **in the same trace** (one trace per request); human-readable span names; tool run typed `tool` with verb+object name
 - [ ] `total_cost != null` on every llm run after ingestion; trace row shows the cost rollup
+- [ ] **`total_cost > 0` on the ROOT run** — proves the summary run and the llm subtree share one trace (Part C worked)
+- [ ] **`app.trace_shape = anchored`** on the summary run (not `standalone`)
 - [ ] With `LANGSMITH_RECORD_IO=true`: `inputs.system_prompt` on the root, full length
+- [ ] **With `LANGSMITH_RECORD_IO=true`: llm runs have non-empty `inputs`, and tool runs show arguments *and* results** — separate box from the one above; the shared-`recordInputs` bug passes that one and fails this one
 - [ ] `app.*` metadata (model, version, environment, outcome, tokens) present; `thread_id` = session id
+- [ ] **A clarifying-question turn** (send a request with a detail deliberately missing) records `outcome: asked_user` with the question text — not an empty `answered`
 - [ ] The five §9 questions answerable from the trace list alone
 
 **Tooling:**
@@ -1420,6 +1568,19 @@ The distilled insights from building and verifying this integration — the thin
 14. **Restart the dev server after adding instrumentation.** `eve dev` reuses an already-running instance (it refuses to start a second one), and `setup` runs only at startup — a pre-integration server produces zero spans forever while looking healthy.
 15. **Where metadata is queryable is part of the design.** Runtime-context values ride on spans as `ai.settings.context.*` attributes but are not queryable metadata in LangSmith; the hook-authored runs are the only place `app.*`/`eve.session.id`/`thread_id` are guaranteed filterable. Anything a dashboard or verification script must filter by belongs on the hook runs.
 
+### Added 2026-07-31 — from debugging the partner agent's "incomplete monitoring"
+
+The reported symptom was one vague sentence: *traces are missing the system prompt, inputs, outputs, cost, and token usage.* It turned out to be **four independent defects** whose symptoms overlapped into a single fog. That is the meta-lesson, and the rest follow from it.
+
+16. **"Observability is incomplete" is a symptom, never a diagnosis — enumerate before fixing.** Four separate causes were live simultaneously here: a mis-gated content switch, an unimplemented Part C, stale span-name rules, and an unhandled turn shape. Any one of them alone explains *some* of the complaint, so the first plausible fix feels like the answer and leaves three defects in place. The discipline that worked: query the actual runs first, tabulate exactly which fields are present and absent on which run types, and only then start attributing. The table in §7.1 was worth more than any amount of code reading.
+17. **Partial data is more misleading than no data.** Nothing was erroring. Every pipe reported success, and both halves of every request were present *somewhere* in LangSmith. Whoever opened the summary run concluded "cost tracking is broken"; whoever opened the OTLP root concluded "prompts and replies are broken". Two correct observations, one cause, and no way to reconcile them without looking at both rows side by side. When a report says feature X is missing, check whether X exists on a *different* run than the reporter was looking at before assuming X was never produced.
+18. **A skipped step in a guide is invisible later; a sentinel makes it loud.** Nothing in the running system said "Part C was never implemented" — the code simply lacked functions no one remembered were supposed to exist. Cheap fix, applied everywhere now: emit metadata that names the shape you achieved (`app.trace_shape: anchored | standalone`). Absence of a feature is undetectable; a field that says `standalone` is a query.
+19. **Span names are a version-dependent API — never hardcode one.** `eve.turn` vs `ai.eve.turn` cost real time here, and the failure mode is severe out of proportion to the typo: a rename rule that misses is cosmetic, but the Part C anchor keyed on the same string silently produces *no anchor at all*, which is the difference between one trace and two. Match tolerantly (`/^(ai\.)?eve\.turn$/`) and re-measure after every eve upgrade.
+20. **The framework's type declarations outrank the guide.** Both wrong claims in this document (`message.completed.data.text`; `ai.eve.turn` as the sole spelling) were disproved in under a minute by `node_modules/eve/dist/src/protocol/message.d.ts` and by a span log. Reading `.d.ts` files also *found* capability nobody had asked for: `cacheReadTokens` (45,696 of 51,375 input tokens on a real turn — cache behaviour that was completely invisible before), `costUsd`, `finishReason`, and the `input.requested` payload that fixed defect #4.
+21. **Test the boring turn, not just the impressive one.** The long multi-tool "find yoga studios in Dortmund" request exercised every code path and passed. The two-word "best yoga studio" request — the one a real user actually sends — hit the clarifying-question path and exposed a defect the rich turn could not reach. Verification prompts must include the short, underspecified, and interrupted cases.
+22. **`app.finish_reason` is the fastest triage field there is.** `finish_reason: "tool-calls"` together with an empty `app.tools_used` says, in one glance, "the model called something that produced no tool run" — which is precisely the `ask_question` signature. It cost one line to record and immediately explained a defect that had read as random.
+23. **Cost inflation re-confirmed (2026-07-31, eve 0.25.2 / ai 7.0.34).** The nested `invoke_agent` llm span still reports ~2× the `chat` span's usage and the rollup still sums both — a real turn billed as ~1× showed `total_cost = $0.217` across 104,500 rolled-up tokens. Unchanged from the 2026-07-27 measurement, so treat it as a standing property of this pipeline rather than a transient bug: fine as a relative per-request signal, never as a billing figure.
+
 ---
 
 ## 16. Next Steps
@@ -1432,3 +1593,124 @@ With tracing verified end-to-end, the following topics build on this foundation 
 - **Feedback loops** — user feedback capture, annotation queues, and the continuous-improvement cycle.
 
 Do not start those until every box in §14 is checked — they all consume the traces this guide produces, and gaps here (missing cost, missing system prompt, unreadable names) become their gaps too.
+
+---
+
+## 17. Observability Audit & Improvements (2026-07-31)
+
+A production audit against **live** traces (project `Navio KB Chatbot`, inspected via the
+LangSmith MCP `fetch_runs`) found the integration correct on identity, linking, and system-prompt
+capture, but with **two real gaps**: trace **cost was ~2× inflated**, and the **execution graph
+was AI-only** (eve's workflow nodes were dropped). Both are now fixed in code, made configurable,
+and covered by tests (`tests/langsmith.test.ts` → "audit improvements"). This section is the
+living record of the audit — update it whenever the AI-SDK/eve span shapes change.
+
+### 17.1 Finding #1 — cost was double-counted (now **FIXED**)
+
+**Evidence** (real turn, trace `…75b0…`, one model call):
+
+| Run (span) | run_type | usage on the run |
+|---|---|---|
+| **Agent Reasoning** (`invoke_agent gpt-4.1`) | llm | 16,726 / 333 |
+| **Generating Response** (`chat gpt-4.1`) | llm | 16,726 / 333 |
+| **Root rollup** | chain | **34,118 tokens / $0.072232** |
+| *True per-call cost* | — | *17,059 tokens / $0.036116* |
+
+LangSmith prices **every** run that carries usage and sums them at the root, so the outer
+`invoke_agent` (which aggregates its inner calls' usage) and the inner `chat` (the real call) are
+counted **twice** → exactly 2×. This confirms **and now resolves** Lesson #23, which had treated
+the inflation as an immutable "standing property… never a billing figure."
+
+**Root cause:** the AI SDK emits `gen_ai.usage.*` on both the agent-operation wrapper span
+(`invoke_agent`) and the model-call span (`chat`).
+
+**Fix — `dedupeUsage` (default ON):** the instrumentation strips usage attributes from the
+**aggregator** span (`invoke_agent`) before export, so only the per-call `chat` spans are priced.
+The trace cost now equals the true per-call sum and **agrees with the summary run's
+`app.tokens.total`**. Opt out with `LANGSMITH_DEDUPE_USAGE=false` to compare against the raw
+(inflated) numbers.
+- Code: `isUsageAggregatorSpan` / `isUsageAttribute` (`lib/langsmith.ts`); `withoutAggregateUsage`
+  (`agent/instrumentation.ts`, composed **before** `withHumanName` so it matches the raw span name).
+- **Verify after redeploy:** for a single-call turn, the root `total_tokens` ≈ the summary
+  `app.tokens.total` (no longer ~2×); via `fetch_runs --trace-id …`, only `chat` runs carry usage.
+
+### 17.2 Finding #2 — the execution graph was AI-only (now configurable, default **COMPLETE**)
+
+The span filter kept AI spans + their **ancestors** only, dropping eve's Workflow-SDK structural
+spans — so sibling/parallel graph nodes and network calls never reached LangSmith and the
+"complete execution flow" wasn't inspectable.
+
+**Fix — `traceCompleteness` (default COMPLETE):** `shouldExportSpan(name, keys, complete)` now
+also keeps `workflow.*`, durable `step.*`, and `fetch *` spans (honest, quiet labels from
+`humanSpanName`), so the whole graph — workflow nodes, steps, tool calls, LLM calls — is captured
+and linked under the single request trace.
+- **Trade-off:** completeness = more runs per trace = higher LangSmith consumption. Set
+  `LANGSMITH_TRACE_COMPLETENESS=ai` (or `lean`/`false`) for the lean AI-only view.
+- Wired via `TRACE_COMPLETE` in `agent/instrumentation.ts`.
+
+### 17.3 Richer cost/usage telemetry on the summary run
+
+- **`app.tokens.cached`** — cache-read input tokens (billed cheaper), now accounted in
+  `usageTokens` (accepts `cachedInputTokens` / `cacheReadInputTokens` / `promptTokensDetails`).
+- **`app.cost.estimate_usd`** — an at-a-glance USD **estimate** from `MODEL_PRICES` /
+  `estimateCostUsd` (cache-aware). This is a *metadata convenience* for immediate visibility;
+  LangSmith's server-side price on the `chat` llm runs remains authoritative, and because it's a
+  metadata field it never double-counts (§8.2).
+- Unchanged: `app.tokens.input/output/total`, `app.duration_ms`, `app.model_steps`,
+  `app.tools_used`, `app.tool_errors`, `app.outcome`, `app.model`, `app.agent`, `thread_id`.
+
+### 17.4 Monitoring trace CONSUMPTION and remaining capacity
+
+"Remaining trace capacity" is an **org-level billing** metric, not per-trace metadata. Monitor it:
+- **LangSmith → Settings → Usage** ("Usage graph") — traces created vs. plan quota.
+- **`get_billing_usage` (MCP) / billing API** — ⚠️ returns **403** for a *workspace-scoped* key;
+  use an **org-scoped** key (set `LANGSMITH_WORKSPACE_ID`) or read the dashboard.
+- **Per-request:** the summary run's `app.*` metadata gives immediate tokens/cost/steps for
+  filtering, dashboards, and alerts.
+- **Guidance:** because completeness (17.2) raises run volume, run `LANGSMITH_TRACE_COMPLETENESS=ai`
+  if you're near a plan limit.
+
+### 17.5 Expected trace hierarchy (post-fix)
+
+```
+Customer Request: "…"                         (summary root — inputs/outputs, app.* metadata)
+└─ Agent Run (infrastructure)                 (workflow.* — kept in COMPLETE mode)
+   └─ Processing Step (infrastructure)        (step.* — kept in COMPLETE mode)
+      └─ Agent Turn: Understanding & Responding
+         └─ Agent Reasoning (invoke_agent)    (usage STRIPPED → not priced)
+            └─ Attempt N: Model Call & Tool Selection
+               └─ Generating Response (chat)  (the ONE priced llm run)
+                  └─ Calling <Tool> …          (tool runs, if any)
+```
+
+### 17.6 New environment variables (all optional; safe defaults)
+
+| Var | Default | Effect |
+|---|---|---|
+| `LANGSMITH_TRACE_COMPLETENESS` | `complete` | `ai`/`lean`/`false` = AI-only spans (lower volume) |
+| `LANGSMITH_DEDUPE_USAGE` | `true` | `false` = keep raw (2×-inflated) cost for comparison |
+
+(Pre-existing debug flags still apply: `LANGSMITH_EXPORT_ALL`, `LANGSMITH_HUMAN_NAMES`,
+`EVE_LS_SPAN_DEBUG`.)
+
+### 17.7 Troubleshooting additions
+
+| Symptom | Likely cause → fix |
+|---|---|
+| Trace cost/tokens look ~2× the real call | `LANGSMITH_DEDUPE_USAGE=false`, **or** the AI SDK introduced a new aggregator span name → extend `isUsageAggregatorSpan`. Confirm with `fetch_runs --trace-id`: only `chat` runs should carry usage. |
+| Graph nodes / network calls missing | `LANGSMITH_TRACE_COMPLETENESS=ai`, **or** eve renamed structural spans → extend the `complete` clause in `shouldExportSpan` **and** `humanSpanName`. |
+| `get_billing_usage` → 403 | Workspace-scoped key → use an org-scoped key. |
+| Cost still wrong after redeploy | The `app.model` / Azure deployment name has no `MODEL_PRICES` entry (estimate = 0) and/or LangSmith lacks pricing for the model slug — add a price row and check `ls_model_name` on the llm runs. |
+| Can't tell "dropped" vs "not yet ingested" | `EVE_LS_SPAN_DEBUG=1` → `.data/spans.log` logs `KEEP`/`DROP` (+`rule`) per span. |
+
+### 17.8 Lessons learned (supersedes Lesson #23)
+
+1. **The `invoke_agent`/`chat` double-count is FIXABLE at export** by stripping the aggregator's
+   usage — it is *not* an immutable property of the pipeline. Fix cost accuracy; don't caveat it.
+2. **Audit against real traces, not the UI.** The 2× only becomes obvious when you see two `llm`
+   runs with *identical* usage under one trace (`fetch_runs --trace-id`).
+3. **Completeness and dedupe belong behind env flags** — they trade volume vs. accuracy, and teams
+   near a plan limit need the lean mode.
+4. **The summary run's `app.tokens.*` was right all along** — it counts eve's `step.completed`
+   usage once. After the dedupe fix, the OTLP-priced cost finally agrees with it; that agreement is
+   now the fastest correctness check.

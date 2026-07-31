@@ -43,6 +43,44 @@ export function recordIo(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.LANGSMITH_RECORD_IO === "true";
 }
 
+/** Whether to export the FULL eve execution graph — workflow nodes, durable
+ *  steps, and network calls — alongside the AI spans, so the complete flow is
+ *  inspectable in a single trace (not just AI spans + their ancestors).
+ *
+ *  Default: COMPLETE. Trade-off: completeness means more runs per trace (higher
+ *  LangSmith trace/usage consumption). Set LANGSMITH_TRACE_COMPLETENESS=ai (or
+ *  "lean"/"false") for an AI-only view with the lowest volume. */
+export function traceCompleteness(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.LANGSMITH_TRACE_COMPLETENESS?.trim().toLowerCase();
+  return v !== "ai" && v !== "lean" && v !== "false";
+}
+
+/** COST ACCURACY. eve's AI SDK emits token usage on BOTH the outer
+ *  `invoke_agent` aggregator span AND its inner per-call `chat` span, and
+ *  LangSmith prices every run that carries usage — so the trace root
+ *  double-counts (≈2× tokens & cost). When true (default), instrumentation
+ *  strips usage from the aggregator so only the real per-call `chat` spans are
+ *  priced and the trace cost is accurate. Set LANGSMITH_DEDUPE_USAGE=false to
+ *  compare against the raw (inflated) numbers. */
+export function dedupeUsage(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.LANGSMITH_DEDUPE_USAGE !== "false";
+}
+
+/** Spans that AGGREGATE their children's token usage. Stripping usage from
+ *  these (see instrumentation) prevents LangSmith from double-counting them
+ *  against their inner `chat` calls. `invoke_agent` is the AI SDK agent-op
+ *  wrapper observed on eve 0.25.3 / ai 7.x. */
+export function isUsageAggregatorSpan(name: string): boolean {
+  return name.startsWith("invoke_agent");
+}
+
+/** True for attribute keys that carry token usage LangSmith prices from
+ *  (`gen_ai.usage.*`, `ai.usage.*`, and token-count variants). Used only to
+ *  strip usage from aggregator spans, so a broad match is safe there. */
+export function isUsageAttribute(key: string): boolean {
+  return /usage|token/i.test(key);
+}
+
 /** The one sanctioned way to build a LangSmith SDK client: EU endpoint,
  *  explicit. Returns undefined without a key so callers stay no-op. */
 export function createLangsmithClient(env: NodeJS.ProcessEnv = process.env): Client | undefined {
@@ -66,13 +104,32 @@ export function appMetadata(env: NodeJS.ProcessEnv = process.env): Record<string
 // ---------------------------------------------------------------------------
 
 /** AI spans carry `ai.` / `gen_ai.` attributes and eve's turn span carries
- *  `eve.`; eve's Workflow-SDK infrastructure spans carry none of those. */
-export function shouldExportSpan(name: string, attributeKeys: readonly string[]): boolean {
+ *  `eve.`; eve's Workflow-SDK infrastructure spans carry none of those.
+ *
+ *  `complete` (see `traceCompleteness`) additionally keeps eve's structural
+ *  graph spans (`workflow.*`, durable `step.*`, `fetch *`) so the full
+ *  execution flow is captured and linked — not only AI spans and their
+ *  ancestors. They get honest, quiet labels via `humanSpanName`. Default
+ *  (2-arg calls) keeps the lean AI-only behavior. */
+export function shouldExportSpan(
+  name: string,
+  attributeKeys: readonly string[],
+  complete = false,
+): boolean {
   if (name.startsWith("ai.")) return true;
-  return attributeKeys.some(
+  const ai = attributeKeys.some(
     (k) =>
       k.startsWith("ai.") || k.startsWith("gen_ai.") || k.startsWith("eve.") || k.startsWith("app."),
   );
+  if (ai) return true;
+  if (complete) {
+    return (
+      name.startsWith("workflow.") ||
+      name.startsWith("step.") ||
+      name.startsWith("fetch ")
+    );
+  }
+  return false;
 }
 
 /** Ancestor bookkeeping for the span filter.
@@ -243,21 +300,73 @@ interface TurnState {
   toolErrors: number;
   inputTokens: number;
   outputTokens: number;
+  cachedTokens: number;
 }
 
 function freshTurn(): TurnState {
-  return { steps: 0, toolsUsed: [], toolErrors: 0, inputTokens: 0, outputTokens: 0 };
+  return {
+    steps: 0,
+    toolsUsed: [],
+    toolErrors: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+  };
 }
 
 /** eve's usage field names are not pinned by the docs; accept the common
- *  AI SDK spellings defensively. Wrong guesses cost nothing (0 tokens). */
-function usageTokens(usage: unknown): { input: number; output: number } {
+ *  AI SDK spellings defensively. Wrong guesses cost nothing (0 tokens).
+ *  `cached` is the subset of input tokens served from the prompt cache (billed
+ *  cheaper) — used for a more accurate cost estimate. */
+function usageTokens(usage: unknown): { input: number; output: number; cached: number } {
   const u = (usage ?? {}) as Record<string, unknown>;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  // AI SDK v7 (Azure/OpenAI) reports prompt-cache hits under
+  // `inputTokenDetails.cacheReadTokens` — verified live via `npm run cache:check`.
+  // Keep the older spellings as fallbacks for other providers/versions.
+  const inDetails = u.inputTokenDetails as Record<string, unknown> | undefined;
+  const promptDetails = u.promptTokensDetails as Record<string, unknown> | undefined;
   return {
     input: n(u.inputTokens) || n(u.promptTokens) || n(u.input_tokens),
     output: n(u.outputTokens) || n(u.completionTokens) || n(u.output_tokens),
+    cached:
+      n(inDetails?.cacheReadTokens) ||
+      n(u.cachedInputTokens) ||
+      n(u.cacheReadInputTokens) ||
+      n(u.cached_tokens) ||
+      n(promptDetails?.cachedTokens),
   };
+}
+
+/** USD per 1M tokens, keyed by a substring of the model / Azure deployment name.
+ *  A client-side ESTIMATE only, for immediate at-a-glance cost on the summary
+ *  run — LangSmith's server-side pricing on the gen_ai llm children remains the
+ *  authoritative cost. Update these as provider prices change. */
+export const MODEL_PRICES: {
+  match: RegExp;
+  inPer1M: number;
+  outPer1M: number;
+  cachedInPer1M: number;
+}[] = [
+  { match: /gpt-4\.1-mini/i, inPer1M: 0.4, outPer1M: 1.6, cachedInPer1M: 0.1 },
+  { match: /gpt-4\.1/i, inPer1M: 2, outPer1M: 8, cachedInPer1M: 0.5 },
+  { match: /gpt-4o-mini/i, inPer1M: 0.15, outPer1M: 0.6, cachedInPer1M: 0.075 },
+  { match: /gpt-4o/i, inPer1M: 2.5, outPer1M: 10, cachedInPer1M: 1.25 },
+];
+
+/** Rough USD estimate for a turn's token usage. Cached input is billed at the
+ *  cheaper cached rate; the rest of the input at the full rate. Returns 0 when
+ *  the model has no price entry — we never invent a price. */
+export function estimateCostUsd(
+  model: string,
+  input: number,
+  output: number,
+  cached = 0,
+): number {
+  const p = MODEL_PRICES.find((e) => e.match.test(model));
+  if (!p) return 0;
+  const uncachedInput = Math.max(0, input - cached);
+  return (uncachedInput * p.inPer1M + cached * p.cachedInPer1M + output * p.outPer1M) / 1_000_000;
 }
 
 export interface SummaryRunPayload {
@@ -306,9 +415,10 @@ export class TurnJournal {
       }
       case "step.completed": {
         t.steps += 1;
-        const { input, output } = usageTokens(data?.usage);
+        const { input, output, cached } = usageTokens(data?.usage);
         t.inputTokens += input;
         t.outputTokens += output;
+        t.cachedTokens += cached;
         break;
       }
       case "action.result": {
@@ -395,7 +505,17 @@ export class TurnJournal {
           // the OTLP llm children — never set native usage fields here (§8.2).
           "app.tokens.input": String(t.inputTokens),
           "app.tokens.output": String(t.outputTokens),
+          "app.tokens.cached": String(t.cachedTokens),
           "app.tokens.total": String(t.inputTokens + t.outputTokens),
+          // At-a-glance ESTIMATE for immediate cost visibility (server-side
+          // pricing on the llm children stays authoritative; metadata field, so
+          // the two never double-count).
+          "app.cost.estimate_usd": estimateCostUsd(
+            appMetadata()["app.model"] ?? "unknown",
+            t.inputTokens,
+            t.outputTokens,
+            t.cachedTokens,
+          ).toFixed(6),
           "app.agent": args.agentName,
           "app.channel.kind": args.channelKind ?? "unknown",
           "eve.session.id": args.sessionId,

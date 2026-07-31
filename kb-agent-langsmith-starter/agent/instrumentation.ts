@@ -30,8 +30,11 @@ import { defineInstrumentation } from "eve/instrumentation";
 
 import {
   LANGSMITH_EU_OTEL_TRACES_URL,
+  dedupeUsage,
   dottedStampFromHr,
   humanSpanName,
+  isUsageAggregatorSpan,
+  isUsageAttribute,
   langsmithEnabled,
   otelRunId,
   projectName,
@@ -40,9 +43,17 @@ import {
   SpanFilterState,
   systemPromptStore,
   traceAnchors,
+  traceCompleteness,
 } from "../lib/langsmith.ts";
 
 const RECORD_IO = recordIo();
+/** Export the full eve execution graph (workflow nodes + steps + network),
+ *  not just AI spans + ancestors, so the complete flow is inspectable in one
+ *  trace. Opt out with LANGSMITH_TRACE_COMPLETENESS=ai. */
+const TRACE_COMPLETE = traceCompleteness();
+/** Strip usage from the aggregator span so LangSmith prices each model call
+ *  once (accurate cost). Opt out with LANGSMITH_DEDUPE_USAGE=false. */
+const DEDUPE_USAGE = dedupeUsage();
 
 /** OTel JS 1.x exposes `parentSpanId`; 2.x moved it to `parentSpanContext`. */
 function parentIdOf(span: Span | ReadableSpan): string | undefined {
@@ -61,6 +72,26 @@ function withHumanName(span: ReadableSpan): ReadableSpan {
   return new Proxy(span, {
     get(target, prop) {
       if (prop === "name") return name;
+      const v = Reflect.get(target, prop, target);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+}
+
+/** COST ACCURACY (§8): strip token-usage attributes from eve's `invoke_agent`
+ *  aggregator span so LangSmith prices only the inner per-call `chat` spans.
+ *  Otherwise the aggregator and its inner call both carry the same usage and
+ *  the trace double-counts tokens & cost (~2×). Names/identity untouched —
+ *  runs the check on the RAW span name, so compose it BEFORE withHumanName. */
+function withoutAggregateUsage(span: ReadableSpan): ReadableSpan {
+  if (!DEDUPE_USAGE || !isUsageAggregatorSpan(span.name)) return span;
+  const filtered: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(span.attributes)) {
+    if (!isUsageAttribute(k)) filtered[k] = v;
+  }
+  return new Proxy(span, {
+    get(target, prop) {
+      if (prop === "attributes") return filtered as ReadableSpan["attributes"];
       const v = Reflect.get(target, prop, target);
       return typeof v === "function" ? v.bind(target) : v;
     },
@@ -111,10 +142,10 @@ class AiSpanFilter implements SpanProcessor {
 
   onEnd(span: ReadableSpan): void {
     this.open.delete(span.spanContext().spanId);
-    const ai = shouldExportSpan(span.name, Object.keys(span.attributes));
+    const keepByRule = shouldExportSpan(span.name, Object.keys(span.attributes), TRACE_COMPLETE);
     const keep =
       process.env.LANGSMITH_EXPORT_ALL === "true" ||
-      this.state.onEnd(span.spanContext().spanId, parentIdOf(span), ai);
+      this.state.onEnd(span.spanContext().spanId, parentIdOf(span), keepByRule);
     // Local span-debug log: separates "exporter never saw it" from "backend
     // hasn't ingested it yet" — the two failure modes that look identical
     // from the UI. Indispensable when debugging.
@@ -123,15 +154,17 @@ class AiSpanFilter implements SpanProcessor {
         mkdirSync(".data", { recursive: true });
         appendFileSync(
           ".data/spans.log",
-          `${keep ? "KEEP" : "DROP"}${ai ? " ai" : ""} | ${span.name} | ${Object.keys(span.attributes).slice(0, 10).join(",")}\n`,
+          `${keep ? "KEEP" : "DROP"}${keepByRule ? " rule" : ""} | ${span.name} | ${Object.keys(span.attributes).slice(0, 10).join(",")}\n`,
         );
       } catch {
         // Diagnostics must never break the agent.
       }
     }
     if (keep) {
+      // Dedupe usage on the RAW span (name check), then rename for humans.
+      const deduped = withoutAggregateUsage(span);
       this.inner.onEnd(
-        process.env.LANGSMITH_HUMAN_NAMES === "false" ? span : withHumanName(span),
+        process.env.LANGSMITH_HUMAN_NAMES === "false" ? deduped : withHumanName(deduped),
       );
     }
   }

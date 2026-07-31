@@ -27,6 +27,11 @@ import {
   SpanFilterState,
   systemPromptStore,
   traceAnchors,
+  traceCompleteness,
+  estimateCostUsd,
+  dedupeUsage,
+  isUsageAggregatorSpan,
+  isUsageAttribute,
   TurnJournal,
 } from "../lib/langsmith.ts";
 
@@ -111,6 +116,74 @@ describe("span filter (Step A3)", () => {
     state.onStart("fetch2", "root2");
     expect(state.onEnd("fetch2", "root2", false)).toBe(false);
     expect(state.onEnd("root2", undefined, false)).toBe(false);
+  });
+});
+
+describe("audit improvements: trace completeness + cost", () => {
+  it("traceCompleteness defaults to complete, opts out with ai/lean/false", () => {
+    expect(traceCompleteness(env())).toBe(true);
+    expect(traceCompleteness(env({ LANGSMITH_TRACE_COMPLETENESS: "ai" }))).toBe(false);
+    expect(traceCompleteness(env({ LANGSMITH_TRACE_COMPLETENESS: "lean" }))).toBe(false);
+    expect(traceCompleteness(env({ LANGSMITH_TRACE_COMPLETENESS: "complete" }))).toBe(true);
+  });
+
+  it("complete mode also keeps eve's structural graph spans (full flow)", () => {
+    // Lean (default 2-arg) drops workflow/fetch noise…
+    expect(shouldExportSpan("workflow.execute turnWorkflow", ["workflow.id"])).toBe(false);
+    expect(shouldExportSpan("fetch POST http://x/y", ["http.method"])).toBe(false);
+    // …complete mode keeps them so the whole execution graph is captured.
+    expect(shouldExportSpan("workflow.execute turnWorkflow", ["workflow.id"], true)).toBe(true);
+    expect(shouldExportSpan("step.execute turnStep", [], true)).toBe(true);
+    expect(shouldExportSpan("fetch POST http://x/y", ["http.method"], true)).toBe(true);
+    // AI spans stay kept in both modes; unrelated non-structural still dropped.
+    expect(shouldExportSpan("chat gpt-4.1", ["gen_ai.request.model"], true)).toBe(true);
+    expect(shouldExportSpan("random.span", ["foo"], true)).toBe(false);
+  });
+
+  it("estimateCostUsd prices known models incl. cheaper cached input; unknown = 0", () => {
+    // gpt-4.1: $2/1M in + $8/1M out → 1M each = $10.
+    expect(estimateCostUsd("gpt-4.1", 1_000_000, 1_000_000)).toBeCloseTo(10, 6);
+    // 1M input all cached ($0.5/1M) + 0 out = $0.50.
+    expect(estimateCostUsd("gpt-4.1", 1_000_000, 0, 1_000_000)).toBeCloseTo(0.5, 6);
+    // Azure deployment name containing the model still matches.
+    expect(estimateCostUsd("navio-gpt-4.1-eu", 0, 1_000_000)).toBeCloseTo(8, 6);
+    // Unknown model → never guess a price.
+    expect(estimateCostUsd("mystery-model", 1000, 1000)).toBe(0);
+  });
+
+  it("usage de-dup targets the aggregator span + its usage attributes (accurate cost)", () => {
+    expect(dedupeUsage(env())).toBe(true);
+    expect(dedupeUsage(env({ LANGSMITH_DEDUPE_USAGE: "false" }))).toBe(false);
+    // The outer agent-op span aggregates usage; the inner `chat` call is the real one.
+    expect(isUsageAggregatorSpan("invoke_agent gpt-4.1")).toBe(true);
+    expect(isUsageAggregatorSpan("chat gpt-4.1")).toBe(false);
+    // Usage/token attrs are stripped from the aggregator; request attrs are kept.
+    expect(isUsageAttribute("gen_ai.usage.input_tokens")).toBe(true);
+    expect(isUsageAttribute("ai.usage.completionTokens")).toBe(true);
+    expect(isUsageAttribute("gen_ai.request.model")).toBe(false);
+  });
+
+  it("the summary run reports cached tokens and an estimated cost", () => {
+    const journal = new TurnJournal();
+    journal.record("sc", "message.received", { message: "hi" }, 1);
+    // Real AI SDK v7 (Azure/OpenAI) usage shape — cache hits under inputTokenDetails.
+    journal.record(
+      "sc",
+      "step.completed",
+      { usage: { inputTokens: 100, outputTokens: 20, inputTokenDetails: { cacheReadTokens: 40 } } },
+      2,
+    );
+    const run = journal.finalize({
+      sessionId: "sc",
+      outcome: "answered",
+      agentName: "a",
+      project: "p",
+      recordContent: true,
+      now: 3,
+    })!;
+    expect(run.extra.metadata["app.tokens.cached"]).toBe("40");
+    expect(run.extra.metadata["app.tokens.total"]).toBe("120");
+    expect(run.extra.metadata["app.cost.estimate_usd"]).toBeDefined();
   });
 });
 
