@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "live-check": "tsx scripts/live-check.ts",
+    "contact:check": "tsx scripts/contact-live-check.ts",
     "eval:upload": "tsx scripts/upload-eval-dataset.ts",
     "eval:verify": "tsx scripts/verify-eval-dataset.ts",
     "eval:run": "tsx scripts/run-eval.ts",
@@ -28,7 +29,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^9.0.3",
-    "tailwindcss": "^4.0.0"
+    "tailwindcss": "^4.0.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

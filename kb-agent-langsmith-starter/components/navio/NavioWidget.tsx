@@ -1,14 +1,16 @@
 "use client";
 
-// Navio widget — the chat-first FAQ bot, built to docs/design/NAVIO_WIDGET_SPEC.md.
-// Screens: launcher (in public/launcher.js) → greeting → consent → chat → info.
-// This component is the in-iframe app: greeting card, GDPR consent gate, the FAQ
-// chat, and the "Über Navio" info overlay, with a brand-green header, privacy
-// footer, dark-mode toggle, and bilingual (DE/EN) copy. Business logic (the eve
+// Navio Plus widget — the menu-based FAQ + contact bot, built to
+// docs/design/NAVIO_PLUS_WIDGET_SPEC.md. Screens: launcher (public/launcher.js) →
+// greeting → consent → MENU → FAQ chat | Kontaktformular → success; ⓘ → info.
+// This component is the in-iframe shell (header/body/footer, dark-mode toggle,
+// bilingual DE/EN copy) orchestrating the screens; the FAQ chat lives in ChatBody,
+// the menu in NavioMenu, the contact form in KontaktForm. Business logic (the eve
 // agent) is passed in via `agent`; this file is design + flow only.
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
   ArrowRight,
   Bot,
   Check,
@@ -24,13 +26,27 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
+import { NavioMenu } from "./NavioMenu";
+import { KontaktForm } from "./KontaktForm";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
-type Screen = "greeting" | "consent" | "chat" | "info";
+type Screen = "greeting" | "consent" | "menu" | "chat" | "contact" | "info";
+
+/** Header title/subtitle per screen (Navio Plus, spec §2). */
+const HEADER: Record<
+  Exclude<Screen, "greeting">,
+  { title: string; subtitle: string | null; dot: boolean }
+> = {
+  consent: { title: "Navio Plus", subtitle: "Online", dot: true },
+  menu: { title: "Navio Plus", subtitle: "Online", dot: true },
+  chat: { title: "FAQ-Agent", subtitle: "Online", dot: true },
+  contact: { title: "Kontakt aufnehmen", subtitle: "Antwort in 1–2 Werktagen", dot: false },
+  info: { title: "Über Navio Plus", subtitle: null, dot: false },
+};
 
 // Point this at the real Sportnavi privacy page (override via env if needed).
 const PRIVACY_URL =
-  process.env.NEXT_PUBLIC_PRIVACY_URL ?? "https://www.sportnavi.de/datenschutz";
+  process.env.NEXT_PUBLIC_PRIVACY_URL ?? "https://www.sportnavi.de/datenschutz/";
 
 const QUICK_REPLIES = [
   "Angebote finden",
@@ -45,8 +61,8 @@ const GREETING_EN = "Hi, I'm Navio 👋🏻\nYour guide through the Sportnavi wo
 const ADVANTAGES: { de: string; en: string }[] = [
   { de: "Schreib in jeder Sprache – Navio antwortet in deiner", en: "Write in any language — Navio replies in yours" },
   { de: "Antwortet nur mit offiziellen Sportnavi-Infos – erfindet nichts", en: "Answers only with official Sportnavi info — never invents" },
-  { de: "DSGVO-konform – deine Zustimmung vor jedem Chat", en: "GDPR-compliant — your consent before every chat" },
-  { de: "Hilft Mitgliedern, Firmen & Partnern – rund um die Uhr", en: "Helps members, companies & partners — around the clock" },
+  { de: "DSGVO-konform – deine Zustimmung vor jeder Nutzung", en: "GDPR-compliant — your consent before every use" },
+  { de: "FAQ-Agent & Kontaktformular in einem Widget", en: "FAQ agent & contact form in one widget" },
 ];
 
 function closeWidget() {
@@ -69,104 +85,124 @@ export function NavioWidget({ agent }: { agent: Agent }) {
     void agent.send({ message: trimmed });
   }
 
-  function reset() {
-    agent.reset();
-    setDeclined(false);
-    setScreen("consent");
+  const root = `${theme === "dark" ? "theme-dark " : ""}flex h-screen flex-col bg-(--surface) text-(--fg)`;
+
+  if (screen === "greeting") {
+    return (
+      <div className={root}>
+        <GreetingCard theme={theme} onToggleTheme={toggle} onStart={() => setScreen("consent")} />
+      </div>
+    );
   }
 
-  const themeBtn = (
-    <button
-      type="button"
-      aria-label={theme === "dark" ? "Helles Design" : "Dunkles Design"}
-      onClick={toggle}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
-    >
-      {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
-    </button>
-  );
+  const header = HEADER[screen];
+  const showBack = screen === "chat" || screen === "contact" || screen === "info";
 
   return (
-    <div
-      className={`${theme === "dark" ? "theme-dark " : ""}flex h-screen flex-col bg-(--surface) text-(--fg)`}
-    >
-      {screen === "greeting" ? (
-        <GreetingCard theme={theme} onToggleTheme={toggle} onStart={() => setScreen("consent")} />
-      ) : (
-        <>
-          {/* Header — brand-green shell (spec §2) */}
-          <header className="flex items-center gap-3 bg-(--brand-green) px-4 py-3 text-white">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-(--brand-green)" aria-hidden="true">
-              <Bot size={20} strokeWidth={1.75} />
+    <div className={root}>
+      {/* Header — brand-green shell (spec §2); left slot + controls vary by screen */}
+      <header className="flex items-center gap-3 bg-(--brand-green) px-4 py-3 text-white">
+        {showBack ? (
+          <button
+            type="button"
+            aria-label="Zurück zum Menü"
+            onClick={() => setScreen("menu")}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
+          >
+            <ArrowLeft size={18} strokeWidth={1.75} />
+          </button>
+        ) : (
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-(--brand-green)" aria-hidden="true">
+            <Bot size={20} strokeWidth={1.75} />
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-headline text-sm font-semibold leading-tight">{header.title}</p>
+          {header.subtitle && (
+            <span className="flex items-center gap-1.5 text-xs text-white/85">
+              {header.dot && <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden="true" />}
+              {header.subtitle}
             </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-headline text-sm font-semibold leading-tight">Navio — Sportnavi Guide</p>
-              <span className="flex items-center gap-1.5 text-xs text-white/85">
-                <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden="true" />
-                Online
-              </span>
-            </div>
-            {themeBtn}
-            <button
-              type="button"
-              aria-label={screen === "info" ? "Zurück zum Chat" : "Über Navio"}
-              onClick={() => setScreen(screen === "info" ? "chat" : "info")}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
-            >
-              <Info size={16} strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              aria-label="Chat zurücksetzen"
-              onClick={reset}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
-            >
-              <RotateCcw size={16} strokeWidth={1.75} />
-            </button>
-            <button
-              type="button"
-              aria-label="Chat schließen"
-              onClick={closeWidget}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
-            >
-              <X size={16} strokeWidth={1.75} />
-            </button>
-          </header>
-
-          {/* Body — the only scroll region */}
-          {screen === "consent" && (
-            <ConsentGate declined={declined} onAccept={() => setScreen("chat")} onDecline={() => setDeclined(true)} />
           )}
-          {screen === "chat" && (
-            <ChatBody agent={agent} isBusy={isBusy} messages={messages} onQuickReply={send} />
-          )}
-          {screen === "info" && <InfoPanel onBack={() => setScreen("chat")} />}
+        </div>
+        {(screen === "consent" || screen === "menu") && (
+          <HeaderBtn label={theme === "dark" ? "Helles Design" : "Dunkles Design"} onClick={toggle}>
+            {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
+          </HeaderBtn>
+        )}
+        {screen === "menu" && (
+          <HeaderBtn label="Über Navio Plus" onClick={() => setScreen("info")}>
+            <Info size={16} strokeWidth={1.75} />
+          </HeaderBtn>
+        )}
+        {screen === "chat" && (
+          <HeaderBtn label="Chat zurücksetzen" onClick={() => agent.reset()}>
+            <RotateCcw size={16} strokeWidth={1.75} />
+          </HeaderBtn>
+        )}
+        <HeaderBtn label="Schließen" onClick={closeWidget}>
+          <X size={16} strokeWidth={1.75} />
+        </HeaderBtn>
+      </header>
 
-          {/* Input bar — shown on consent (disabled) + chat (spec §5, §6) */}
-          {(screen === "consent" || screen === "chat") && (
-            <InputBar
-              draft={draft}
-              setDraft={setDraft}
-              onSend={() => send(draft)}
-              disabled={screen === "consent" || isBusy}
-              placeholder={screen === "consent" ? "Bitte Datenschutz akzeptieren" : "Frage Navio …"}
-            />
-          )}
-
-          {/* Privacy footer — constant on the panel */}
-          <footer className="border-t border-(--border) bg-(--surface) px-4 py-2 text-center">
-            <a
-              href={PRIVACY_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] text-(--fg-subtle) underline underline-offset-2 hover:text-(--fg)"
-            >
-              Datenschutz · Privacy Policy
-            </a>
-          </footer>
-        </>
+      {/* Body — the only scroll region */}
+      {screen === "consent" && (
+        <ConsentGate declined={declined} onAccept={() => setScreen("menu")} onDecline={() => setDeclined(true)} />
       )}
+      {screen === "menu" && (
+        <NavioMenu onSelectFaq={() => setScreen("chat")} onSelectContact={() => setScreen("contact")} />
+      )}
+      {screen === "chat" && (
+        <ChatBody agent={agent} isBusy={isBusy} messages={messages} onQuickReply={send} />
+      )}
+      {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
+      {screen === "info" && <InfoPanel onBack={() => setScreen("menu")} />}
+
+      {/* Input bar — FAQ chat only */}
+      {screen === "chat" && (
+        <InputBar
+          draft={draft}
+          setDraft={setDraft}
+          onSend={() => send(draft)}
+          disabled={isBusy}
+          placeholder="Frage Navio …"
+        />
+      )}
+
+      {/* Privacy footer — constant on the panel */}
+      <footer className="border-t border-(--border) bg-(--surface) px-4 py-2 text-center">
+        <a
+          href={PRIVACY_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11px] text-(--fg-subtle) underline underline-offset-2 hover:text-(--fg)"
+        >
+          Datenschutz · Privacy Policy
+        </a>
+      </footer>
     </div>
+  );
+}
+
+/** Round white/15 icon button used across the header. */
+function HeaderBtn({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -396,8 +432,8 @@ function InfoPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="flex-1 space-y-4 overflow-y-auto p-5">
       <div>
-        <h3 className="font-headline text-base font-semibold text-(--fg)">Über Navio</h3>
-        <p className="text-xs text-(--fg-subtle)">About Navio</p>
+        <h3 className="font-headline text-base font-semibold text-(--fg)">Über Navio Plus</h3>
+        <p className="text-xs text-(--fg-subtle)">About Navio Plus</p>
         <p className="mt-2 text-sm text-(--fg-muted)">
           Navio ist dein freundlicher Guide durch Sportnavi – Deutschlands Firmenfitness-Netzwerk. Stell deine Fragen
           und bekomm schnelle, verlässliche Antworten.
@@ -435,7 +471,7 @@ function InfoPanel({ onBack }: { onBack: () => void }) {
         onClick={onBack}
         className="rounded-full bg-(--fg) px-4 py-2 text-sm lowercase text-(--surface) transition-transform hover:scale-[1.02]"
       >
-        zurück zum Chat
+        zurück
       </button>
     </div>
   );
