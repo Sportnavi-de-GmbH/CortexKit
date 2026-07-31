@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Navio widget embed test</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 48px; color: #1c1917; }
+      .box { max-width: 640px; }
+      code { background: #f5f5f4; padding: 2px 6px; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h1>Pretend this is a customer website 🌐</h1>
+      <p>
+        This is a plain HTML page — no framework. The only Navio code is the one
+        <code>&lt;script&gt;</code> below. You should see a teal-on-ink
+        <strong>💬 bubble</strong> bottom-right. Click it → Navio opens as a
+        floating panel (or full-screen on a phone). Resize the window narrow to
+        see it switch to the mobile sheet.
+      </p>
+
+      <!-- THE WIDGET — one line, works on any site.
+           LOCAL testing points at your dev server; for production swap the src to
+           https://cortex-kit.vercel.app/launcher.js (or https://chat.sportnavi.de/launcher.js). -->
+      <script src="http://localhost:3001/launcher.js" async></script>
+    </div>
+  </body>
+</html>

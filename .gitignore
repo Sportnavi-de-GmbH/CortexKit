@@ -1,0 +1,40 @@
+# ─── Secrets — NEVER commit ───────────────────────────────────────────────
+.env
+.env.local
+.env*.local
+**/.env.local
+**/.env*.local
+# .mcp.json holds real API keys (LangSmith, Stitch) — comment on its own line;
+# Git does NOT support trailing/inline comments, they'd break the pattern.
+.mcp.json
+**/.mcp.json
+
+# ─── Local tooling / editor config ────────────────────────────────────────
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ─── Node ─────────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ─── Build / generated artifacts (regenerable) ───────────────────────────
+.next/
+**/.next/
+.output/
+**/.output/
+.eve/
+**/.eve/
+.data/
+**/.data/
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# ─── Scratch / temp ───────────────────────────────────────────────────────
+scratchpad/
+tmp/
+*.log
