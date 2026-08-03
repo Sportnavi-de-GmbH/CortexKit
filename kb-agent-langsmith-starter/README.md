@@ -109,3 +109,25 @@ calling the tool, and no failure ever happens (guide §11 V3).
 - **No key = no-op** — the agent must keep running with an empty `.env.local`.
 - **Hooks never throw** — guard every handler; a thrown hook becomes `turn.failed`.
 - **Never commit `.env.local` or any real API key** — placeholders only in committed files.
+
+## Local demo — Partner finder in the menu
+
+The "Partner finden" menu option talks to the **Partner Recommendation agent**, which
+lives in the separate `SportnaviPartnerRecomandationBot` project. Run both locally:
+
+1. **Start the partner agent** (its own repo) on its own port, with its own `.env.local`
+   (Azure + Supabase + embeddings):
+   ```bash
+   # in SportnaviPartnerRecomandationBot/partner-recommendation-agent
+   npm run dev:ui -- -p 3001
+   ```
+2. **Start this app** with the proxy target set:
+   ```bash
+   # in kb-agent-langsmith-starter
+   PARTNER_AGENT_HOST=http://localhost:3001 npm run dev:ui
+   ```
+3. Open the widget, accept consent, choose **Partner finden**, and ask e.g. *"Yoga in
+   Bochum"*. Requests flow: widget → `/api/partner/eve/v1/*` (this app) → the partner host.
+
+If `PARTNER_AGENT_HOST` is unset, the proxy returns 503 and only the FAQ + contact
+options are usable.
