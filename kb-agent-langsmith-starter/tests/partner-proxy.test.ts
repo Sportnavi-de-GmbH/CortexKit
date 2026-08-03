@@ -1,5 +1,47 @@
 import { describe, it, expect, vi } from "vitest";
-import { proxyToPartner, isForwardablePath } from "../lib/partner-proxy";
+import { proxyToPartner, isForwardablePath, withKeepAlive } from "../lib/partner-proxy";
+
+describe("withKeepAlive", () => {
+  async function drain(stream: ReadableStream<Uint8Array>): Promise<string> {
+    const reader = stream.getReader();
+    const dec = new TextDecoder();
+    let out = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += dec.decode(value);
+    }
+    return out;
+  }
+
+  it("passes the upstream bytes through unchanged", async () => {
+    const src = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("data: one\n\n"));
+        c.close();
+      },
+    });
+    expect(await drain(withKeepAlive(src, 10_000))).toBe("data: one\n\n");
+  });
+
+  it("injects an SSE comment while the upstream is silent", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const src = new ReadableStream<Uint8Array>({
+      async start(c) {
+        await gate; // upstream stays silent (a long tool call)
+        c.enqueue(new TextEncoder().encode("data: late\n\n"));
+        c.close();
+      },
+    });
+    const out = withKeepAlive(src, 5); // tiny interval so the test is fast
+    const reader = out.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toBe(": keepalive\n\n");
+    release();
+    await reader.cancel();
+  });
+});
 
 describe("isForwardablePath", () => {
   it("allows eve routes", () => {
