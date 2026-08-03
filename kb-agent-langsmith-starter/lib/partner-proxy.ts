@@ -40,6 +40,63 @@ function json(body: unknown, status: number): Response {
   });
 }
 
+/**
+ * SSE keep-alive. eve emits NOTHING while a tool runs — a partner search
+ * (Supabase + embeddings, then a long generated answer) is routinely 30-60s of
+ * silence. A browser drops an idle connection and surfaces it mid-turn as
+ * "network error" (observed 2026-08-03: turn 1 rendered, the slower turn 2
+ * errored), while curl happily waits. SSE comment lines (`: ...`) are ignored by
+ * every SSE parser, so emitting one every 15s keeps the socket warm without
+ * touching the event stream.
+ */
+export function withKeepAlive(
+  body: ReadableStream<Uint8Array>,
+  intervalMs = 15_000,
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const reader = body.getReader();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      timer = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          stop(); // controller already closed
+        }
+      }, intervalMs);
+
+      void (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) controller.enqueue(value);
+          }
+          controller.close();
+        } catch (err) {
+          try {
+            controller.error(err);
+          } catch {
+            /* already errored */
+          }
+        } finally {
+          stop();
+        }
+      })();
+    },
+    cancel(reason) {
+      stop();
+      return reader.cancel(reason);
+    },
+  });
+}
+
 export async function proxyToPartner(
   req: Request,
   pathSegments: string[],
@@ -77,5 +134,18 @@ export async function proxyToPartner(
   for (const [k, v] of upstream.headers) {
     if (!STRIP.has(k.toLowerCase())) respHeaders.set(k, v);
   }
+
+  // Event streams get keep-alive + explicit anti-buffering headers, so a long
+  // silent turn survives the browser and any proxy in between.
+  const isEventStream = (upstream.headers.get("content-type") ?? "").includes("text/event-stream");
+  if (isEventStream && upstream.body) {
+    respHeaders.set("Cache-Control", "no-cache, no-transform");
+    respHeaders.set("X-Accel-Buffering", "no");
+    return new Response(withKeepAlive(upstream.body), {
+      status: upstream.status,
+      headers: respHeaders,
+    });
+  }
+
   return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
 }
