@@ -4,7 +4,7 @@
 // two option cards routing to the FAQ chat (green) or the Kontaktformular (orange).
 // Presentational only — the parent (NavioWidget) owns navigation.
 
-import { ArrowRight, Bot, Mail } from "lucide-react";
+import { ArrowRight, Bot, Mail, MapPin } from "lucide-react";
 
 type CardProps = {
   icon: React.ReactNode;
@@ -50,9 +50,11 @@ function OptionCard({ icon, title, body, accent, onClick }: CardProps) {
 
 export function NavioMenu({
   onSelectFaq,
+  onSelectPartner,
   onSelectContact,
 }: {
   onSelectFaq: () => void;
+  onSelectPartner: () => void;
   onSelectContact: () => void;
 }) {
   return (
@@ -67,6 +69,13 @@ export function NavioMenu({
           body="Stell deine Frage – Navio antwortet sofort, rund um die Uhr."
           accent="green"
           onClick={onSelectFaq}
+        />
+        <OptionCard
+          icon={<MapPin size={24} strokeWidth={1.75} />}
+          title="Partner finden"
+          body="Finde Studios & Kurse in deiner Nähe – sag einfach Stadt und Sportart."
+          accent="green"
+          onClick={onSelectPartner}
         />
         <OptionCard
           icon={<Mail size={24} strokeWidth={1.75} />}
