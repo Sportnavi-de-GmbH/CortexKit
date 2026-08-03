@@ -30,7 +30,7 @@ import { NavioMenu } from "./NavioMenu";
 import { KontaktForm } from "./KontaktForm";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
-type Screen = "greeting" | "consent" | "menu" | "chat" | "contact" | "info";
+type Screen = "greeting" | "consent" | "menu" | "chat" | "partner" | "contact" | "info";
 
 /** Header title/subtitle per screen (Navio Plus, spec §2). */
 const HEADER: Record<
@@ -40,6 +40,7 @@ const HEADER: Record<
   consent: { title: "Navio Plus", subtitle: "Online", dot: true },
   menu: { title: "Navio Plus", subtitle: "Online", dot: true },
   chat: { title: "FAQ-Agent", subtitle: "Online", dot: true },
+  partner: { title: "Partner-Finder", subtitle: "Online", dot: true },
   contact: { title: "Kontakt aufnehmen", subtitle: "Antwort in 1–2 Werktagen", dot: false },
   info: { title: "Über Navio Plus", subtitle: null, dot: false },
 };
@@ -58,6 +59,33 @@ const QUICK_REPLIES = [
 const GREETING_DE = "Hi, ich bin Navio 👋🏻\nDein Guide durch die Sportnavi Welt. Wobei kann ich dir helfen?";
 const GREETING_EN = "Hi, I'm Navio 👋🏻\nYour guide through the Sportnavi world. How can I help you?";
 
+const PARTNER_GREETING_DE =
+  "Sag mir, wo und was du trainieren willst – z. B. 'Yoga in Bochum' 📍\nIch zeige dir passende Sportnavi-Partner in deiner Nähe.";
+const PARTNER_GREETING_EN =
+  "Tell me where and what you want to train — e.g. 'Yoga in Bochum' 📍\nI'll show you matching Sportnavi partners near you.";
+const PARTNER_QUICK_REPLIES = [
+  "Yoga in Bochum",
+  "Klettern für Anfänger",
+  "Fitnessstudio in Bielefeld",
+  "Reha-Sport in meiner Nähe",
+];
+
+// Per-chat-screen copy so the FAQ and Partner screens reuse ChatBody/InputBar.
+const CHAT_CFG = {
+  chat: {
+    greetingDe: GREETING_DE,
+    greetingEn: GREETING_EN,
+    quickReplies: QUICK_REPLIES,
+    placeholder: "Frage Navio …",
+  },
+  partner: {
+    greetingDe: PARTNER_GREETING_DE,
+    greetingEn: PARTNER_GREETING_EN,
+    quickReplies: PARTNER_QUICK_REPLIES,
+    placeholder: "Stadt & Sportart, z. B. 'Yoga in Bochum' …",
+  },
+} as const;
+
 const ADVANTAGES: { de: string; en: string }[] = [
   { de: "Schreib in jeder Sprache – Navio antwortet in deiner", en: "Write in any language — Navio replies in yours" },
   { de: "Antwortet nur mit offiziellen Sportnavi-Infos – erfindet nichts", en: "Answers only with official Sportnavi info — never invents" },
@@ -69,20 +97,32 @@ function closeWidget() {
   window.parent?.postMessage("snv-widget-close", "*");
 }
 
-export function NavioWidget({ agent }: { agent: Agent }) {
+export function NavioWidget({
+  faqAgent,
+  partnerAgent,
+}: {
+  faqAgent: Agent;
+  partnerAgent: Agent;
+}) {
   const { theme, toggle } = useNavioTheme();
   const [screen, setScreen] = useState<Screen>("greeting");
   const [declined, setDeclined] = useState(false);
   const [draft, setDraft] = useState("");
 
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
-  const messages = agent.data.messages;
+  // The two chat screens ("chat" = FAQ, "partner" = finder) each drive their own eve
+  // agent; every message/status/reset below targets whichever screen is active.
+  const activeAgent = screen === "partner" ? partnerAgent : faqAgent;
+  const isChatScreen = screen === "chat" || screen === "partner";
+  const cfg = screen === "partner" ? CHAT_CFG.partner : CHAT_CFG.chat;
+
+  const isBusy = activeAgent.status === "submitted" || activeAgent.status === "streaming";
+  const messages = activeAgent.data.messages;
 
   function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || isBusy || screen !== "chat") return;
+    if (!trimmed || isBusy || !isChatScreen) return;
     setDraft("");
-    void agent.send({ message: trimmed });
+    void activeAgent.send({ message: trimmed });
   }
 
   const root = `${theme === "dark" ? "theme-dark " : ""}flex h-screen flex-col bg-(--surface) text-(--fg)`;
@@ -96,7 +136,7 @@ export function NavioWidget({ agent }: { agent: Agent }) {
   }
 
   const header = HEADER[screen];
-  const showBack = screen === "chat" || screen === "contact" || screen === "info";
+  const showBack = isChatScreen || screen === "contact" || screen === "info";
 
   return (
     <div className={root}>
@@ -135,8 +175,8 @@ export function NavioWidget({ agent }: { agent: Agent }) {
             <Info size={16} strokeWidth={1.75} />
           </HeaderBtn>
         )}
-        {screen === "chat" && (
-          <HeaderBtn label="Chat zurücksetzen" onClick={() => agent.reset()}>
+        {isChatScreen && (
+          <HeaderBtn label="Chat zurücksetzen" onClick={() => activeAgent.reset()}>
             <RotateCcw size={16} strokeWidth={1.75} />
           </HeaderBtn>
         )}
@@ -150,22 +190,34 @@ export function NavioWidget({ agent }: { agent: Agent }) {
         <ConsentGate declined={declined} onAccept={() => setScreen("menu")} onDecline={() => setDeclined(true)} />
       )}
       {screen === "menu" && (
-        <NavioMenu onSelectFaq={() => setScreen("chat")} onSelectContact={() => setScreen("contact")} />
+        <NavioMenu
+          onSelectFaq={() => setScreen("chat")}
+          onSelectPartner={() => setScreen("partner")}
+          onSelectContact={() => setScreen("contact")}
+        />
       )}
-      {screen === "chat" && (
-        <ChatBody agent={agent} isBusy={isBusy} messages={messages} onQuickReply={send} />
+      {isChatScreen && (
+        <ChatBody
+          agent={activeAgent}
+          isBusy={isBusy}
+          messages={messages}
+          onQuickReply={send}
+          greetingDe={cfg.greetingDe}
+          greetingEn={cfg.greetingEn}
+          quickReplies={cfg.quickReplies}
+        />
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
       {screen === "info" && <InfoPanel onBack={() => setScreen("menu")} />}
 
       {/* Input bar — FAQ chat only */}
-      {screen === "chat" && (
+      {isChatScreen && (
         <InputBar
           draft={draft}
           setDraft={setDraft}
           onSend={() => send(draft)}
           disabled={isBusy}
-          placeholder="Frage Navio …"
+          placeholder={cfg.placeholder}
         />
       )}
 
@@ -332,11 +384,17 @@ function ChatBody({
   isBusy,
   messages,
   onQuickReply,
+  greetingDe,
+  greetingEn,
+  quickReplies,
 }: {
   agent: Agent;
   isBusy: boolean;
   messages: EveMessageData["messages"];
   onQuickReply: (text: string) => void;
+  greetingDe: string;
+  greetingEn: string;
+  quickReplies: readonly string[];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -350,13 +408,13 @@ function ChatBody({
     <div ref={scrollRef} className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
       {/* Static bilingual greeting bubble */}
       <BotBubble>
-        <p className="whitespace-pre-wrap">{GREETING_DE}</p>
-        <p className="mt-2 whitespace-pre-wrap text-(--fg-subtle)">{GREETING_EN}</p>
+        <p className="whitespace-pre-wrap">{greetingDe}</p>
+        <p className="mt-2 whitespace-pre-wrap text-(--fg-subtle)">{greetingEn}</p>
       </BotBubble>
 
       {showQuickReplies && (
         <div className="flex flex-wrap gap-2 pt-1">
-          {QUICK_REPLIES.map((q) => (
+          {quickReplies.map((q) => (
             <button
               key={q}
               type="button"

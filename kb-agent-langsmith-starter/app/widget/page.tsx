@@ -56,9 +56,12 @@ function useBotId(): void {
 }
 
 export default function WidgetPage() {
-  const agent = useEveAgent();
+  const faqAgent = useEveAgent();
+  // The partner finder runs as a separate service; the KB app proxies /api/partner/*
+  // to it (see app/api/partner/[...path]/route.ts). Lazy — no session until first send.
+  const partnerAgent = useEveAgent({ host: "/api/partner" });
   useBotId();
   useEffect(ensureVisitorId, []);
 
-  return <NavioWidget agent={agent} />;
+  return <NavioWidget faqAgent={faqAgent} partnerAgent={partnerAgent} />;
 }
