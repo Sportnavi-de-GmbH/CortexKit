@@ -51,4 +51,24 @@ describe("proxyToPartner", () => {
     );
     expect(await res.text()).toBe("data: hi\n\n");
   });
+
+  it("does not forward content-encoding (fetch already decoded the body)", async () => {
+    // Node fetch auto-decompresses; forwarding the stale content-encoding header
+    // makes the browser try to gunzip plain text → 'Failed to fetch'.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 202,
+          headers: { "content-type": "application/json", "content-encoding": "gzip" },
+        }),
+    ) as unknown as typeof fetch;
+
+    const res = await proxyToPartner(req("POST"), ["eve", "v1", "session"], {
+      host: "http://partner.local",
+      fetchImpl,
+    });
+
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.text()).toBe('{"ok":true}');
+  });
 });

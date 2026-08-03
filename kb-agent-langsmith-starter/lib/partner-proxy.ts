@@ -7,11 +7,15 @@
 // existing consent/BotID path and needs no CORS. Unset PARTNER_AGENT_HOST ⇒ 503, so
 // the KB widget still works with no partner host configured.
 
-// Hop-by-hop / host headers we must not forward (fetch recomputes length/encoding).
+// Headers we must not forward. Hop-by-hop / host headers, plus content-encoding
+// and content-length: Node's fetch auto-DECOMPRESSES the upstream body, so relaying
+// the stale `content-encoding: gzip` (with an already-decoded body) makes the browser
+// fail to decode it ("Failed to fetch"). The length no longer matches either.
 const STRIP = new Set([
   "host",
   "connection",
   "content-length",
+  "content-encoding",
   "transfer-encoding",
   "keep-alive",
 ]);
