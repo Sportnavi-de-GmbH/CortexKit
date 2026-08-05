@@ -1,0 +1,144 @@
+{
+  "ranAt": "2026-07-20T08:22:51.184Z",
+  "results": [
+    {
+      "id": 8,
+      "category": "coverage-baseline",
+      "turns": [
+        {
+          "userTurn": "Krafttraining rund um die Uhr in Aalen.",
+          "agentResponse": "Hier kommt deine Auswahl für Krafttraining rund um die Uhr in Aalen und Umgebung 💪🏻 Da Aalen selbst nur zwei passende Studios hat, habe ich dir zusätzlich 24/7-Fitnessmöglichkeiten aus Göppingen und Ulm (bis ca. 50 km) dazugeholt, damit du mehr Auswahl hast.\n\n🏋️‍♂️ TopFit – Aalen Ulmerstraße\nPerfekt für flexible Zeiten: Dieses Studio in Aalen ist 24/7 geöffnet – du kannst also wirklich jederzeit trainieren. Laut Profil findest du hier moderne Geräte­landschaften mit sieben Trainingsbereichen inklusive Free Weights, Functional Area und einem eigenen Bereich speziell für Frauen. Es gibt CyberFitness-Kurse rund um die Uhr und du kannst mit einem Probetraining starten. Mitgliedschaften sind monatlich oder flexibel – alle Details findest du direkt auf dem Profil.\n\n🏋️‍♀️ TopFit – Aalen Bahnhofstraße\nEbenfalls direkt in Aalen – auch dieses Studio hat durchgehend geöffnet, bietet moderne Geräte für geführtes und freies Krafttraining und spezielle Ladies- und Wellnessbereiche (Sauna, Solarium). Besonders cool: Selbst Kurse und Groupfitness gibt es per Touchscreen rund um die Uhr und du kannst gratis Probetrainieren.\n\n🏋️‍♂️ TopFit – Göppingen Esslinger Straße (ca. 35 km)\nFür noch mehr Auswahl: Auch dieses Studio gehört zur TopFit-Kette und ist 24/7 geöffnet. Laut den Angeboten findest du hier alles, was du beim Krafttraining brauchst – allerdings liegt derzeit kein ausführlicher Profiltext vor. Wenn du öfters pendelst oder etwas Neues ausprobieren willst, lohnt sich ein Blick!\n\n🏋️ clever fit Ulm (ca. 50 km)\nWenn du weiter suchen willst, ist dieses Studio in Ulm vielleicht für dich spannend: Laut Profil kannst du auch hier rund um die Uhr trainieren und profitierst von modernen Trainingsgeräten und Sonderkonditionen für Studenten und Schüler. Das Angebot richtet sich an alle Erfahrungsstufen.\n\nSag mir gern, falls du nähere Infos (z. B. genaue Preise oder Ausstattung) zu einem bestimmten Studio möchtest oder Unterstützung bei der Auswahl brauchst! Sonst: Viel Spaß beim Training – du bist rund um die Uhr flexibel 💚",
+          "toolCalls": [
+            {
+              "name": "extract_city_and_intent",
+              "input": {
+                "requestText": "Krafttraining rund um die Uhr in Aalen."
+              }
+            },
+            {
+              "name": "resolve_partners",
+              "input": {
+                "cityCanonical": "Aalen",
+                "cityInput": "Aalen",
+                "cityConfidence": 1,
+                "cityPartnerCount": 2,
+                "centroidLat": 48.840980225,
+                "centroidLng": 10.0979186822368,
+                "intentText": "Krafttraining rund um die Uhr",
+                "intentTags": [
+                  "krafttraining"
+                ]
+              }
+            },
+            {
+              "name": "build_recommendations",
+              "input": {
+                "finalRecommendations": 5
+              }
+            },
+            {
+              "name": "delegate_to_curator",
+              "input": {
+                "intentText": "Krafttraining rund um die Uhr",
+                "intentTags": [
+                  "krafttraining"
+                ],
+                "shortlist": [
+                  {
+                    "id": 17350,
+                    "name": "TopFit - Aalen Ulmerstrasse",
+                    "city": "Aalen",
+                    "tags": [
+                      "freihanteltraining",
+                      "functional-training",
+                      "cyberfitness",
+                      "cardio",
+                      "ladies-area",
+                      "solarium",
+                      "inbody-koerperanalyse",
+                      "krafttraining",
+                      "24-7",
+                      "ernaehrungsberatung"
+                    ],
+                    "summary": "Überblick Der TopFit Fitnessclub Aalen Ulmerstraße ist ein rund um die Uhr geöffnetes Fitnessstudio der TopFit-Kette (über 20 Clubs, Betreiber: TopFit Fitness- und Freizeitanlagen GmbH & Co. KG, Schwäbisch Gmünd). Der Club an der Ulmerstraße 45 bietet auf über 1.300 m² sieben Trainingsbereiche mit modernsten Geräten, qualifizierten Trainern und einem betont außergewöhnlichen Design. Mit über 1.700 Mitgliedern und einer Bewertung von 4,8/5 richtet er sich an alle, die flexibel Muskelaufbau, Figurtraining, Stressabbau oder Abnehmen verfolgen. Die Mitgliedschaft gilt in allen TopFit Clubs. Angebot - Geräte Area (geführtes Kraft-Training für alle Level) - Cardio Area (Laufbänder, Crosstrainer, Fahrräder mit integriertem Entertainment-System) - Booty Area (gezieltes Gesäß-, Bein- und Core-Training: Hip Thrusts, Squats, Kickbacks) - Functional Area (Klimmzüge, Liegestütze, Burpees, TRX, Boxen, Sandsäcke) - Hammer Strength Area (Plate-Loaded-Geräte, freies Krafttraining) - Free Weights Area (Kurzhanteln, Langhanteln, Kettlebells) - Ladies Area (exklusiver Trainingsbereich für Frauen) - Solarium - Fitnesskurse: Live-Kurse und CyberFitness-Kurse rund um die Uhr am Touchscreen; Kursplan und Anmeldung über die TopFit-App - Kostenlos inklusive: Parkplätze, Duschen, WLAN, InBody-Körperanalyse, individueller Trainingsplan, professionelle Ersteinweisung, Ernährungsberatung - Trainerbetreuung täglich 09:00–21:00 Uhr (u. a. Physiotherapeuten, Sportwissenschaftler, lizenzierte Trainer) - Zusatzleistungen (Add-ons): Getränke-Flatrate, Premium-Paket (Getränke-, Solarium- und Massarium-Flatrate) - Kostenloses, unverbindliches Probetraining bzw. 14 Tage testen Preise - Mitgliedschaft 12 Monate: 8 € / Woche - Mitgliedschaft 1 Monat: 10 € / Woche - Keine versteckten Kosten, Mitgliedschaft jederzeit pausierbar (bis zu 6 Monate pro Jahr) - Studenten: jederzeit flexibel kündbar bei Studienende, bis zu 6 Monate/Jahr pausierbar - Clubwechsler-Aktion: bis zu 3 Monate geschenkt bei Vorlage der Kündigungsbestätigung - Mitgliedschaft ab 15 Jahren (mit Einwilligung der Erziehungsberechtigten); Abbuchung alle 14 Tage Kontakt & Anfahrt TopFit Fitnessclub Aalen Ulmerstraße, Ulmerstraße 45, 73431 Aalen. Telefon: 07361 8064660. Mitgliederverwaltung (GFA 24/7): verwaltung@gfa247.com. Kostenlose Parkplätze direkt am Club; ÖPNV: Aalen Hbf (Bahn), 750 m zum Club. Öffnungszeiten Mo – So: 24 Stunden geöffnet (auch an Feiertagen).",
+                    "website_url": "https://www.topfit.fitness/aalen-ulmerstrasse",
+                    "source": "home",
+                    "sourceCity": "Aalen"
+                  },
+                  {
+                    "id": 17349,
+                    "name": "TopFit - Aalen Bahnhofstrasse",
+                    "city": "Aalen",
+                    "tags": [
+                      "inbody-analyse",
+                      "groupfitness",
+                      "geraetetraining",
+                      "cyberfitness",
+                      "cardio",
+                      "freihantel",
+                      "sauna",
+                      "ladies-area",
+                      "solarium",
+                      "hammer-strength",
+                      "24-7"
+                    ],
+                    "summary": "Überblick Der TopFit Fitnessclub Aalen Bahnhofstraße gehört zur TopFit-Kette (über 20 Clubs, Betreiber: TopFit Fitness- und Freizeitanlagen GmbH & Co. KG, Schwäbisch Gmünd) und ist rund um die Uhr geöffnet (24/7). Auf über 1.500 m² gibt es 8 Trainingsbereiche mit modernen Geräten, qualifizierten Trainern (u.a. Physiotherapeuten und Sportwissenschaftler, täglich 09:00–21:00 vor Ort) sowie Sauna und Solarium. Eine Mitgliedschaft gilt für alle TopFit Clubs. Angebot - Geräte Area (geführte, gelenkschonende Geräte für alle Muskelgruppen) - Cardio Area (Laufbänder, Crosstrainer, Fahrräder mit integriertem Entertainment-System: Netflix, Spotify, Social Media) - Booty Area (Hip Thrusts, Squats, Kickbacks) - Functional Area (Klimmzüge, TRX, Boxen, Sandsäcke, Burpees) - Hammer Strength Area (Plate-Loaded-Geräte) - Free Weights Area (Kurzhanteln, Langhanteln, Kettlebells) - Ladies Area (exklusiver Trainingsbereich für Frauen) - Groupfitness Area: Live-Kurse + CyberFitness-Kurse per Touchscreen rund um die Uhr (Kursplan in der App) - Wellness: Sauna, Solarium, Power Plate; Add-ons: Getränke-Flatrate, Premium-Paket (Getränke-, Solarium- und Massarium-Flatrate) - InBody-Körperanalyse (BIA), individueller Trainingsplan, professionelle Ersteinweisung, Ernährungsberatung (Nutrition Coaching) - Kostenlose Parkplätze, kostenloses Duschen, kostenloses WLAN - Kostenloses Probetraining (mit oder ohne Personal Trainer, 14 Tage testen möglich) - Mitgliedschaft ab 15 Jahren (mit Einwilligung); Studenten können jederzeit flexibel kündigen und bis zu 6 Monate/Jahr pausieren Preise - 12-Monats-Mitgliedschaft: ab 8 €/Woche - 1-Monats-Mitgliedschaft: 10 €/Woche - Keine versteckten Kosten, jederzeit pausierbar (bis zu 6 Monate pro Jahr); Abbuchung alle 14 Tage - Aktionsangebot (bis 15.07.26): monatlich kündbar, 50 % aufs Startpaket, Welcome Box - Clubwechsler: bis zu 3 Monate gratis trainieren während der alte Vertrag noch läuft Kontakt & Anfahrt - TopFit Aalen Bahnhofstraße, Bahnhofstr. 111, 73430 Aalen - Telefon: 07361 9809388 - E-Mail (zentral, laut Impressum): info@topfit.fitness; Mitgliederverwaltung: verwaltung@gfa247.com - Kostenlose Parkplätze direkt am Club; ÖPNV: Bus \"Wasseralfingen Löwenbrauerei\" (500 m), Aalen Hbf (800 m) Öffnungszeiten Mo–So durchgehend geöffnet (24 h, auch an Feiertagen); Trainerbetreuung täglich 09:00–21:00 Uhr",
+                    "website_url": "https://www.topfit.fitness/aalen-bahnhofstrasse",
+                    "source": "home",
+                    "sourceCity": "Aalen"
+                  },
+                  {
+                    "id": 17355,
+                    "name": "TopFit - Göppingen Esslinger Strasse",
+                    "city": "Göppingen",
+                    "tags": [
+                      "krafttraining",
+                      "cardio",
+                      "functional training",
+                      "freihanteltraining",
+                      "ladies area",
+                      "groupfitness",
+                      "sauna",
+                      "solarium",
+                      "cyberfitness",
+                      "24/7"
+                    ],
+                    "summary": "",
+                    "website_url": null,
+                    "source": "nearby",
+                    "sourceCity": "Göppingen",
+                    "similarity": 0.503398913029928,
+                    "distanceKm": 35.24831296594854
+                  },
+                  {
+                    "id": 18683,
+                    "name": "clever fit Ulm",
+                    "city": "Ulm",
+                    "tags": [
+                      "24/7 Training",
+                      "Cardio",
+                      "Vibrationstraining",
+                      "Kurse",
+                      "Probetraining",
+                      "Wellhub",
+                      "Urban Sports Club",
+                      "Hansefit"
+                    ],
+                    "summary": "Das clever fit Fitnessstudio Ulm ist ein modernes Fitnessstudio, das seinen Mitgliedern seit Kurzem einen 24/7-Zugang bietet – Training rund um die Uhr, auch an Wochenenden und Feiertagen. Das Studio richtet sich an aktive Menschen aller Art, darunter auch Schüler und Studenten mit Sonderkonditionen. Es verfügt über moderne Trainingsgeräte, einen großen Cardiopark sowie ein vielfältiges Kursangebot und ist offizieller Partner von Wellhub, Urban Sports Club, Wellpass und Hansefit.",
+                    "website_url": "https://www.clever-fit.com/de/fitnessstudio/ulm/",
+                    "source": "nearby",
+                    "sourceCity": "Ulm",
+                    "similarity": 0.486863599085074,
+                    "distanceKm": 49.76737428898361
+                  }
+                ]
+              }
+            }
+          ],
+          "stepCount": 5
+        }
+      ],
+      "error": null
+    }
+  ]
+}

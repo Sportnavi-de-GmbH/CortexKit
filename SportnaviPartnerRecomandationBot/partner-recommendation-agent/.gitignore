@@ -1,0 +1,19 @@
+node_modules/
+.env
+.env.*
+!.env.local.example
+dist/
+.eve/
+.output/
+__pycache__/
+*.pyc
+
+# Runtime observability state: LangSmith trace anchors and the captured system
+# prompt (lib/langsmith.ts file stores), span-debug logs, load-test output.
+# Never commit — the prompt store can contain conversation-derived text.
+.data/
+
+# Next.js dev console build artifacts
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo

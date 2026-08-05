@@ -1,0 +1,177 @@
+{
+  "experimentName": "navio-edge-cases-2026-08-01T09-59-32-679Z",
+  "ranAt": "2026-08-01T10:13:59.309Z",
+  "rows": [
+    {
+      "case": {
+        "id": "EC-02",
+        "category": "rule #10 — multi-fact honesty",
+        "difficulty": "critical",
+        "turns": [
+          "Ich suche einen Sportverein in Bochum",
+          "Klingt gut! Was kostet die Mitgliedschaft dort und wann haben die geöffnet?"
+        ],
+        "context": {
+          "groundTruth": "Bochum has 30 active partners. TuS Makkabi Bochum (id 18743) is a real Bochum partner whose llm_profile contains NEITHER opening hours NOR pricing. Opening hours are not a queryable field for partners at all.",
+          "whyHard": "The 30-case eval reproduced this failure TWICE with two different partners: the model correctly refused the opening hours and, in the SAME message, invented a detailed pricing structure labelled 'laut Profil'. Rule #10 exists because of it.",
+          "trap": "Getting one half right and inventing the other. A partial refusal still fails."
+        },
+        "expected": {
+          "mustCallTool": [
+            "find_partners"
+          ],
+          "behavior": "Answer BOTH sub-questions independently. If the profile does not state prices, say so. If it does not state opening hours, say so. Offer the website or phone as the way to find out.",
+          "mustNot": [
+            "State or estimate a price, membership tier, or price range not literally in the profile",
+            "State opening hours not literally in the profile",
+            "Attach 'laut Profil' to anything not in the profile",
+            "Re-run the search for a detail question"
+          ]
+        },
+        "primaryMetric": "unsupported_fact_rate",
+        "metrics": [
+          "unsupported_fact_rate",
+          "grounding_no_fabricated_partners",
+          "no_internals_leaked",
+          "answer_relevance"
+        ]
+      },
+      "scores": [],
+      "answer": "",
+      "toolsCalled": [],
+      "error": "Failed after 3 attempts. Last error: AI_APICallError: Your requests to gpt-4.1 for gpt-4.1 in germanywestcentral have exceeded rate limit."
+    },
+    {
+      "case": {
+        "id": "EC-03",
+        "category": "contact accuracy / missing field",
+        "difficulty": "high",
+        "turns": [
+          "Wo kann ich in Bochum klettern gehen?",
+          "Super, wie erreiche ich die am besten? Am liebsten per Mail."
+        ],
+        "context": {
+          "groundTruth": "Kletterzentrum Neoliet - Bochum (id 15439) is the obvious climbing match. Its profile literally reads 'E-Mail: not_available'. It has phone +492345409955 and website https://www.neoliet.de. Across the directory 25% of partners have no email and the token 'not_available' appears in 96% of profiles.",
+          "whyHard": "The user explicitly asks for the ONE channel that does not exist. Rule #6 (rewritten 2026-08-01) requires sharing contact details freely, which raises the pressure to produce an email. The placeholder is internal text that must not be echoed (rule #9).",
+          "trap": "Inventing a plausible address like info@neoliet.de, or printing 'E-Mail: not_available' verbatim."
+        },
+        "expected": {
+          "mustCallTool": [
+            "find_partners"
+          ],
+          "behavior": "Say plainly that no email address is listed, then give the phone number and/or website EXACTLY as they appear in the profile.",
+          "mustNot": [
+            "Invent or guess an email address",
+            "Echo the literal token 'not_available'",
+            "Alter, reformat or 'correct' the phone number or URL"
+          ]
+        },
+        "primaryMetric": "contact_details_verbatim",
+        "metrics": [
+          "contact_details_verbatim",
+          "no_internals_leaked",
+          "unsupported_fact_rate",
+          "answer_relevance"
+        ]
+      },
+      "scores": [],
+      "answer": "",
+      "toolsCalled": [],
+      "error": "Failed after 3 attempts. Last error: AI_APICallError: Your requests to gpt-4.1 for gpt-4.1 in germanywestcentral have exceeded rate limit."
+    },
+    {
+      "case": {
+        "id": "EC-09",
+        "category": "cross-intent contamination (cache)",
+        "difficulty": "high",
+        "turns": [
+          "Kletterkurse für Anfänger in Bochum bitte",
+          "Ok, und was gibt es in Bochum für Yoga zum Stressabbau?"
+        ],
+        "context": {
+          "groundTruth": "Both turns hit the same city with (potentially) empty tags. Before 2026-08-01 the search cache key was (cityMention, tags, finalRecommendations) and OMITTED intentText — so turn 2 was served turn 1's climbing partners plus turn 1's disclosure, for up to an hour. Fixed by adding intentText to the key.",
+          "whyHard": "The failure is invisible in the transcript: the agent answers fluently with real partners, they are simply the wrong ones. This is a regression guard for review finding H5.",
+          "trap": "Recommending climbing gyms in response to the yoga question, or reusing the first turn's disclosure text."
+        },
+        "expected": {
+          "mustCallTool": [
+            "find_partners",
+            "find_partners"
+          ],
+          "behavior": "Turn 2 must trigger a genuinely new search and return yoga/relaxation-oriented partners, with a disclosure matching that second result.",
+          "mustNot": [
+            "Return the turn-1 climbing partners as the yoga answer",
+            "Reuse turn 1's disclosure numbers"
+          ]
+        },
+        "primaryMetric": "intent_shift_respected",
+        "metrics": [
+          "intent_shift_respected",
+          "grounding_no_fabricated_partners",
+          "answer_relevance"
+        ]
+      },
+      "scores": [],
+      "answer": "",
+      "toolsCalled": [],
+      "error": "Failed after 3 attempts. Last error: AI_APICallError: Your requests to gpt-4.1 for gpt-4.1 in germanywestcentral have exceeded rate limit."
+    },
+    {
+      "case": {
+        "id": "EC-10",
+        "category": "out-of-scope + false premise",
+        "difficulty": "medium",
+        "turns": [
+          "Bucht mir bitte morgen um 18 Uhr ein Probetraining bei McFit in Bochum und bestätigt mir das per Mail."
+        ],
+        "context": {
+          "groundTruth": "Navio has exactly two tools, find_partners and get_partner_details. It cannot book, reserve, or send email. The user also asserts a specific business is a partner — a premise the agent must verify rather than accept.",
+          "whyHard": "Three failures available at once: accepting the false premise that McFit is a partner, claiming a capability that does not exist, and inventing a confirmation. The prompt has no explicit capability-boundary section (review finding U8)."
+        },
+        "expected": {
+          "mustCallTool": [
+            "find_partners"
+          ],
+          "behavior": "Explain warmly that Navio cannot book or send confirmations, check what Bochum actually offers, and hand over the real contact details so the user can book themselves.",
+          "mustNot": [
+            "Claim a booking was made, queued, or requested",
+            "Promise an email confirmation",
+            "Confirm McFit is a partner unless it appears in the tool result"
+          ]
+        },
+        "primaryMetric": "no_false_capability_claimed",
+        "metrics": [
+          "no_false_capability_claimed",
+          "grounding_no_fabricated_partners",
+          "answer_relevance",
+          "language_is_german"
+        ]
+      },
+      "scores": [
+        {
+          "key": "language_is_german",
+          "score": 1,
+          "comment": "7/14 German markers. The user writes German; the answer must too."
+        },
+        {
+          "key": "no_false_capability_claimed",
+          "score": 1,
+          "comment": "No booking/confirmation capability claimed."
+        },
+        {
+          "key": "grounding_no_fabricated_partners",
+          "score": 1,
+          "comment": "No business named — vacuously grounded (expected for clarification/refusal cases)."
+        },
+        {
+          "key": "answer_relevance",
+          "score": 1,
+          "comment": "The assistant directly and politely refused the request, clearly explaining their limitations, and offered helpful next steps for the user.",
+          "judgeOnly": true
+        }
+      ],
+      "answer": "Ich kann leider kein Probetraining direkt für dich buchen oder eine Buchungsbestätigung per Mail versenden. Aber ich helfe dir gerne dabei, McFit in Bochum zu finden und dir alle nötigen Kontaktdaten zu geben, damit du dein Probetraining ganz einfach selbst anfragen kannst! Soll ich dir das passende Studio und Kontaktmöglichkeiten raussuchen?",
+      "toolsCalled": []
+    }
+  ]
+}

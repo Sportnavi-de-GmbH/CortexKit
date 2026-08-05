@@ -1,0 +1,43 @@
+=== results\run-1784534796237.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Hier sind die besten Optionen für Krafttraining rund um die Uhr in Aalen und Umgebung 👇🏻 Die Auswahl in Aalen selbst ist aktuell etwas begrenzt (2 Studios), für mehr Flexibilität habe ich dir noch einige Alternativen aus Göppingen und Ulm (~35–50 km) dazugeholt:
+
+1. **TopFit - Aalen Ulmerstrasse**
+   - Komplett 24/7 geöffnet – du kannst rund um die Uhr trainieren, sogar an Feiertagen!
+   - Das Stu
+
+=== results\run-1784534909435.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Ich habe dir die besten Möglichkeiten für Krafttraining rund um die Uhr in Aalen und Umgebung herausgesucht 👇🏻 Die ganz genaue Auswahl direkt in Aalen ist begrenzt, deshalb bekommst du auch ein paar Empfehlungen aus Ulm und Göppingen (~35–50 km entfernt) für volle Flexibilität:
+
+🏋️‍♂️ **TopFit – Aalen Ulmerstraße**
+- 24/7 geöffnet, du kannst also wirklich zu jeder Tages- und Nachtzeit trainieren.
+
+
+=== results\run-1784535023954.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Hier sind meine Top-Empfehlungen für Krafttraining rund um die Uhr in Aalen und Umgebung 💪🏻⏰:
+
+1. TopFit – Aalen Ulmerstrasse  
+Direkt in Aalen findest du das TopFit Fitnessstudio in der Ulmerstraße – es ist tatsächlich 24/7 geöffnet, auch an Feiertagen! Laut Profil gibt’s hier modernes Gerätetraining, Functional- und Freihantelbereich, Personal-Coaching sowie eigene Bereiche für Frauen. Ein Plus:
+
+=== results\run-1784535215525.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Hier sind die Top-Optionen für Krafttraining rund um die Uhr in Aalen, damit du wirklich jederzeit loslegen kannst 💪🏻:
+
+🏋️‍♂️ TopFit - Aalen Ulmerstrasse  
+Das Studio bietet dir laut Profil modernste Geräte und sieben Trainingsbereiche mit Fokus auf Krafttraining, Functional Training und Freihanteln – alles rund um die Uhr geöffnet, auch an Feiertagen. Besonders praktisch: CyberFitness-Kurse sind 
+
+=== results\run-1784535500651.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Ich habe für dich die besten Optionen für Krafttraining rund um die Uhr in Aalen gefunden 💪🏻 – und auch ein paar Alternativen aus der Umgebung, damit du möglichst flexibel trainieren kannst:
+
+🏋️‍♂️ TopFit - Aalen Ulmerstrasse  
+- Dieses Studio ist tatsächlich 24 Stunden am Tag (auch an Feiertagen) geöffnet und perfekt für dein Anliegen! Du findest modernste Geräte, einen großen Freihantelbereich, 
+
+=== results\run-1784535771184.json ===
+toolNames: ['extract_city_and_intent', 'resolve_partners', 'build_recommendations', 'delegate_to_curator']
+response: Hier kommt deine Auswahl für Krafttraining rund um die Uhr in Aalen und Umgebung 💪🏻 Da Aalen selbst nur zwei passende Studios hat, habe ich dir zusätzlich 24/7-Fitnessmöglichkeiten aus Göppingen und Ulm (bis ca. 50 km) dazugeholt, damit du mehr Auswahl hast.
+
+🏋️‍♂️ TopFit – Aalen Ulmerstraße
+Perfekt für flexible Zeiten: Dieses Studio in Aalen ist 24/7 geöffnet – du kannst also wirklich jederzeit t

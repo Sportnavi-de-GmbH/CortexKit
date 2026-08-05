@@ -1,0 +1,117 @@
+{
+  "meta": {
+    "description": "Manual analysis of the 5-case pilot run, cross-checked line-by-line against the actual profile text the model had in context (see results/run-*.json). Scores are 1-5 (5 = fully passes all evaluation criteria).",
+    "resultFiles": ["results/run-1784483812198.json", "results/run-1784483887566.json"]
+  },
+  "scores": [
+    {
+      "id": 4,
+      "score": 4,
+      "verdict": "Mostly pass",
+      "findings": [
+        {
+          "type": "strength",
+          "detail": "Correctly and explicitly disclosed that no partner in the München working set actually has a Yoga tag ('Leider gibt es aktuell keine Partner ... die explizit Yoga-Kurse im Angebot haben'), rather than presenting a weak match as a confident answer. Verified against real data: all 4 München partners + the 1 borrowed Unterhaching partner genuinely carry zero yoga tag."
+        },
+        {
+          "type": "strength",
+          "detail": "Offered real, verifiable alternative cities (Stuttgart, Augsburg) for yoga specifically, and asked a concrete follow-up rather than dead-ending."
+        },
+        {
+          "type": "issue",
+          "severity": "medium",
+          "detail": "Silently dropped the one borrowed/nearby partner (all inclusive Fitness München Unterhaching, ~9.7km, similarity 0.54) from the final answer with zero mention or disclosure. Rule #4 requires plainly disclosing when any presented partner was borrowed from a different city — but here the issue is subtler: it wasn't presented AND undisclosed, it was silently excluded. Either outcome (include-and-disclose, or explicitly explain the exclusion) would satisfy the honesty spirit; silently dropping it without a word does not, and the user has no idea a 5th, geographically-close option existed at all."
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "score": 5,
+      "verdict": "Pass",
+      "findings": [
+        {
+          "type": "strength",
+          "detail": "Zero tool calls (stepCount=1) — correctly recognized Garmisch-Partenkirchen is absent from the coverage list purely from the system prompt, with no wasted search attempt."
+        },
+        {
+          "type": "strength",
+          "detail": "Offered München, Augsburg, and Stuttgart as alternatives — all three are real, verified entries in the coverage list (4, 1, and 6 partners respectively). No hallucinated city names."
+        },
+        {
+          "type": "minor-gap",
+          "severity": "low",
+          "detail": "Did not flag that 'Skifahren' (skiing) is unlikely to be a category this directory covers at all regardless of city — treated it purely as a coverage-gap issue. Not a violation of any rule, but a missed opportunity noted in the original test design."
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "score": 4,
+      "verdict": "Mostly pass",
+      "findings": [
+        {
+          "type": "strength",
+          "detail": "The driver ('sanft', 'Wiedereinstieg') was folded into intent.text and intent.tags at the extraction step itself, before the curator was ever invoked — this is exactly the intent-decomposition behavior the recent prompt changes were designed to produce, and it happened without being explicitly hand-held through the pipeline."
+        },
+        {
+          "type": "strength",
+          "detail": "Justification for evactive is driver-specific ('geschütztes Umfeld, das den Wiedereinstieg besonders sanft und locker macht'), not a bare tag restatement — passes the curator's new justification-specificity rule."
+        },
+        {
+          "type": "strength",
+          "detail": "Honest hedging on the second recommendation (Alphateam, a combat-sports studio where Yoga is one minor course among many): the agent explicitly said the focus 'liegt spürbar auf vielseitigem Training und Selbstverteidigung, Yoga ist eher eines von mehreren Angeboten' rather than overselling the fit."
+        },
+        {
+          "type": "issue",
+          "severity": "medium",
+          "detail": "Dortmund's actual Yoga coverage is itself thin (only evactive has a real 'yoga'-adjacent offering among the 5-partner shortlist; Alphateam's Yoga is a minor line item in a combat-sport prose block) — structurally the same thinness pattern as case 4's München result, but here it was never explicitly named as thin coverage the way case 4 did. Inconsistent application of the shortfall-honesty rule depending on how the request is framed."
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "score": 1,
+      "verdict": "Critical fail — turn 2",
+      "findings": [
+        {
+          "type": "strength",
+          "detail": "Turn 1 (initial Yoga-in-Dortmund recommendation) was reasonable and grounded — no issues found."
+        },
+        {
+          "type": "issue",
+          "severity": "critical",
+          "detail": "Turn 2 asked for evactive's opening hours and pricing. The agent stated 'Montag bis Freitag: 8:00-22:00 Uhr, Samstag und Sonntag: 10:00-16:00 Uhr' — evactive's actual profile text (present verbatim in the model's own context, see results/run-1784483812198.json case 20) contains NO opening hours anywhere. These hours are entirely fabricated. This is a direct, confirmed violation of non-negotiable rule #10 (added specifically to prevent this) and the exact failure mode case 20 was designed to catch."
+        },
+        {
+          "type": "issue",
+          "severity": "critical",
+          "detail": "The agent also stated 'Der Beitrag startet ab 29,90 € pro Monat' as if this were the base membership price. The actual profile text says the 29,90 € figure is for a 'Zusatzoption Gerätetraining inkl. Umkleiden, Duschen und Sauna' (an ADD-ON for equipment/shower/sauna access), not a general starting membership fee. The agent took a real number from the profile and reattached it to a different, incorrect claim — a subtler and arguably more dangerous failure mode than pure invention, since the number itself is 'real' and could pass a shallow fact-check."
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "score": 4,
+      "verdict": "Mostly pass",
+      "findings": [
+        {
+          "type": "strength",
+          "detail": "Correctly treated 'war noch nie im Fitnessstudio' as specifying the functional ask (general fitness) without needing to ask a separate guided-choice question — a defensible reading of implicit intent rather than a rule violation."
+        },
+        {
+          "type": "strength",
+          "detail": "Top pick (Praxis Bilal Physiotherapie) is well-grounded to the nervous-beginner driver: profile genuinely states barrier-free access, no long wait times, and 1:1 personal coaching — a substantively better match for this driver than a generic gym, and the agent named the specific concrete details rather than a generic reassurance."
+        },
+        {
+          "type": "strength",
+          "detail": "Passes the genericness check in comparison to other cases — tone and content visibly differ from a bare 'Fitness in Münster' request."
+        },
+        {
+          "type": "issue",
+          "severity": "medium",
+          "detail": "Two of the three recommendations (HEINZ training, Vi-Dance) have thin, template-boilerplate profile text ('bietet vielseitige Möglichkeiten im Bereich Ems... Individuelle Trainings- und Nutzungsmöglichkeiten' — generic filler present on many partners with minimal scraped content). The agent's justification for HEINZ ('Einsteiger:innen werden laut Profil von Anfang an individuell beraten und betreut') restates this boilerplate as if it were a specific, meaningful signal about beginner-friendliness — it isn't; it's filler text, not evidence. The agent currently cannot distinguish a genuinely detailed profile from a boilerplate placeholder one."
+        }
+      ]
+    }
+  ]
+}

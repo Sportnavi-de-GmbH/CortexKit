@@ -1,0 +1,4 @@
+# Contains a live LangSmith API key (see .mcp.json's env block) — never commit
+# real credentials in MCP config, per EVE_LANGSMITH_TRACING_GUIDE.md §4/§13.
+.mcp.json
+.gstack/
