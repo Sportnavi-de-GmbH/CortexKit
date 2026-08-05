@@ -41,3 +41,6 @@ scratchpad/
 tmp/
 *.log
 .gstack/
+
+# ─── Separate repositories (own remotes, own history) ────────────────────────
+SportnaviPartnerRecomandationBot/
