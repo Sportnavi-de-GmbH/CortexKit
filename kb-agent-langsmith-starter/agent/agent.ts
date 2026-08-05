@@ -28,6 +28,25 @@ function resolveModel() {
   }
 }
 
+// Per-session execution budgets (production-readiness review §P2.6). Navio is a
+// PUBLIC, ANONYMOUS endpoint, so an uncapped session is a direct cost/abuse risk:
+// eve's default is 40M input tokens/session (~$80 at gpt-4.1 list) with output
+// UNCAPPED. A support session is a handful of short turns, so we cap both far
+// lower. eve checks the input cap before each model call and blocks further
+// calls in the session once it is crossed (the crossing call is allowed to
+// finish, since providers only report exact usage after completion).
+//
+// Both are env-tunable without a code change; set the env to `0` to disable a
+// cap (mapped to eve's `false`). Keep these SMALL — the real hard cost ceiling
+// for a public endpoint is the AI Gateway spend cap (see resolveModel + §P2.6).
+function limitFromEnv(name: string, fallback: number): number | false {
+  const raw = process.env[name]?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n === 0 ? false : n; // 0 ⇒ explicitly uncapped
+}
+
 // This agent has no tools, no subagents, and no skills by design: its entire
 // behaviour comes from the system prompt in `agent/instructions.md`.
 //
@@ -44,4 +63,11 @@ export default defineAgent({
   // used) is resolved above.
   modelContextWindowTokens: 1_047_576,
   model: resolveModel(),
+  limits: {
+    // ~250k input tokens ≈ 15 turns of the full ~16.7k prompt — generous for a
+    // real support chat, but bounds a runaway/abusive session to ~$0.50.
+    maxInputTokensPerSession: limitFromEnv("NAVIO_MAX_INPUT_TOKENS_PER_SESSION", 250_000),
+    // Hard ceiling on generated tokens per session (default is uncapped).
+    maxOutputTokensPerSession: limitFromEnv("NAVIO_MAX_OUTPUT_TOKENS_PER_SESSION", 20_000),
+  },
 });
