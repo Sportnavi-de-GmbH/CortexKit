@@ -1,0 +1,242 @@
+{
+    "root_group": {
+        "groups": {
+            "widget health": {
+                "checks": {
+                    "health 200": {
+                        "name": "health 200",
+                        "path": "::widget health::health 200",
+                        "id": "c6cd5c39322477a54046d8a81d7ccbb8",
+                        "passes": 1721,
+                        "fails": 0
+                    }
+                },
+                "name": "widget health",
+                "path": "::widget health",
+                "id": "249db028b7568601e42578d683048cf1",
+                "groups": {}
+            },
+            "widget page (CSP check)": {
+                "name": "widget page (CSP check)",
+                "path": "::widget page (CSP check)",
+                "id": "87168a135ba4fff1a63420d3017e3a9e",
+                "groups": {},
+                "checks": {
+                        "widget 200": {
+                            "fails": 0,
+                            "name": "widget 200",
+                            "path": "::widget page (CSP check)::widget 200",
+                            "id": "e119d996aba5c06e28a8a61b3e0ad319",
+                            "passes": 1721
+                        },
+                        "has frame-ancestors CSP": {
+                            "name": "has frame-ancestors CSP",
+                            "path": "::widget page (CSP check)::has frame-ancestors CSP",
+                            "id": "db52934a10eb2bb279aac8810bfe1034",
+                            "passes": 1721,
+                            "fails": 0
+                        },
+                        "has nosniff": {
+                            "name": "has nosniff",
+                            "path": "::widget page (CSP check)::has nosniff",
+                            "id": "a48f56774f15bf7fa18729dca9e2d7fb",
+                            "passes": 1721,
+                            "fails": 0
+                        }
+                    }
+            },
+            "launcher script": {
+                "name": "launcher script",
+                "path": "::launcher script",
+                "id": "184b8a1ff51490aa3a2e81bf958005c1",
+                "groups": {},
+                "checks": {
+                        "launcher 200": {
+                            "path": "::launcher script::launcher 200",
+                            "id": "07e6f36a26e9f839d12e2ef79482ce58",
+                            "passes": 1721,
+                            "fails": 0,
+                            "name": "launcher 200"
+                        },
+                        "launcher cached": {
+                            "passes": 1721,
+                            "fails": 0,
+                            "name": "launcher cached",
+                            "path": "::launcher script::launcher cached",
+                            "id": "c4b23a73128a681b50d544b11f6f1ff9"
+                        }
+                    }
+            },
+            "partner health (internal service)": {
+                "name": "partner health (internal service)",
+                "path": "::partner health (internal service)",
+                "id": "a391cc0bbeeff301fa3accd6a76d6857",
+                "groups": {},
+                "checks": {
+                        "partner health 200": {
+                            "id": "c346596353b463f4f9c4c982b884924d",
+                            "passes": 1721,
+                            "fails": 0,
+                            "name": "partner health 200",
+                            "path": "::partner health (internal service)::partner health 200"
+                        }
+                    }
+            }
+        },
+        "checks": {},
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "metrics": {
+        "http_reqs": {
+            "rate": 98.28744254234114,
+            "count": 6884
+        },
+        "http_req_receiving": {
+            "max": 22.8934,
+            "p(90)": 1.3813799999999996,
+            "p(95)": 2.9477399999999996,
+            "avg": 0.5379980534572929,
+            "min": 0,
+            "med": 0
+        },
+        "iterations": {
+            "count": 1721,
+            "rate": 24.571860635585285
+        },
+        "http_req_failed": {
+            "passes": 0,
+            "fails": 6884,
+            "thresholds": {
+                "rate<0.05": false
+            },
+            "value": 0
+        },
+        "http_req_duration": {
+            "avg": 80.36235408192883,
+            "min": 14.1738,
+            "med": 113.76235,
+            "max": 1285.2664,
+            "p(90)": 134.23674,
+            "p(95)": 144.48581
+        },
+        "http_req_blocked": {
+            "avg": 0.3467117083091226,
+            "min": 0,
+            "med": 0,
+            "max": 1172.0425,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "checks": {
+            "passes": 12047,
+            "fails": 0,
+            "value": 1
+        },
+        "navio_launcher_ms": {
+            "min": 14.1738,
+            "med": 24.261,
+            "max": 417.2884,
+            "p(90)": 35.8106,
+            "p(95)": 41.1328,
+            "avg": 27.414995002905275
+        },
+        "group_duration": {
+            "p(95)": 145.0613599999999,
+            "avg": 80.81221730098787,
+            "min": 14.1739,
+            "med": 113.82409999999999,
+            "max": 1588.0545,
+            "p(90)": 134.38683999999998
+        },
+        "http_req_waiting": {
+            "med": 111.7779,
+            "max": 1285.2664,
+            "p(90)": 133.64302,
+            "p(95)": 143.46925999999996,
+            "avg": 79.76714446542674,
+            "min": 8.1796
+        },
+        "data_received": {
+            "count": 28498539,
+            "rate": 406892.5790969158
+        },
+        "http_req_duration{expected_response:true}": {
+            "min": 14.1738,
+            "med": 113.76235,
+            "max": 1285.2664,
+            "p(90)": 134.23674,
+            "p(95)": 144.48581,
+            "avg": 80.36235408192883
+        },
+        "navio_widget_page_ms": {
+            "p(90)": 39.3526,
+            "p(95)": 47.5538,
+            "avg": 30.658357408483464,
+            "min": 17.4981,
+            "med": 26.621,
+            "max": 548.1169,
+            "thresholds": {
+                "p(95)<3000": false
+            }
+        },
+        "http_req_tls_handshaking": {
+            "avg": 0.10775598489250436,
+            "min": 0,
+            "med": 0,
+            "max": 62.67,
+            "p(90)": 0,
+            "p(95)": 0
+        },
+        "navio_health_ms": {
+            "avg": 131.47944009296907,
+            "min": 111.3839,
+            "med": 125.6937,
+            "max": 503.3938,
+            "p(90)": 144.7005,
+            "p(95)": 159.0037,
+            "thresholds": {
+                "p(95)<1500": false
+            }
+        },
+        "http_req_sending": {
+            "p(90)": 0,
+            "p(95)": 0.5088,
+            "avg": 0.05721156304474139,
+            "min": 0,
+            "med": 0,
+            "max": 8.2979
+        },
+        "http_req_connecting": {
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0.06495963102847181,
+            "min": 0,
+            "med": 0,
+            "max": 68.2209
+        },
+        "data_sent": {
+            "rate": 6514.983985578953,
+            "count": 456306
+        },
+        "iteration_duration": {
+            "max": 3169.3583,
+            "p(90)": 354.2668,
+            "p(95)": 395.6121,
+            "avg": 323.2902644392797,
+            "min": 271.3574,
+            "med": 308.0553
+        },
+        "vus": {
+            "value": 1,
+            "min": 1,
+            "max": 10
+        },
+        "vus_max": {
+            "value": 10,
+            "min": 10,
+            "max": 10
+        }
+    }
+}

@@ -1,0 +1,257 @@
+{
+    "root_group": {
+        "groups": {
+            "1. partner agent requires the shared secret": {
+                "name": "1. partner agent requires the shared secret",
+                "path": "::1. partner agent requires the shared secret",
+                "id": "0f7a6baaa364af687fbc68321d3faeb7",
+                "groups": {},
+                "checks": {
+                        "direct partner access is refused (401/403)": {
+                            "name": "direct partner access is refused (401/403)",
+                            "path": "::1. partner agent requires the shared secret::direct partner access is refused (401/403)",
+                            "id": "4ccc5611db3c03398aafc78c1e14a281",
+                            "passes": 15,
+                            "fails": 0
+                        }
+                    }
+            },
+            "2. partner agent console is not public in production": {
+                "checks": {
+                    "console redirected or blocked": {
+                        "fails": 0,
+                        "name": "console redirected or blocked",
+                        "path": "::2. partner agent console is not public in production::console redirected or blocked",
+                        "id": "9ed29dd50cab35ab5387a54e7ba74dbc",
+                        "passes": 15
+                    }
+                },
+                "name": "2. partner agent console is not public in production",
+                "path": "::2. partner agent console is not public in production",
+                "id": "db71049491aac4dee9f3a22809996220",
+                "groups": {}
+            },
+            "3. foreign origin is rejected on the partner proxy": {
+                "name": "3. foreign origin is rejected on the partner proxy",
+                "path": "::3. foreign origin is rejected on the partner proxy",
+                "id": "4fae944a8dff4fc30b867d08bc05f5d7",
+                "groups": {},
+                "checks": {
+                        "foreign origin blocked (403)": {
+                            "name": "foreign origin blocked (403)",
+                            "path": "::3. foreign origin is rejected on the partner proxy::foreign origin blocked (403)",
+                            "id": "30f291f35ce42db3935311f10d7cc11b",
+                            "passes": 15,
+                            "fails": 0
+                        }
+                    }
+            },
+            "4. SSRF / traversal guard on the proxy": {
+                "checks": {
+                    "traversal 0 not forwarded (404/403/400)": {
+                        "passes": 15,
+                        "fails": 0,
+                        "name": "traversal 0 not forwarded (404/403/400)",
+                        "path": "::4. SSRF / traversal guard on the proxy::traversal 0 not forwarded (404/403/400)",
+                        "id": "340ece1d7dc96967e88a586ba8625b6c"
+                    },
+                    "traversal 1 not forwarded (404/403/400)": {
+                        "name": "traversal 1 not forwarded (404/403/400)",
+                        "path": "::4. SSRF / traversal guard on the proxy::traversal 1 not forwarded (404/403/400)",
+                        "id": "d4b1c090e83408ccb5deee6560d32827",
+                        "passes": 15,
+                        "fails": 0
+                    },
+                    "traversal 2 not forwarded (404/403/400)": {
+                        "fails": 0,
+                        "name": "traversal 2 not forwarded (404/403/400)",
+                        "path": "::4. SSRF / traversal guard on the proxy::traversal 2 not forwarded (404/403/400)",
+                        "id": "2a74b7797c9caad5be0d1bdaa9cb14f1",
+                        "passes": 15
+                    }
+                },
+                "name": "4. SSRF / traversal guard on the proxy",
+                "path": "::4. SSRF / traversal guard on the proxy",
+                "id": "e4a096db05fa53ec29088b02b1453971",
+                "groups": {}
+            },
+            "5. oversized body is rejected before the model": {
+                "id": "26c184fa6a27b45438e6b07ef2ac618b",
+                "groups": {},
+                "checks": {
+                        "oversized body rejected (403/413)": {
+                            "name": "oversized body rejected (403/413)",
+                            "path": "::5. oversized body is rejected before the model::oversized body rejected (403/413)",
+                            "id": "17df674b980277ec51383fcea70b67f2",
+                            "passes": 9,
+                            "fails": 6
+                        }
+                    },
+                "name": "5. oversized body is rejected before the model",
+                "path": "::5. oversized body is rejected before the model"
+            },
+            "6. embedding lock (frame-ancestors)": {
+                "id": "9e974f6a091335b4adc7bb7e571a0ba0",
+                "groups": {},
+                "checks": {
+                        "CSP present": {
+                            "name": "CSP present",
+                            "path": "::6. embedding lock (frame-ancestors)::CSP present",
+                            "id": "78a3382412a64d8e489752ea049454f1",
+                            "passes": 6,
+                            "fails": 9
+                        },
+                        "sportnavi.de allowed": {
+                            "passes": 6,
+                            "fails": 9,
+                            "name": "sportnavi.de allowed",
+                            "path": "::6. embedding lock (frame-ancestors)::sportnavi.de allowed",
+                            "id": "1e7c640feadc5432d52c55063bf344bf"
+                        },
+                        "not open to all": {
+                            "name": "not open to all",
+                            "path": "::6. embedding lock (frame-ancestors)::not open to all",
+                            "id": "ec83d5eef116fe3409635da3600b78d2",
+                            "passes": 15,
+                            "fails": 0
+                        }
+                    },
+                "name": "6. embedding lock (frame-ancestors)",
+                "path": "::6. embedding lock (frame-ancestors)"
+            }
+        },
+        "checks": {},
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "metrics": {
+        "security_checks_failed": {
+            "count": 15,
+            "rate": 2.545520654940064,
+            "thresholds": {
+                "count==0": true
+            }
+        },
+        "group_duration": {
+            "avg": 194.00267000000002,
+            "min": 16.0004,
+            "med": 54.2986,
+            "max": 1729.0911,
+            "p(90)": 511.11010000000226,
+            "p(95)": 942.3770749999995
+        },
+        "data_sent": {
+            "count": 3026791,
+            "rate": 513650.60057911277
+        },
+        "vus": {
+            "value": 3,
+            "min": 3,
+            "max": 3
+        },
+        "http_req_duration": {
+            "med": 29.962699999999998,
+            "max": 1725.9078,
+            "p(90)": 178.06826000000007,
+            "p(95)": 804.7118199999999,
+            "avg": 140.1613458333333,
+            "min": 15.4957
+        },
+        "http_req_tls_handshaking": {
+            "min": 0,
+            "med": 0,
+            "max": 54.7037,
+            "p(90)": 0,
+            "p(95)": 1.2968699999999262,
+            "avg": 2.02732
+        },
+        "http_req_connecting": {
+            "max": 21.9061,
+            "p(90)": 0,
+            "p(95)": 0.70381499999996,
+            "avg": 0.9100175,
+            "min": 0,
+            "med": 0
+        },
+        "iterations": {
+            "count": 15,
+            "rate": 2.545520654940064
+        },
+        "checks": {
+            "passes": 126,
+            "fails": 24,
+            "value": 0.84
+        },
+        "http_req_blocked": {
+            "avg": 4.6041316666666665,
+            "min": 0,
+            "med": 0,
+            "max": 117.9334,
+            "p(90)": 0,
+            "p(95)": 2.092244999999881
+        },
+        "security_checks_passed": {
+            "count": 105,
+            "rate": 17.81864458458045
+        },
+        "vus_max": {
+            "min": 3,
+            "max": 3,
+            "value": 3
+        },
+        "data_received": {
+            "count": 1791998,
+            "rate": 304104.52817408566
+        },
+        "http_reqs": {
+            "rate": 20.364165239520513,
+            "count": 120
+        },
+        "http_req_receiving": {
+            "med": 0,
+            "max": 17.6129,
+            "p(90)": 2.267970000000007,
+            "p(95)": 4.64851,
+            "avg": 0.8920358333333334,
+            "min": 0
+        },
+        "http_req_duration{expected_response:true}": {
+            "min": 15.4957,
+            "med": 24.8104,
+            "max": 1725.9078,
+            "p(90)": 1023.4643600000011,
+            "p(95)": 1373.6216399999998,
+            "avg": 273.2605185185185
+        },
+        "http_req_sending": {
+            "avg": 2.2904116666666665,
+            "min": 0,
+            "med": 0,
+            "max": 85.4118,
+            "p(90)": 1.2427300000000032,
+            "p(95)": 3.13661
+        },
+        "http_req_waiting": {
+            "med": 28.4566,
+            "max": 1640.496,
+            "p(90)": 178.06826000000007,
+            "p(95)": 800.30991,
+            "avg": 136.9788983333334,
+            "min": 12.3656
+        },
+        "http_req_failed": {
+            "passes": 93,
+            "fails": 27,
+            "value": 0.775
+        },
+        "iteration_duration": {
+            "p(95)": 3279.3057399999993,
+            "avg": 1164.1023400000004,
+            "min": 277.7881,
+            "med": 506.7966,
+            "max": 3471.1119,
+            "p(90)": 3116.31814
+        }
+    }
+}

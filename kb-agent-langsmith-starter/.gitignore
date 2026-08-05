@@ -3,3 +3,5 @@ node_modules/
 .eve/
 .data/
 *.tsbuildinfo
+
+.vercel

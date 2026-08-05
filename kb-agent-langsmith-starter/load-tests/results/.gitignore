@@ -1,0 +1,2 @@
+# k6 raw per-request streams are large (~30MB); keep summaries + report only
+results/*-raw.json
