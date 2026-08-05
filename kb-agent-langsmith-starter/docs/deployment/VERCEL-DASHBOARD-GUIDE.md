@@ -274,22 +274,54 @@ traffic a rule blocks, and basic flood ("DDoS") protection is always on for free
 > the cap is harder to dodge. **Endpoint paths** below (like `/eve/v1/session`) are the internal
 > addresses the widget uses.
 
-**Rule A — Allow only Sportnavi origins (the origin lock).** *Protects against: other websites
-calling your chatbot's API to run up your bill.*
-- If **Request Path** *starts with* `/eve/v1/` **OR** *starts with* `/api/partner/` **OR**
-  *equals* `/api/contact`
-- **AND** the **Origin** header *exists*
-- **AND** the **Origin** *is not any of* `https://chat.sportnavi.de`, `https://www.sportnavi.de`,
-  `https://sportnavi.de`
-- Then: **Log** (later → **Deny**)
+#### How to enter a condition in the Vercel UI (read this once — it applies to every rule below)
 
-> ⚠️ The **"Origin exists"** part is deliberate: the streaming connection and health checks
-> legitimately send no Origin, and you must not block those.
+In the **If** area of a rule, each condition is built from three parts plus (sometimes) a value:
+
+1. **Parameter** — *what* to look at. You'll use **Request Path**, **Request Method**, and
+   **Request Header**. ⚠️ **There is no "Origin" entry in the list** — `Origin` is an HTTP *header*,
+   so you choose **Request Header** and a **Key** box appears where you type `Origin`.
+2. **Operator** — *how* to compare. The ones used below are **Starts with**, **Equals**, **Exists**
+   (for "the header is present" — needs **no value**, and it only appears **after** you type the
+   Key), and **Is not any of** (compare against a list).
+3. **Value** — what to match (leave empty for **Exists**).
+
+Add more conditions in the same group with **＋ And**. Pick the rule's **action** at the bottom
+(**Log** / **Deny** / **Rate Limit**); a **Rate Limit** action also asks for the **count**, the
+**window** in seconds, and the **key** to count by (**IP**, or **IP + JA4**).
+
+> Your account may label an operator slightly differently (e.g. **Is set** instead of **Exists**,
+> or **Does not equal** for a single value). Pick the closest match — the meaning is what counts.
+
+**Rule A — Allow only Sportnavi origins (the origin lock).** *Protects against: other websites
+calling your chatbot's API to run up your bill.* Build it as **three conditions joined by AND**:
+
+| # | Parameter | Key | Operator | Value |
+|---|---|---|---|---|
+| 1 | **Request Path** | — | **Starts with** | `/eve/v1/` |
+| 2 | **Request Header** | `Origin` | **Exists** | *(leave empty)* |
+| 3 | **Request Header** | `Origin` | **Is not any of** | `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de` |
+
+Action: **Log** (later → **Deny**).
+
+> 💡 **Couldn't find "Origin"?** That's expected — pick **Request Header** and type `Origin` in the
+> **Key** box (conditions 2 and 3). The **Exists** operator shows up **only after** you've entered
+> the Key.
 >
-> ⚠️ **While you are still testing on the temporary `*.vercel.app` address (before §11):** your own
+> ⚠️ The **"Origin Exists"** condition (row 2) is deliberate: the live answer-stream and health
+> checks legitimately send **no** Origin, and you must not block those. Without it, row 3 would also
+> match empty-Origin requests and break streaming.
+>
+> ⚠️ **While you are still testing on the temporary `*.vercel.app` address (before §8a):** your own
 > widget's Origin is `https://<project>.vercel.app`, which is *not* in the list — switching this
 > rule to **Deny** now would block **your own widget**. Keep it on **Log** until the real
-> `chat.sportnavi.de` address is live.
+> `chat.sportnavi.de` address is live (or temporarily add the `*.vercel.app` origin to row 3's list
+> while testing, and remove it afterwards).
+>
+> ℹ️ **The API routes `/api/partner/` and `/api/contact` are already origin-checked in the app's
+> own code**, and rate-limited by Rule E — so Rule A can stay simple and cover just `/eve/v1/`. If
+> you want the same edge-level origin lock on them too (optional hardening), duplicate Rule A twice
+> more with row 1 changed to Path **Starts with** `/api/partner/` and Path **Equals** `/api/contact`.
 
 **Rule B — Limit starting a chat.** *Protects against: a script opening thousands of chats to burn
 AI credits.*
