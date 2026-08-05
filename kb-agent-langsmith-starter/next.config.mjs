@@ -1,3 +1,4 @@
+import { withBotId } from "botid/next/config";
 import { withEve } from "eve/next";
 
 // Who may embed the Navio widget in an iframe. Locked to Sportnavi by default
@@ -8,8 +9,24 @@ const frameAncestors =
   process.env.WIDGET_FRAME_ANCESTORS ??
   "'self' https://www.sportnavi.de https://sportnavi.de";
 
+// The Next app at `/` is the developer console (chat + tool dashboard against
+// /eve/v1/*). It is handy locally but must NOT be a public page in production —
+// the public surface is the embeddable `/widget`. In production only, redirect
+// `/` to `/widget`; preview/development keep the console for debugging.
+const isProduction = process.env.VERCEL_ENV === "production";
+
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+  async redirects() {
+    if (!isProduction) return [];
+    return [
+      {
+        source: "/",
+        destination: "/widget",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -34,4 +51,4 @@ const nextConfig = {
   },
 };
 
-export default withEve(nextConfig);
+export default withBotId(withEve(nextConfig));

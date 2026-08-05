@@ -11,9 +11,9 @@ Technical documentation for the Navio app (`kb-agent-langsmith-starter/`), group
 ## 🚀 Deployment
 | Doc | What it's for |
 |---|---|
-| [deployment/PUBLIC-WIDGET-DEPLOYMENT.md](deployment/PUBLIC-WIDGET-DEPLOYMENT.md) | The *why* — architecture + hand-off checklist for going live. |
-| [deployment/VERCEL-DASHBOARD-GUIDE.md](deployment/VERCEL-DASHBOARD-GUIDE.md) | Click-by-click deploy + security setup in the Vercel dashboard (no terminal). |
-| [deployment/VERCEL-RUNBOOK.md](deployment/VERCEL-RUNBOOK.md) | The same steps via the Vercel CLI (copy-paste commands). |
+| **[deployment/VERCEL-DASHBOARD-GUIDE.md](deployment/VERCEL-DASHBOARD-GUIDE.md)** | ⭐ **Canonical guide.** Complete non-technical, two-service deploy + security walkthrough (§1 architecture → §8 launch checklist): firewall rules, bot protection, rate limits, the shared-secret Partner lock, secrets, cost caps, monitoring. **Start here.** |
+| [deployment/PUBLIC-WIDGET-DEPLOYMENT.md](deployment/PUBLIC-WIDGET-DEPLOYMENT.md) | The deeper *why* — architecture + rationale behind the canonical guide's steps. |
+| [deployment/VERCEL-RUNBOOK.md](deployment/VERCEL-RUNBOOK.md) | The same steps via the Vercel CLI (copy-paste commands); mirrors the canonical guide. |
 
 ## 🎨 Design
 | Doc | What it's for |

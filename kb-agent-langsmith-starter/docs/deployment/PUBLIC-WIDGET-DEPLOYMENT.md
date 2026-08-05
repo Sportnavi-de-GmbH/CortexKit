@@ -7,6 +7,11 @@ workflow**, and how to **verify** it.
 Companions: [`VERCEL-RUNBOOK.md`](VERCEL-RUNBOOK.md) (CLI, copy-paste) ·
 [`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) (click-by-click, no terminal).
 
+> ℹ️ **[`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) is the canonical, step-by-step
+> source for the firewall rules and security configuration** (including the shared-secret Partner
+> lock that is now implemented in code). This file gives the architecture and rationale behind
+> those steps; where the two overlap, follow the dashboard guide's exact settings.
+
 > **Status (2026-08-03):** the widget, the 3-option menu, the contact form, and the Partner
 > Agent integration are **built and verified locally**. No `vercel.json` or `.vercel/` link
 > exists in either repo, so treat every Vercel step below as **not yet done** unless your
@@ -46,15 +51,20 @@ Since the Partner Agent was added, Navio is **two independently deployed apps**:
 **one origin** (service 1). That reuses the existing consent gate, origin allowlist, BotID
 and Firewall rules, and needs no CORS. Service 2 can stay locked down — see §6.
 
-**Two separate git repos:**
+**One repo, two Vercel projects** (told apart by Root Directory — both app folders live inside
+`CortexKit`):
 
 | Service | Repo | Vercel root directory |
 |---|---|---|
-| 1 — Navio widget | `github.com/AiLabSportnavi/CortexKit` | **`kb-agent-langsmith-starter`** |
-| 2 — Partner Agent | `github.com/AiLabSportnavi/SportnaviPartnerRecomandationBot` | **`partner-recommendation-agent`** |
+| 1 — Navio widget | `CortexKit` | **`kb-agent-langsmith-starter`** |
+| 2 — Partner Agent | `CortexKit` (same repo) | **`SportnaviPartnerRecomandationBot/partner-recommendation-agent`** |
 
-⚠️ Setting **Root Directory** is mandatory for both. If you skip it, Vercel builds the empty
-repo root and every URL 404s.
+⚠️ Setting **Root Directory** is mandatory for both. If you skip it (or pick the wrong folder),
+Vercel builds the wrong part of the repo and every URL 404s.
+
+> ℹ️ The standalone `SportnaviPartnerRecomandationBot` GitHub repo exists but is **out of date and
+> unused** — the partner agent's current code is the folder inside `CortexKit`. Deploy both
+> projects from `CortexKit`.
 
 ---
 

@@ -29,6 +29,11 @@ export interface ProxyDeps {
 
 /** Only eve's own routes may be forwarded — this is NOT an open proxy. */
 export function isForwardablePath(pathSegments: string[]): boolean {
+  // Reject path-traversal segments before the prefix check: without this,
+  // ["eve","..","admin"] joins to "eve/../admin", passes the `eve/` prefix, and
+  // could escape the eve namespace on the upstream. Encoded forms never reach
+  // here — Next.js decodes the catch-all segments before this runs.
+  if (pathSegments.some((s) => s === ".." || s === ".")) return false;
   const path = pathSegments.join("/");
   return path === "eve" || path.startsWith("eve/");
 }
@@ -38,6 +43,87 @@ function json(body: unknown, status: number): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// --- Request gate for /api/partner/* -----------------------------------------
+// This route is a plain Next.js handler and sits OUTSIDE eve's channel auth (eve
+// owns only /eve/v1/*), so the origin + size checks that agent/channels/eve.ts
+// applies to the FAQ agent do not run here. Mirror them so a partner turn gets
+// the same front-door protection as a FAQ turn (defense in depth behind the
+// Vercel Firewall rules on /api/partner/).
+
+/** Same body-size cap as the eve channel (shared `NAVIO_MAX_REQUEST_BYTES`). */
+const MAX_REQUEST_BYTES = Number(process.env.NAVIO_MAX_REQUEST_BYTES ?? 16_000);
+
+function requestHost(req: Request): string | null {
+  return req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+}
+
+/** The origin the caller claims, from `Origin` or (fallback) `Referer`. */
+function callerOrigin(req: Request): string | null {
+  const origin = req.headers.get("origin");
+  if (origin) return origin;
+  const referer = req.headers.get("referer");
+  if (referer) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+  } catch {
+    return false;
+  }
+}
+
+function extraAllowedOrigins(): string[] {
+  return (process.env.WIDGET_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Reject an oversized body (413) or a foreign browser origin (403) BEFORE
+ * forwarding upstream. Returns a Response to reject, or `null` to continue.
+ * A missing Origin (same-origin GET streams, non-browser callers) is deferred
+ * to the edge and the partner service's own auth — same policy as the eve
+ * channel, so the streaming route keeps working.
+ */
+export function checkPartnerRequest(req: Request): Response | null {
+  if (MAX_REQUEST_BYTES > 0) {
+    const len = req.headers.get("content-length");
+    if (len) {
+      const bytes = Number(len);
+      if (Number.isFinite(bytes) && bytes > MAX_REQUEST_BYTES) {
+        return json({ detail: "Message too large." }, 413);
+      }
+    }
+  }
+
+  const origin = callerOrigin(req);
+  if (origin) {
+    const allowed = new Set<string>(extraAllowedOrigins());
+    let originHost: string | null = null;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      /* malformed Origin — fall through to reject */
+    }
+    const sameOrigin = !!originHost && originHost === requestHost(req);
+    if (!allowed.has(origin) && !sameOrigin && !isLoopbackOrigin(origin)) {
+      return json({ detail: "Origin not allowed." }, 403);
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -114,6 +200,21 @@ export async function proxyToPartner(
   const headers = new Headers();
   for (const [k, v] of req.headers) {
     if (!STRIP.has(k.toLowerCase())) headers.set(k, v);
+  }
+
+  // Service-to-service auth. The partner agent (Service 2) authenticates THIS
+  // proxy via a shared secret carried as HTTP Basic. eve's client never uses the
+  // Authorization header for session state (its continuationToken rides in the
+  // request body/query), so overwriting it here breaks no session. Strip any
+  // client-supplied Authorization unconditionally so a browser can't smuggle a
+  // credential upstream; add ours only when the secret is configured. With no
+  // secret set, the upstream falls back to its own auth (401 in production —
+  // fail closed; loopback dev still works via the agent's localDev()).
+  headers.delete("authorization");
+  const secret = process.env.PARTNER_PROXY_SECRET?.trim();
+  if (secret) {
+    const basic = Buffer.from(`navio-proxy:${secret}`).toString("base64");
+    headers.set("authorization", `Basic ${basic}`);
   }
 
   const init: RequestInit = { method: req.method, headers, redirect: "manual" };

@@ -142,6 +142,13 @@ Navio is made of several pieces. Here's what each one is and **why it exists**:
 
 ## 4. Deploying the project on Vercel
 
+> ⚠️ **Superseded — use the canonical guide for deployment and security.** The exact, current,
+> two-service deploy + Vercel-security walkthrough (firewall rules, bot protection, rate limits,
+> secrets, the shared-secret partner lock, cost caps, monitoring) now lives in **one** place:
+> [`../deployment/VERCEL-DASHBOARD-GUIDE.md`](../deployment/VERCEL-DASHBOARD-GUIDE.md). Sections 4
+> and 5 below are kept for background only and are **not** maintained — do not follow their
+> firewall-rule details.
+
 "Deploying" simply means **putting the project online** so it has a real web address.
 
 ### Prerequisites (what you need first)
@@ -202,6 +209,11 @@ Open these in your browser:
 ---
 
 ## 5. Securing the deployment
+
+> ⚠️ **The authoritative firewall rules and security steps are in
+> [`../deployment/VERCEL-DASHBOARD-GUIDE.md`](../deployment/VERCEL-DASHBOARD-GUIDE.md) §3–§8.**
+> This section is an older, single-project summary (no Partner-agent proxy, no shared secret, no
+> Rule E) kept for background. Follow the canonical guide for anything you actually configure.
 
 ### Why security matters
 Navio is **public** — anyone can use it, no login. That's great for visitors, but it means

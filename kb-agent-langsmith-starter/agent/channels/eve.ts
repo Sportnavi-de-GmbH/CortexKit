@@ -158,13 +158,16 @@ function requestHost(request: Request): string | null {
 }
 
 /**
- * Loopback origins (local dev) are safe to allow: a real production browser
- * never sends a `localhost` Origin, and a non-browser caller that forges one is
- * already handled by BotID / rate limiting / the spend cap (an Origin header is
- * not a security boundary against scripts). This keeps `npm run dev` working
- * behind the Next dev proxy without loosening production.
+ * Loopback origins (local dev) are accepted OUTSIDE production only. A real
+ * production browser never sends a `localhost` Origin, so allowing it there buys
+ * nothing and only widens the surface for a forged-Origin script (which BotID /
+ * rate limiting / the spend cap already backstop). Gating on `VERCEL_ENV`
+ * (`preview`/`development`/unset — i.e. not `production`) keeps `npm run dev` and
+ * preview deploys working behind the Next dev proxy while closing the hole in
+ * production. This function is only reached when an Origin header is present.
  */
 function isLoopbackOrigin(origin: string): boolean {
+  if (process.env.VERCEL_ENV === "production") return false;
   try {
     const host = new URL(origin).hostname;
     return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");

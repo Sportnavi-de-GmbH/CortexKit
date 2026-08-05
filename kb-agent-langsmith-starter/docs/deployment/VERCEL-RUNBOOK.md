@@ -3,14 +3,24 @@
 The *how*. Companion to [`PUBLIC-WIDGET-DEPLOYMENT.md`](PUBLIC-WIDGET-DEPLOYMENT.md) (the
 *what/why*) and [`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) (no-terminal version).
 
-> **Two services, two Vercel projects** (see the deployment guide §1):
-> | # | Project | Repo | Run commands from |
+> ℹ️ **[`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) is the canonical source for the
+> firewall-rule definitions, bot protection, rate limits, and the shared-secret partner lock.**
+> The commands here mirror it; if they ever disagree, the dashboard guide wins.
+
+> **Two services, two Vercel projects — from ONE repository** (see the deployment guide §1). Both
+> app folders live inside the single `CortexKit` repo; they become two projects via the **Root
+> Directory**, not two repos:
+> | # | Project | Repo | Run commands from (Root Directory) |
 > |---|---|---|---|
-> | 1 | **navio-widget** (public) | `AiLabSportnavi/CortexKit` | `kb-agent-langsmith-starter/` |
-> | 2 | **navio-partner** (internal) | `AiLabSportnavi/SportnaviPartnerRecomandationBot` | `partner-recommendation-agent/` |
+> | 1 | **navio-widget** (public) | `CortexKit` | `kb-agent-langsmith-starter/` |
+> | 2 | **navio-partner** (internal) | `CortexKit` (same repo) | `SportnaviPartnerRecomandationBot/partner-recommendation-agent/` |
 >
 > Always run `vercel` from the **app folder**, not the repo root — that folder is the Vercel
-> project root (where `next.config.mjs` lives) and holds `.vercel/project.json`.
+> project root (where `next.config.mjs` lives) and holds `.vercel/project.json`. Two app folders in
+> one repo means two separate `.vercel/project.json` files, i.e. two linked projects.
+>
+> ℹ️ The standalone `SportnaviPartnerRecomandationBot` GitHub repo is **not** used here and is out
+> of date — the partner agent's live code is the folder inside `CortexKit`.
 
 > **Golden rule for the firewall:** every rule is **staged as a draft**. Nothing goes live
 > until **you** run `vercel firewall publish --yes`. Stage as `log` first, review real

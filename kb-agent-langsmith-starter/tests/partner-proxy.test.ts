@@ -52,6 +52,11 @@ describe("isForwardablePath", () => {
     expect(isForwardablePath(["admin"])).toBe(false);
     expect(isForwardablePath(["..", "etc", "passwd"])).toBe(false);
   });
+  it("rejects traversal segments even under the eve prefix", () => {
+    expect(isForwardablePath(["eve", "..", "admin"])).toBe(false);
+    expect(isForwardablePath(["eve", "v1", "..", "..", "secrets"])).toBe(false);
+    expect(isForwardablePath(["eve", "."])).toBe(false);
+  });
 });
 
 describe("proxyToPartner", () => {
@@ -92,6 +97,60 @@ describe("proxyToPartner", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(await res.text()).toBe("data: hi\n\n");
+  });
+
+  it("injects the shared secret as HTTP Basic and strips any inbound Authorization", async () => {
+    const prev = process.env.PARTNER_PROXY_SECRET;
+    process.env.PARTNER_PROXY_SECRET = "s3cret";
+    try {
+      let seen: Headers | undefined;
+      const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+        seen = init.headers as Headers;
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+
+      const inbound = new Request("http://localhost/api/partner/eve/v1/session", {
+        method: "POST",
+        body: "{}",
+        headers: { authorization: "Basic ZXZpbDpldmls" }, // attacker-supplied
+      });
+      await proxyToPartner(inbound, ["eve", "v1", "session"], {
+        host: "http://partner.local",
+        fetchImpl,
+      });
+
+      const expected = "Basic " + Buffer.from("navio-proxy:s3cret").toString("base64");
+      expect(seen?.get("authorization")).toBe(expected);
+    } finally {
+      if (prev === undefined) delete process.env.PARTNER_PROXY_SECRET;
+      else process.env.PARTNER_PROXY_SECRET = prev;
+    }
+  });
+
+  it("strips inbound Authorization when no secret is configured (fail closed)", async () => {
+    const prev = process.env.PARTNER_PROXY_SECRET;
+    delete process.env.PARTNER_PROXY_SECRET;
+    try {
+      let seen: Headers | undefined;
+      const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+        seen = init.headers as Headers;
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+
+      const inbound = new Request("http://localhost/api/partner/eve/v1/session", {
+        method: "POST",
+        body: "{}",
+        headers: { authorization: "Basic ZXZpbDpldmls" },
+      });
+      await proxyToPartner(inbound, ["eve", "v1", "session"], {
+        host: "http://partner.local",
+        fetchImpl,
+      });
+
+      expect(seen?.get("authorization")).toBeNull();
+    } finally {
+      if (prev !== undefined) process.env.PARTNER_PROXY_SECRET = prev;
+    }
   });
 
   it("does not forward content-encoding (fetch already decoded the body)", async () => {
