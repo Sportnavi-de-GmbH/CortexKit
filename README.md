@@ -130,24 +130,132 @@ Common commands (run inside `kb-agent-langsmith-starter`):
 
 ---
 
-## Deploy to production
+## Host on Vercel — step by step (anyone can follow)
 
-Everything you need is in the **canonical guide**, written for a non-technical owner
-(§1 architecture → §8 launch checklist):
-**[`kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md`](kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md)**
-(CLI version: [`VERCEL-RUNBOOK.md`](kb-agent-langsmith-starter/docs/deployment/VERCEL-RUNBOOK.md);
-the deeper "why": [`PUBLIC-WIDGET-DEPLOYMENT.md`](kb-agent-langsmith-starter/docs/deployment/PUBLIC-WIDGET-DEPLOYMENT.md)).
+You will create **two Vercel projects from this one `CortexKit` repository**, told apart only by
+their **Root Directory** (the sub-folder Vercel builds). Deploy the **Partner agent first**,
+because the widget needs its address.
 
-In short: **two Vercel projects from this one `CortexKit` repo**, deployed **partner agent first**,
-differing only by Root Directory:
+> **Words used below:** **Vercel** = the hosting service ([vercel.com](https://vercel.com)).
+> **Import** = connect a GitHub repo to Vercel. **Root Directory** = which sub-folder to build.
+> **Environment variable** = a saved setting (a key or address) you type into Vercel, never into
+> the code. **Deploy** = publish it live.
 
-| # | Project | Repo | Root Directory |
-|---|---|---|---|
-| 1 | navio-widget (public) | `CortexKit` | `kb-agent-langsmith-starter` |
-| 2 | navio-partner (internal) | `CortexKit` (same repo) | `SportnaviPartnerRecomandationBot/partner-recommendation-agent` |
+### The workflow at a glance
 
-Then set Service 1's `PARTNER_AGENT_HOST` to Service 2's URL and the **same
-`PARTNER_PROXY_SECRET`** on both projects, and redeploy.
+```
+  Step 0  Prerequisites (GitHub access, Vercel account, the env values)
+     │
+  Step 1  Import project 2 (Partner agent)  ──►  set Root Directory  ──►  add env vars  ──►  Deploy
+     │                                                                         │
+     │                                                          copy its URL ◄─┘
+     ▼
+  Step 2  Import project 1 (Widget)  ──►  set Root Directory  ──►  add env vars (incl. that URL
+     │                                    + the shared secret)  ──►  Deploy
+     ▼
+  Step 3  Test all three menu cards on the temporary *.vercel.app address
+     │
+  Step 4  Turn on security  (Firewall rules → Bot protection → Spend cap)
+     │
+  Step 5  Add the real domain (chat.sportnavi.de) → embed the one-line script → go live
+```
+
+> 📖 This is the quick path. For the **exhaustive, non-technical version with every click,
+> firewall rule, and screenshot-level detail**, follow the canonical guide:
+> **[VERCEL-DASHBOARD-GUIDE.md](kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md)**.
+
+### Step 0 — What you need first
+
+- Access to the **`CortexKit`** GitHub repo (both services live here — you do **not** need a
+  separate Partner-agent repo).
+- A **Vercel** account (the **Pro** plan unlocks the full firewall + bot protection; a free-plan
+  fallback is in the canonical guide).
+- The **environment values**: Azure OpenAI (endpoint, key, model), the Supabase database URL +
+  **service-role** key, the embedding API URL + key, and one long random **shared secret** you
+  invent now (used by both projects).
+- Access to **sportnavi.de's DNS** for the custom-domain step.
+
+⚠️ First, make sure secrets aren't in the code: `.env.local` and `.mcp.json` must stay
+git-ignored (they already are), and rotate any key that was ever shared.
+
+### Step 1 — Deploy the Partner agent (project 2) first
+
+1. On **vercel.com** → **Add New… → Project** → **Import** the **`CortexKit`** repo. (First time:
+   click **Install** to connect Vercel to GitHub.)
+2. **Root Directory → Edit →** choose **`SportnaviPartnerRecomandationBot/partner-recommendation-agent`**.
+   *(Mandatory — the wrong folder makes every address show "404".)*
+3. Name it **`navio-partner`**.
+4. Open **Environment Variables** and add:
+
+   | Variable | Meaning |
+   |---|---|
+   | `AZURE_AI_CHATBOT_OPENAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT_NAME` | The AI brain (address, password, model name). |
+   | `MEMORY_SUPABASE_URL` / `MEMORY_SUPABASE_SERVICE_ROLE_KEY` | The partner database — use the **service-role** key (the normal one returns zero partners). |
+   | `EMBEDDING_API_URL` / `EMBEDDING_API_KEY` | Turns text into numbers so the agent can find *similar* studios. |
+   | **`PARTNER_PROXY_SECRET`** | Your long random shared secret. **Remember this exact value — project 1 needs the same one.** |
+
+5. Click **Deploy**, then **copy the deployment URL** (e.g. `https://navio-partner.vercel.app`).
+
+✅ **Checkpoint:** the build succeeds and you have the partner URL copied.
+
+### Step 2 — Deploy the widget (project 1)
+
+1. **Add New… → Project** → **Import `CortexKit` again** (yes, the same repo).
+2. **Root Directory → Edit → `kb-agent-langsmith-starter`**. Name it **`navio-widget`**.
+3. **Environment Variables:**
+
+   | Variable | Meaning |
+   |---|---|
+   | `AZURE_AI_CHATBOT_OPENAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT_NAME` | The FAQ agent's AI brain. |
+   | **`PARTNER_AGENT_HOST`** | The **partner URL** you copied in Step 1. |
+   | **`PARTNER_PROXY_SECRET`** | The **exact same** secret you set on project 2. |
+   | `WIDGET_FRAME_ANCESTORS` | Sites allowed to embed the widget (defaults to sportnavi.de). |
+   | `SALESFORCE_*` *(optional)* | Contact form. Blank ⇒ the form simulates success without saving. |
+
+   Tick **Production** and **Preview** for each. The two `PARTNER_PROXY_SECRET` values **must
+   match**.
+4. Click **Deploy**.
+
+✅ **Checkpoint:** you get a widget URL like `https://navio-widget.vercel.app`.
+
+### Step 3 — Test all three cards
+
+Open `https://<widget-url>/widget` → **Mit Navio chatten → Zustimmen**:
+
+- **FAQ-Agent** → ask *"Was ist Firmenfitness?"* → it answers.
+- **Partner finden** → *"Yoga in Bochum"* → real studios (wait 30–60s; the bubble is empty while
+  it searches — that's normal). A **503** means `PARTNER_AGENT_HOST` is wrong; an **empty/401**
+  answer means the two `PARTNER_PROXY_SECRET` values don't match.
+- **Kontaktformular** → submits.
+
+✅ **Checkpoint:** all three cards work — this proves the shared secret is correct end to end.
+
+### Step 4 — Turn on security
+
+On the **widget** project (Vercel → **Firewall**, **Bot Protection**, then **Azure**):
+
+1. **Firewall rules** — add the origin lock + rate limits (start each in **Log**, review
+   **Firewall → Traffic**, then switch to **Deny/429**). Exact rules: canonical guide §3.
+2. **Bot protection** — enable **BotID**, set `BOTID_ENABLED` + `NEXT_PUBLIC_BOTID_ENABLED` =
+   `true`, redeploy.
+3. **Spend cap** — in the **Azure Portal**, set a Tokens-Per-Minute limit + a monthly budget alert.
+
+✅ **Checkpoint:** rules are Active; a call from another site is blocked; a flood is rate-limited.
+
+### Step 5 — Real domain + go live
+
+1. **Widget project → Settings → Domains →** add **`chat.sportnavi.de`** (add the CNAME at DNS).
+2. **Partner project →** add a non-obvious domain like `partner.sportnavi.de`; update the widget's
+   `PARTNER_AGENT_HOST` to it and **redeploy**. Then flip Firewall **Rule A → Deny**.
+3. **Embed** — give the web team one line for any sportnavi.de page:
+
+   ```html
+   <script src="https://chat.sportnavi.de/launcher.js" async></script>
+   ```
+
+✅ **Final checks:** the widget works on sportnavi.de; a copy on any other site is refused; a
+flood returns 429; no secret is visible in the page source. Full launch checklist: canonical
+guide §8.
 
 ---
 
@@ -165,6 +273,53 @@ Defense in depth — no single layer is enough:
   so Service 2 is not publicly usable.
 
 Full step-by-step: the deployment guide, §3–§8.
+
+---
+
+## Documentation
+
+Everything is documented. Start with the row that matches what you want to do.
+
+**🚀 Deploy & host**
+
+| Doc | What it covers |
+|---|---|
+| ⭐ [VERCEL-DASHBOARD-GUIDE.md](kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md) | **Canonical guide.** Full non-technical deploy + security walkthrough (§1 architecture → §8 launch checklist). **Start here to go live.** |
+| [VERCEL-RUNBOOK.md](kb-agent-langsmith-starter/docs/deployment/VERCEL-RUNBOOK.md) | The same steps as copy-paste **Vercel CLI** commands. |
+| [PUBLIC-WIDGET-DEPLOYMENT.md](kb-agent-langsmith-starter/docs/deployment/PUBLIC-WIDGET-DEPLOYMENT.md) | The deeper **"why"** behind the deployment + embedding workflow. |
+| [09-website-security.md](docs/09-website-security.md) · [PRODUCTION-READINESS-REVIEW.md](kb-agent-langsmith-starter/docs/PRODUCTION-READINESS-REVIEW.md) | Security model, and the go-live readiness checklist. |
+
+**🧭 Understand the product & architecture**
+
+| Doc | What it covers |
+|---|---|
+| [docs/](docs/) ([index](docs/README.md)) | Numbered project docs **01–11**: objective, challenges, architecture, prompt engineering, experiments, KB strategy, team workflow, feedback loop, security, operations, roadmap. |
+| [01-project-objective.md](docs/01-project-objective.md) · [03-solution-architecture.md](docs/03-solution-architecture.md) | Why Navio exists and how it's built. |
+| [10-operations.md](docs/10-operations.md) | Setup, environment variables, testing, day-to-day operation. |
+| [reference/NAVIO-plus.md](docs/reference/NAVIO-plus.md) · [reference/PROJECT_DOCUMENTATION.md](docs/reference/PROJECT_DOCUMENTATION.md) | Product overview and long-form project documentation. |
+
+**🎨 Design & widget**
+
+| Doc | What it covers |
+|---|---|
+| [WIDGET-DESIGN-GUIDELINES.md](kb-agent-langsmith-starter/docs/design/WIDGET-DESIGN-GUIDELINES.md) | The two-colour brand system (green = AI, orange = human), fonts, launcher. |
+| [NAVIO_PLUS_WIDGET_SPEC.md](kb-agent-langsmith-starter/docs/design/NAVIO_PLUS_WIDGET_SPEC.md) · [NAVIO_WIDGET_SPEC.md](kb-agent-langsmith-starter/docs/design/NAVIO_WIDGET_SPEC.md) | The widget/menu specifications. |
+
+**🤖 The Partner agent (Service 2)**
+
+| Doc | What it covers |
+|---|---|
+| [PROJECT_CONTEXT.md](SportnaviPartnerRecomandationBot/PROJECT_CONTEXT.md) | The Partner agent's full operating manual — pipeline, data, invariants. |
+| [AGENT_ONBOARDING.md](SportnaviPartnerRecomandationBot/AGENT_ONBOARDING.md) | Fast on-ramp for the Partner agent. |
+
+**📊 Observability, evaluation & cost**
+
+| Doc | What it covers |
+|---|---|
+| [DEV-CONSOLE-MONITORING.md](kb-agent-langsmith-starter/docs/DEV-CONSOLE-MONITORING.md) | What to watch after launch; LangSmith (EU) tracing. |
+| [reference/EVE_LANGSMITH_TRACING_GUIDE.md](docs/reference/EVE_LANGSMITH_TRACING_GUIDE.md) | Deep OpenTelemetry → LangSmith tracing reference. |
+| [reference/PERFORMANCE-COST-ANALYSIS.md](kb-agent-langsmith-starter/docs/reference/PERFORMANCE-COST-ANALYSIS.md) · [05-experiment-analysis.md](docs/05-experiment-analysis.md) | Cost/latency analysis and experiment results. |
+| [kb-agent docs index](kb-agent-langsmith-starter/docs/README.md) | Index of all widget-service docs (deployment, design, decisions, reference). |
 
 ---
 
