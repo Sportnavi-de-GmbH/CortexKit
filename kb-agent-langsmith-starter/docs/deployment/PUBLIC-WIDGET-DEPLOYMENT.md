@@ -1,134 +1,285 @@
-# Deploying Navio as a Public Widget on sportnavi.de (MVP)
+# Deploying Navio as a Public Widget on sportnavi.de
 
-Hand-off guide for the internal dev team. It covers the **Vercel-account steps** that
-can't live in code (custom domain, Firewall, BotID, AI-Gateway spend cap) plus how to
-**embed** the widget and **verify** it. Full rationale is in the architecture plan
-(`.claude/plans/i-d-like-bubbly-pearl.md`); this is the checklist.
+Hand-off guide for the internal dev team: the **architecture**, the **Vercel-account steps**
+that can't live in code (domains, Firewall, BotID, spend cap), the **complete embedding
+workflow**, and how to **verify** it.
 
-**What's already in the repo (code, done):**
-- `agent/channels/eve.ts` — anonymous-but-origin-checked route auth, visitor-id stamping,
-  and the server-side BotID enforcement gate.
-- `agent/agent.ts` — model routing switches to the AI Gateway when `AI_GATEWAY_MODEL` is set.
-- `app/widget/page.tsx` — the embeddable chat (same-origin to the API; BotID client init).
-- `public/launcher.js` — the one-line embed script.
+Companions: [`VERCEL-RUNBOOK.md`](VERCEL-RUNBOOK.md) (CLI, copy-paste) ·
+[`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) (click-by-click, no terminal).
+
+> **Status (2026-08-03):** the widget, the 3-option menu, the contact form, and the Partner
+> Agent integration are **built and verified locally**. No `vercel.json` or `.vercel/` link
+> exists in either repo, so treat every Vercel step below as **not yet done** unless your
+> dashboard says otherwise.
+
+---
+
+## 1. What you are deploying — TWO services
+
+Since the Partner Agent was added, Navio is **two independently deployed apps**:
+
+```
+                    sportnavi.de (marketing site)
+                              │  <script src=".../launcher.js">
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  SERVICE 1 — Navio widget  (this repo)      │   ← public, browser-facing
+        │  kb-agent-langsmith-starter/                │
+        │                                             │
+        │  /widget            the iframe UI + menu    │
+        │  /launcher.js       the embed script        │
+        │  /eve/v1/*          the KB (FAQ) agent      │
+        │  /api/contact       Salesforce contact form │
+        │  /api/partner/*  ───┐  same-origin proxy    │
+        └─────────────────────┼───────────────────────┘
+                              │  PARTNER_AGENT_HOST
+                              ▼
+        ┌─────────────────────────────────────────────┐
+        │  SERVICE 2 — Partner Agent                  │   ← never called by the browser
+        │  SportnaviPartnerRecomandationBot/          │
+        │  partner-recommendation-agent/              │
+        │  /eve/v1/*   partner search (Supabase RAG)  │
+        └─────────────────────────────────────────────┘
+```
+
+**Why a proxy instead of calling service 2 directly:** the browser only ever talks to
+**one origin** (service 1). That reuses the existing consent gate, origin allowlist, BotID
+and Firewall rules, and needs no CORS. Service 2 can stay locked down — see §6.
+
+**Two separate git repos:**
+
+| Service | Repo | Vercel root directory |
+|---|---|---|
+| 1 — Navio widget | `github.com/AiLabSportnavi/CortexKit` | **`kb-agent-langsmith-starter`** |
+| 2 — Partner Agent | `github.com/AiLabSportnavi/SportnaviPartnerRecomandationBot` | **`partner-recommendation-agent`** |
+
+⚠️ Setting **Root Directory** is mandatory for both. If you skip it, Vercel builds the empty
+repo root and every URL 404s.
+
+---
+
+## 2. What's already in the code (nothing to build)
+
+**Service 1 — widget:**
+- `components/navio/NavioWidget.tsx` — screen flow: greeting → consent → **menu** →
+  {FAQ chat | Partner chat | Kontaktformular | info}.
+- `components/navio/NavioMenu.tsx` — the **three** menu cards.
+- `app/widget/page.tsx` — mounts **two** eve clients: the KB agent (same-origin) and the
+  partner agent (`useEveAgent({ host: "/api/partner" })`).
+- `app/api/partner/[...path]/route.ts` + `lib/partner-proxy.ts` — the proxy (SSRF guard,
+  503 when unconfigured, SSE keep-alive).
+- `app/api/contact/route.ts` + `lib/contact/` — Salesforce contact form (server-only creds).
+- `agent/channels/eve.ts` — anonymous-but-origin-checked auth, BotID gate, 16 KB body cap.
+- `agent/agent.ts` — per-session token limits; routes via AI Gateway when `AI_GATEWAY_MODEL` is set.
 - `next.config.mjs` — `frame-ancestors` (who may embed) + hardening headers.
+- `public/launcher.js` — the one-line embed script.
 
-**Assumed plan:** Vercel **Pro**. Embed style: **launcher script + iframe**.
-
----
-
-## 1. Deploy + custom domain
-
-1. Put this repo under **git** (it isn't yet) and import the project into Vercel.
-2. Set the environment variables from `.env.example` in **Vercel → Settings → Environment
-   Variables** (Production + Preview). Azure keys are required; leave `AI_GATEWAY_MODEL`
-   blank until step 4; keep `BOTID_ENABLED`/`NEXT_PUBLIC_BOTID_ENABLED` `false` until step 3.
-3. Add the custom domain **`chat.sportnavi.de`** (Vercel → Settings → Domains) and point the
-   DNS `CNAME` at Vercel. The widget and API both live here; keeping it a dedicated subdomain
-   keeps the chatbot independent of the marketing site.
-4. Confirm `GET https://chat.sportnavi.de/eve/v1/health` returns `200` (always public).
+**Service 2 — partner agent:** its own eve app; see that repo's `CLAUDE.md`.
 
 ---
 
-## 2. Vercel Firewall — Origin allowlist + rate limiting (Layers 1–2)
+## 3. Environment variables
 
-Vercel → **Firewall → Custom Rules**. **Stage every rule as `Log` first**, review real
-traffic under Firewall → Traffic, then switch to the enforcing action.
+### Service 1 (Navio widget)
 
-**Rule A — Origin allowlist (deny foreign browsers).**
-- Match: request path starts with `/eve/v1/` **AND** header `Origin` **is not** one of
-  `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de`.
-- Action: **Deny**. (Leave requests with *no* `Origin` alone — same-origin GET streams omit
-  it; those are covered by rate limiting + BotID.)
+| Variable | Required | Notes |
+|---|---|---|
+| `AZURE_AI_CHATBOT_OPENAI_ENDPOINT` | ✅ | KB agent model |
+| `AZURE_AI_CHATBOT_API_KEY` | ✅ | |
+| `AZURE_AI_CHATBOT_DEPLOYMENT_NAME` | ✅ | e.g. `gpt-4.1` |
+| **`PARTNER_AGENT_HOST`** | ⬅ **new** | Service 2's URL, e.g. `https://partner.sportnavi.de`. **Unset ⇒ the "Partner finden" option returns 503** and the rest of the widget still works. |
+| `WIDGET_FRAME_ANCESTORS` | recommended | who may embed the iframe (default already allows sportnavi.de) |
+| `WIDGET_ALLOWED_ORIGINS` | only if cross-origin | extra browser origins allowed to call the API |
+| `BOTID_ENABLED` / `NEXT_PUBLIC_BOTID_ENABLED` | later | must match each other |
+| `AI_GATEWAY_MODEL` | recommended | activates the hard spend cap |
+| `LANGSMITH_*` | optional | EU endpoint; keep `LANGSMITH_RECORD_IO=false` |
+| `SALESFORCE_*` | for contact form | blank ⇒ simulate mode (no Case created) |
+| `NAVIO_MAX_INPUT_TOKENS_PER_SESSION` / `..._OUTPUT_...` / `NAVIO_MAX_REQUEST_BYTES` | optional | session/abuse budgets; sane defaults in code |
 
-**Rule B — Rate limit session creation (the expensive route).**
-- Match: `POST /eve/v1/session`. Keys: **IP + JA4**. Window 60s.
-- Start limit generous (e.g. 20/min), action **Log**; after review, set ~5–10× real peak and
-  action **429**.
-
-**Rule C — Rate limit follow-up messages.**
-- Match: `POST /eve/v1/session/` (the `:id` turns). Higher limit than B (a real chat sends
-  several messages). IP + JA4, 60s, `429` after review.
-
-**Rule D — Light limit on the stream.**
-- Match: `GET /eve/v1/session/*/stream`. Generous limit (reconnects are normal). `429` after review.
-
-> DDoS mitigation (Layer 0) is already on for every deployment — nothing to configure, and
-> blocked traffic isn't billed. Counters are **per region**, so treat these as shaping; the
-> true cost ceiling is the AI-Gateway budget (step 4).
+### Service 2 (Partner Agent)
+`AZURE_AI_CHATBOT_*`, `MEMORY_SUPABASE_URL`, `MEMORY_SUPABASE_SERVICE_ROLE_KEY` (service-role
+is mandatory — RLS is on with no policies), `EMBEDDING_API_URL`, `EMBEDDING_API_KEY`, plus
+optional `SENTRY_*` / `LANGSMITH_*`. See `.env.local.example` in that repo.
 
 ---
 
-## 3. Vercel BotID — invisible bot detection (Layer 3)
+## 4. Deploy order
 
-1. `botid` is already installed. The server gate (`checkBotId` from `botid/server`) and the
-   client init (`initBotId` from `botid/client/core`) are already wired in the code, both
-   env-gated off.
-2. Add the BotID proxy rewrites so the challenge is served first-party: wrap the export in
-   `next.config.mjs` with `withBotId` from **`botid/next/config`**, i.e.
-   `export default withBotId(withEve(nextConfig));` (per
-   <https://vercel.com/docs/botid/get-started>). Left out of the committed config so the
-   `withBotId`+`withEve` rewrite composition is validated on a real Vercel build before enabling.
-3. Enable Deep Analysis for the project (**Pro**, ~$1 / 1,000 protected session-starts).
-4. Set **both** flags to `true` in Vercel env: `BOTID_ENABLED` (server gate in
-   `agent/channels/eve.ts`) and `NEXT_PUBLIC_BOTID_ENABLED` (client init in the widget). They
-   must match, and `checkLevel` on client and server must agree.
-5. Because the widget is an iframe served from `chat.sportnavi.de`, the challenge and the API
-   call share that origin — no `extraAllowedHosts` needed, and nothing to add to sportnavi.de.
+1. **Deploy service 2 first** (it has no dependency on service 1). Note its production URL.
+2. **Deploy service 1**, setting `PARTNER_AGENT_HOST` to that URL.
+3. Add the custom domain(s) — e.g. `chat.sportnavi.de` for service 1.
+4. Redeploy service 1 after any env change (env is read at build/runtime, not hot-reloaded).
+
+Detailed steps: [`VERCEL-RUNBOOK.md`](VERCEL-RUNBOOK.md) (CLI) or
+[`VERCEL-DASHBOARD-GUIDE.md`](VERCEL-DASHBOARD-GUIDE.md) (dashboard).
 
 ---
 
-## 4. Vercel AI Gateway — the hard spend cap (Layer 5, non-negotiable)
+## 5. Vercel Firewall — origin allowlist + rate limits
 
-1. In the **AI Gateway** dashboard, add your **Azure OpenAI (EU)** deployment as a **BYOK**
-   provider (this keeps inference on your EU data path).
-2. Set a **budget** with a hard limit + alert threshold (per day/month). Past the limit the
-   gateway returns `402` and stops spending — your guaranteed cost ceiling.
-3. Set `AI_GATEWAY_MODEL` in Vercel env to the gateway model id backed by your Azure BYOK
-   provider (e.g. `openai/gpt-4.1`). The code then routes all model calls through the gateway.
-4. (Optional, follow-up) Attribute spend per visitor: thread the `snv_vid` visitor id
-   (already on `ctx.session.auth.current.attributes.visitorId`) into the model call's
-   `providerOptions.gateway.user` / `tags`. Not required for the cap to work.
+On **service 1**. Vercel → **Firewall → Custom Rules**. **Stage every rule as `Log` first**,
+review real traffic under Firewall → Traffic, then switch to enforcing.
 
-On Vercel, gateway auth is automatic via OIDC — no gateway key needed. Provider keys never
-reach the browser.
+**Rule A — Origin allowlist.** Path starts with `/eve/v1/` **AND** header `Origin` *exists*
+**AND** `Origin` is not one of `https://chat.sportnavi.de`, `https://www.sportnavi.de`,
+`https://sportnavi.de` → **Deny**.
+The *"Origin exists"* clause is deliberate: same-origin GET streams and health checks omit
+`Origin`, and denying those would break streaming.
+
+**Rule B — Rate limit session creation.** `POST /eve/v1/session`, keys IP + JA4, 60s window.
+Start generous (20/min) on **Log**, then ~5–10× real peak on **429**.
+
+**Rule C — Rate limit follow-up messages.** `POST /eve/v1/session/` — higher limit than B.
+
+**Rule D — Light limit on the stream.** `GET /eve/v1/session/*/stream` — generous
+(reconnects are normal).
+
+**Rule E — the new API routes.** Also cover **`/api/partner/`** (every partner turn goes
+through it) and **`/api/contact`** (the in-code limiter is per-instance and therefore *not*
+authoritative on serverless — the Firewall rule is the real control).
+
+> DDoS mitigation is automatic on every deployment and blocked traffic isn't billed.
+> Rate-limit counters are **per region**, so treat them as shaping; the true cost ceiling is
+> the spend cap (§7).
 
 ---
 
-## 5. Embed on sportnavi.de
+## 6. Locking down service 2
 
-Give the marketing-site team **one line** for any page:
+The browser never calls service 2 — only service 1's server does. So don't leave it open:
+
+- Give it a **separate domain** (e.g. `partner.sportnavi.de`) and don't publish it.
+- Add a Firewall rule allowing `/eve/v1/` only from service 1's egress, or require a shared
+  secret header, or use Vercel **Deployment Protection** with a bypass token that service 1
+  sends. (The proxy forwards request headers, so a shared-secret header is the simplest.)
+- At minimum, apply the same rate limits as §5.
+
+⚠️ **Not implemented yet** — today the proxy forwards to `PARTNER_AGENT_HOST` with no
+added credential. Track this before going public.
+
+---
+
+## 7. Spend cap — the real cost ceiling
+
+Both services call Azure OpenAI, so cap **both**.
+
+**Option A (works on any plan):** in the **Azure Portal** → your OpenAI resource → Model
+deployments → `gpt-4.1` → **Edit** → set a **Tokens-Per-Minute (TPM)** limit, and add a
+**Cost Management → Budget** with email alerts.
+
+⚠️ **Sizing matters, learned the hard way (2026-08-03):** the partner agent injects one
+profile block per partner into a single model call. At `maxPartners: 100` a dense city
+(Bochum) produced a ~42k-token tool result and a ~60–78k-token model call — **larger than the
+deployment's whole per-minute allowance**, so it returned 429 on *every* attempt regardless of
+spacing. `maxPartners` is now **40**. If you lower Azure TPM, re-check that a worst-case
+search still fits, or lower `maxPartners` to match.
+
+**Option B (Pro / multi-app):** Vercel **AI Gateway** — add Azure OpenAI (EU) as a **BYOK**
+provider, set a hard budget (past it the gateway returns `402` and stops spending), then set
+`AI_GATEWAY_MODEL` and redeploy. On Vercel, gateway auth is automatic via OIDC.
+
+---
+
+## 8. BotID — invisible bot detection
+
+1. `botid` is installed; server gate (`agent/channels/eve.ts`) and client init
+   (`app/widget/page.tsx`) are wired and env-gated off.
+2. Enable the challenge rewrites — wrap the export in `next.config.mjs`:
+   `export default withBotId(withEve(nextConfig));` (import from `botid/next/config`). Left
+   out of the committed config so the `withBotId`+`withEve` composition is validated on a real
+   Vercel build first.
+3. Enable **Deep Analysis** for the project (**Pro**; Hobby gets Basic only).
+4. Set **both** `BOTID_ENABLED` and `NEXT_PUBLIC_BOTID_ENABLED` to `true` — they must match.
+5. The widget is same-origin with the API, so no `extraAllowedHosts` and nothing to add on
+   sportnavi.de.
+
+---
+
+## 9. Embedding the widget on the website — complete workflow
+
+### 9.1 The one line
+
+Once service 1 is deployed and reachable at its domain, the marketing team adds **one tag**
+to any page (ideally the global layout/footer template so it appears site-wide):
 
 ```html
 <script src="https://chat.sportnavi.de/launcher.js" async></script>
 ```
 
-It adds the floating chat button and opens Navio in an iframe. Updates ship centrally by
-redeploying this project. `frame-ancestors` (in `next.config.mjs`, override via
-`WIDGET_FRAME_ANCESTORS`) already restricts embedding to Sportnavi.
+Nothing else. No build step, no npm package, no framework requirement — it works on plain
+HTML, WordPress/TYPO3, React, Vue, Angular.
+
+### 9.2 What that script actually does
+
+`public/launcher.js` is dependency-free and:
+
+1. **Derives its own origin** from its `src` (`document.currentScript`). The same file
+   therefore works on `chat.sportnavi.de`, a `*.vercel.app` preview, or `localhost` **with no
+   edits** — never hardcode the host.
+2. Injects the floating launcher button (ink background, brand-green icon).
+3. On click, opens an **iframe** pointing at `<same-origin>/widget`.
+4. Listens for a `postMessage` of `"snv-widget-close"` from the iframe to close the panel
+   (the widget's ✕ button sends it).
+5. Guards against double-mounting (`window.__navioLauncherMounted`).
+
+Because the iframe is served by the **same deployment** as the script, every call the widget
+makes (`/eve/v1/*`, `/api/partner/*`, `/api/contact`) is **same-origin** — no CORS anywhere.
+
+### 9.3 Required configuration for embedding
+
+| What | Where | Why |
+|---|---|---|
+| `WIDGET_FRAME_ANCESTORS` | service 1 env | **Who may embed the iframe.** Space-separated origins; enforced by the browser via `Content-Security-Policy: frame-ancestors` on `/widget` (set in `next.config.mjs`). Default: `'self' https://www.sportnavi.de https://sportnavi.de`. A site not listed **cannot display the widget**. |
+| `WIDGET_ALLOWED_ORIGINS` | service 1 env | Only if you serve the widget **cross-origin**. Normally leave blank — the iframe is same-origin. |
+| Firewall Rule A | Vercel dashboard | Blocks other sites' browser code from calling the API. |
+| `PARTNER_AGENT_HOST` | service 1 env | Makes the "Partner finden" menu option work. |
+
+### 9.4 End-to-end embedding checklist
+
+1. Deploy **service 2**; note its URL.
+2. Deploy **service 1** with `PARTNER_AGENT_HOST` = that URL + the Azure vars.
+3. Add domain `chat.sportnavi.de` to service 1; verify DNS (CNAME).
+4. Set `WIDGET_FRAME_ANCESTORS` to include every site that should display the widget; redeploy.
+5. Open `https://chat.sportnavi.de/widget` directly — the widget loads and answers.
+6. Give the marketing team the `<script>` tag from §9.1.
+7. On sportnavi.de, confirm the launcher button appears and the panel opens.
+8. Confirm the widget is **refused** in an iframe on a non-allow-listed test page.
+9. Flip Firewall Rule A from Log → Deny (see the preview-URL caveat in the dashboard guide).
+
+### 9.5 Adding another site later
+
+Append its origin to `WIDGET_FRAME_ANCESTORS` **and** to Firewall Rule A's allowlist, then
+redeploy. No code change.
 
 ---
 
-## 6. Verify before flipping rules to enforce
+## 10. Verify before flipping rules to enforce
 
 - **Health:** `GET /eve/v1/health` → 200 unauthenticated.
-- **Origin lock:** a `fetch("https://chat.sportnavi.de/eve/v1/session", {method:"POST"})` from
-  a non-Sportnavi page is denied; the same call from inside the widget works.
-- **Embed lock:** `<iframe src="https://chat.sportnavi.de/widget">` on a non-Sportnavi test
-  page is refused by the browser (`frame-ancestors`).
-- **Rate limit:** script `POST /eve/v1/session` past the threshold → `429` (after confirming
-  real usage stayed under the limit in Log mode).
-- **BotID:** a `curl`/headless call to `POST /eve/v1/session` is blocked in production; a real
-  browser in the widget passes with no visible challenge.
-- **Spend cap:** set a low test budget → the gateway returns `402` and stops once exceeded.
-- **Streaming:** drop the connection mid-answer → the widget reattaches and the answer finishes.
-- **Baseline still green:** `npm run typecheck` and `npm test`.
+- **FAQ chat:** answers a KB question from the menu.
+- **Partner chat:** "Yoga in Bochum" returns real partners **through `/api/partner/*`**
+  (allow 30–60s — see §11).
+- **Partner off-switch:** unset `PARTNER_AGENT_HOST` → that option 503s, the rest still works.
+- **Contact form:** submits (or logs in simulate mode) and creates a Salesforce Case.
+- **Origin lock:** `fetch()` to `/eve/v1/session` from a non-Sportnavi page is denied; the
+  same call inside the widget works.
+- **Embed lock:** `<iframe src=".../widget">` on a non-allow-listed page is refused.
+- **Rate limit / BotID / spend cap:** flood → 429; `curl` session-create blocked; test budget → 402.
+- **Streaming:** drop the connection mid-answer → the widget reattaches and finishes.
+- **Baseline:** `npm run typecheck` and `npm test` green in both repos.
 
 ---
 
-## 7. Also do from day one
+## 11. Operational notes (learned in testing, 2026-08-03)
 
-- Rotate the secrets currently committed in the repo `.mcp.json` (LangSmith + Stitch keys) and
-  move them to env config.
-- Keep LangSmith on **EU** with `LANGSMITH_RECORD_IO=false` (member data / GDPR).
-- Alert on Firewall blocks and AI-Gateway `429`/`402` — those are the early-warning signals.
+- **A partner search takes 30–60s** and streams **nothing** while the tool runs. The proxy
+  injects an SSE keep-alive comment every 15s (`lib/partner-proxy.ts`) because browsers drop
+  idle connections and surface it as `network error`. **Don't add a proxy/CDN that buffers or
+  times out event streams** — the route already sets `no-transform` and `X-Accel-Buffering: no`.
+- **Run one partner instance per Azure deployment.** Multiple copies share the same TPM quota.
+- **Empty bubble ≠ hang.** During the search the assistant bubble is empty; a progress
+  indicator is still an open UX item.
+- **Rotate the keys committed in the repo-root `.mcp.json`** (LangSmith + Stitch) and move
+  them to env config.
+- **Keep LangSmith on EU with `LANGSMITH_RECORD_IO=false`** (member data / GDPR).
+- **Alert on Firewall blocks and gateway 429/402** — the early-warning signals.

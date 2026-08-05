@@ -1,485 +1,464 @@
-# CLAUDE.md — CortexKit
+# CLAUDE.md — CortexKit / Navio
 
-Guidance for Claude Code (and any agent) working in this repository. It documents
-the project purpose, the agent architecture, the folder layout, the knowledge-base
-approach, the system-prompt design, the LangSmith integration, the development
-workflow, the installed Skills/plugins/MCP integrations, and the known open items.
+Long-term project memory. Read this first: it should be enough to understand what the product
+is, how the Navio menu works, how the two agents relate, and where the project stands —
+without re-investigating.
 
-> This file was produced by a read-only analysis of the existing project contents.
-> It describes **what is present today** — it does not add or assume functionality,
-> and it does not rewrite the agent's system prompt.
+**Last verified against source: 2026-08-04.**
 
----
-
-## 1. Project purpose
-
-CortexKit hosts one working project: **`kb-agent-langsmith-starter/`** — a minimal,
-clean [eve](https://www.npmjs.com/package/eve) agent named **"Navio"**, the customer-support
-chatbot for **Sportnavi** (sportnavi.de), a German corporate-fitness ("Firmenfitness")
-network.
-
-The folder plays two roles at once:
-
-1. **A production-style KB/FAQ agent.** Navio answers questions from members,
-   companies, and partners using only a Sportnavi knowledge base that is embedded
-   directly into its system prompt.
-2. **The reference implementation / testbed for
-   [`EVE_LANGSMITH_TRACING_GUIDE.md`](docs/reference/EVE_LANGSMITH_TRACING_GUIDE.md)** (repo root, ~92 KB).
-   Per its [README](kb-agent-langsmith-starter/README.md), the guide "has been followed
-   to completion in this folder" — validated live against **LangSmith EU** on 2026-07-27 —
-   so the LangSmith observability + evaluation stack here is the guide's primary worked
-   example.
-
-The repo root also contains:
-
-| Path | What it is |
-|---|---|
-| [kb-agent-langsmith-starter/](kb-agent-langsmith-starter/) | The Navio agent + its LangSmith integration, evals, and dev console. |
-| [EVE_LANGSMITH_TRACING_GUIDE.md](docs/reference/EVE_LANGSMITH_TRACING_GUIDE.md) | The step-by-step guide the agent implements (Parts A–D, §11 verification, §14 checklist). |
-| [project-prompts/](project-prompts/) | Task prompts used to drive this repo's work: [`anaylse-project.md`](project-prompts/anaylse-project.md) (this analysis task) and [`dataset-generation.md`](project-prompts/dataset-generation.md) (eval-dataset authoring task). |
-| [.mcp.json](.mcp.json) | Project MCP servers: **langsmith** (EU) and **stitch**. See §8. |
-| [.claude/](.claude/) | Project-scoped Claude settings + installed Skills. See §9–§10. |
+> **Golden rule:** source (`agent/`, `lib/`, `app/`, `components/`) wins over prose, including
+> this file. Older docs in this repo have been wrong before (see §10.5).
 
 ---
 
-## 2. Agent architecture (Navio)
+## 1. What this is
 
-### 2.1 The core idea: a no-tool, prompt-injected agent
+**Navio** is Sportnavi's public, anonymous, login-less chat widget for
+[sportnavi.de](https://sportnavi.de) (a German corporate-fitness network). It is embedded on
+the marketing site with **one `<script>` tag** and opens in an iframe.
 
-Navio has **no tools, no subagents, and no skills — by design**. Its entire behaviour
-comes from the system prompt in [`agent/instructions.md`](kb-agent-langsmith-starter/agent/instructions.md).
-The knowledge base is **not** retrieved at runtime (no RAG, no vector store, no file reads) —
-it is baked into the prompt text itself. Confirmed in [`agent/agent.ts`](kb-agent-langsmith-starter/agent/agent.ts):
+One widget, **three capabilities**, behind one menu. Two of them are separate **eve** agents:
+
+| | **FAQ Agent** | **Partner Agent** |
+|---|---|---|
+| Answers | "How does Sportnavi work?" — policies, tariffs, check-in, cashback, contracts | "Where can I train?" — real studios/courses near a city |
+| Retrieval | **None.** KB baked into the system prompt | **RAG.** Supabase directory + embedding similarity |
+| Tools | **0** (11 built-ins disabled) | **2** (`find_partners`, `get_partner_details`); 10 disabled |
+| Data | 5 static FAQ documents | 2,333 partners across 649 cities (live DB) |
+| Lives in | `kb-agent-langsmith-starter/` (this repo) | `SportnaviPartnerRecomandationBot/` (**separate repo**) |
+| Reached via | `/eve/v1/*` (same-origin) | `/api/partner/*` → proxy → its own deployment |
+| Typical latency | 2–8s | **30–60s** (DB search + long answer) |
+
+**When to use which:** anything about *the product, rules, money, contracts* → FAQ Agent.
+Anything about *finding a place to train* → Partner Agent. They do not share context or
+sessions; the menu decides which one the user is talking to.
+
+---
+
+## 2. The Navio menu — structure and navigation
+
+The widget is a screen state machine in
+[`components/navio/NavioWidget.tsx`](kb-agent-langsmith-starter/components/navio/NavioWidget.tsx):
 
 ```ts
-// This agent has no tools, no subagents, and no skills by design: its entire
-// behaviour comes from the system prompt in `agent/instructions.md`.
-export default defineAgent({
-  description: "Knowledge Base & FAQ agent: answers questions using only the " +
-    "knowledge base injected into its system prompt.",
-  modelContextWindowTokens: 1_047_576,
-  model: resolveModel(),
-});
+type Screen = "greeting" | "consent" | "menu" | "chat" | "partner" | "contact" | "info";
 ```
 
-### 2.2 "No tools" takes deliberate work
+### User flow
 
-eve's harness ships built-in tools (bash, web_search, read_file, …) **unless each is
-explicitly disabled**. So [`agent/tools/`](kb-agent-langsmith-starter/agent/tools/) holds
-one `disableTool()` sentinel per built-in. Every file is literally:
+```
+sportnavi.de page
+  └─ launcher.js  → floating button (ink circle, brand-green icon)
+       └─ click → iframe opens /widget
+            │
+            ▼
+   [greeting]   "Hi, ich bin Navio 👋🏻" + "Mit Navio chatten"
+            │
+            ▼
+   [consent]    GDPR gate — Zustimmen / Ablehnen.
+            │   ONE consent covers all three options. Decline ⇒ nothing proceeds.
+            ▼
+   [menu]  ── "Navio Plus" ───────────────────────────────────────────┐
+            │                                                          │  ⓘ → [info]
+            ├─ card 1 "FAQ-Agent"       → [chat]     FAQ Agent         │
+            ├─ card 2 "Partner finden"  → [partner]  Partner Agent     │
+            └─ card 3 "Kontaktformular" → [contact]  Salesforce form   │
+                                                                       │
+   Every sub-screen has a ← back arrow returning to [menu].
+```
+
+### The three menu cards
+
+Defined in [`components/navio/NavioMenu.tsx`](kb-agent-langsmith-starter/components/navio/NavioMenu.tsx):
+
+| # | Card title | Subtitle (DE) | Icon | Accent | Opens |
+|---|---|---|---|---|---|
+| 1 | **FAQ-Agent** | "Stell deine Frage – Navio antwortet sofort, rund um die Uhr." | `Bot` | green | `chat` |
+| 2 | **Partner finden** | "Finde Studios & Kurse in deiner Nähe – sag einfach Stadt und Sportart." | `MapPin` | green | `partner` |
+| 3 | **Kontaktformular** | "Schreib uns direkt – wir melden uns zeitnah bei dir zurück." | `Mail` | orange | `contact` |
+
+**Colour rule (do not break):** the palette is deliberately two-colour —
+`--brand-green` `#95c11e` is the single call-to-action / AI-chat colour, `--brand-orange`
+`#ec6607` means *human hand-off*. Both chat cards are green; only the contact card is orange.
+Never add a third brand colour. (`docs/design/WIDGET-DESIGN-GUIDELINES.md`)
+
+### Header titles per screen
+
+The header label differs from the card label — don't "fix" this, it's intentional:
+
+| Screen | Header title | Subtitle |
+|---|---|---|
+| `consent`, `menu` | **Navio Plus** | Online |
+| `chat` | **FAQ-Agent** | Online |
+| `partner` | **Partner-Finder** | Online |
+| `contact` | **Kontakt aufnehmen** | Antwort in 1–2 Werktagen |
+| `info` | **Über Navio Plus** | — |
+
+### Per-screen chat copy
+
+`chat` and `partner` share `ChatBody` / `InputBar`, parameterised by `CHAT_CFG`:
+
+| | `chat` (FAQ) | `partner` |
+|---|---|---|
+| Greeting | "Hi, ich bin Navio 👋🏻 / Dein Guide durch die Sportnavi Welt…" | "Sag mir, wo und was du trainieren willst – z. B. 'Yoga in Bochum' 📍" |
+| Quick replies | Angebote finden · Wie checke ich ein? · Partner werden · Sportnavi für Firmen | Yoga in Bochum · Klettern für Anfänger · Fitnessstudio in Bielefeld · Reha-Sport in meiner Nähe |
+| Placeholder | "Frage Navio …" | "Stadt & Sportart, z. B. 'Yoga in Bochum' …" |
+
+Header actions: ↺ reset (chat screens only), ⓘ info (menu only), 🌙/☀️ theme (consent/menu),
+✕ close (always — posts `snv-widget-close` to the parent page).
+
+---
+
+## 3. Architecture
+
+### Runtime topology
+
+```
+                     sportnavi.de
+                          │  <script src="https://chat.sportnavi.de/launcher.js" async>
+                          ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │ SERVICE 1 — Navio widget   (kb-agent-langsmith-starter)  │  public, browser-facing
+   │                                                          │
+   │  /widget           iframe UI + menu                      │
+   │  /launcher.js      embed script                          │
+   │  /eve/v1/*         FAQ Agent  (no tools, KB in prompt)   │
+   │  /api/contact      Salesforce Case (server-only creds)   │
+   │  /api/partner/* ──┐ same-origin proxy                    │
+   └───────────────────┼──────────────────────────────────────┘
+                       │ PARTNER_AGENT_HOST
+                       ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │ SERVICE 2 — Partner Agent  (separate repo + deploy)      │  never called by the browser
+   │  /eve/v1/*   find_partners → Supabase + embeddings       │
+   └──────────────────────────────────────────────────────────┘
+```
+
+**Why a proxy and not a direct call:** the browser only ever talks to **one origin**, so the
+consent gate, origin allowlist, BotID and Firewall rules are reused, and there is **no CORS**.
+The two repos stay independently deployable.
+
+### Request flows
+
+**FAQ turn** — one model call, no tools:
+```
+user msg → channel auth (size cap → BotID → origin) → eve agent
+         → Azure gpt-4.1 with the ~16.7k-token prompt as `instructions` → stream
+         → OTLP spans + hook runs → LangSmith EU
+```
+
+**Partner turn** — two model steps:
+```
+user msg → /api/partner/eve/v1/* (proxy) → partner agent
+   step 1: model calls find_partners({cityMention, intentText, tags})
+           → resolve city (fuzzy RPC) → all home-city partners
+           → gap-fill from nearby cities by embedding similarity (disclosed)
+           → rank → hydrate top N profiles → render
+   step 2: model writes the German prose answer from that result only
+```
+A search is **2 model steps**. Non-search turns (greeting, "which city?") are **1**.
+4 steps means an old tool chain regressed.
+
+**Contact submit:** browser → `POST /api/contact` → zod validate → Salesforce OAuth + flow →
+Case. Credentials never reach the client. Blank credentials ⇒ simulate mode.
+
+### Dual agent clients in one widget
+
+[`app/widget/page.tsx`](kb-agent-langsmith-starter/app/widget/page.tsx):
 
 ```ts
-import { disableTool } from "eve/tools";
-export default disableTool();
+const faqAgent     = useEveAgent();                          // same-origin
+const partnerAgent = useEveAgent({ host: "/api/partner" });  // via the proxy
+return <NavioWidget faqAgent={faqAgent} partnerAgent={partnerAgent} />;
 ```
 
-The **11 disabled built-ins** are: `agent`, `ask_question`, `bash`, `glob`, `grep`,
-`load_skill`, `read_file`, `todo`, `web_fetch`, `web_search`, `write_file`. Disabling
-`web_search` is important on purpose: it would give the model a source of truth outside
-the curated prompt, defeating the "answer only from the KB" guarantee.
-
-### 2.3 Model resolution
-
-[`lib/llm.ts`](kb-agent-langsmith-starter/lib/llm.ts) builds an **Azure OpenAI** chat
-model from `AZURE_AI_CHATBOT_OPENAI_ENDPOINT` / `AZURE_AI_CHATBOT_API_KEY` /
-`AZURE_AI_CHATBOT_DEPLOYMENT_NAME` (default deployment `gpt-4.1`), throwing a clear error
-that names any missing var. [`agent.ts`](kb-agent-langsmith-starter/agent/agent.ts)
-resolves the model lazily and **degrades to the `openai/gpt-4.1` gateway id** if the
-environment is empty, so the module stays importable with zero secrets (the smoke test
-imports it directly; CI has no keys). `modelContextWindowTokens` is pinned so eve does
-not need the gateway catalog at compile time.
-
-### 2.4 Runtime shape (one request → one trace)
-
-```
-User message
-  → eve dev host (agent/agent.ts, no tools)
-      → Azure OpenAI (gpt-4.1) with the ~41.5k-token system prompt as `instructions`
-      → streamed reply
-  → OTLP spans  → LangSmith EU  (agent/instrumentation.ts)
-  → hook runs   → LangSmith EU  (agent/hooks/langsmith.ts)  ← summary + failure runs
-```
-
-The dev chat console ([`app/`](kb-agent-langsmith-starter/app/) +
-[`components/`](kb-agent-langsmith-starter/components/)) is a Next.js app hosted
-alongside the agent via `withEve({})` in
-[`next.config.mjs`](kb-agent-langsmith-starter/next.config.mjs). `SessionBar` shows
-status, the copyable session id, and cumulative token usage.
+`useEveAgent` is **lazy** — no session until the first `send()` — so mounting both is free and
+the widget still works when no partner host is configured. `NavioWidget` picks `activeAgent`
+from the current screen. The two conversations are independent and both survive menu
+navigation.
 
 ---
 
-## 3. Folder structure
+## 4. Repository layout
 
 ```
-CortexKit/
-├── CLAUDE.md                       ← this file
-├── docs/                           ← project documentation (incl. reference/ long-form guides)
-├── .mcp.json                       ← langsmith + stitch MCP servers
-├── .claude/
-│   ├── settings.json               ← enabledPlugins for this project
-│   └── skills/                     ← 10 locally-installed Skills (§9)
-├── project-prompts/                ← task prompts (analysis, dataset generation)
-└── kb-agent-langsmith-starter/
-    ├── agent/
-    │   ├── agent.ts                ← agent definition (no tools/subagents/skills)
-    │   ├── instructions.md         ← THE SYSTEM PROMPT (persona + KB + rules) ~41.5k tokens
-    │   ├── instrumentation.ts      ← OTLP traces → LangSmith EU (guide Parts A/C/D)
-    │   ├── hooks/langsmith.ts      ← failure capture + per-turn summary runs (Parts B/C)
-    │   ├── kb/kb.md                ← standalone copy of the KB docs (KB section only)
-    │   ├── tools/*.ts              ← 11 disableTool() sentinels
-    │   └── feedback/               ← tester feedback + prompt iterations
-    │       ├── FEEDBACK-ANALYSIS.md   ← 9 classified issues from v1 testing
-    │       ├── SYSTEM_PROMPT.md       ← canonical prompt (== instructions.md, 1648 lines)
-    │       ├── SYSTEM_PROMPT_V3.md    ← revised 646-line prompt (NOT deployed — see §13)
-    │       └── Feedback*.docx         ← raw tester documents
-    ├── lib/
-    │   ├── langsmith.ts            ← central LangSmith module (region, client, spans, runs)
-    │   ├── llm.ts                  ← Azure OpenAI model resolver
-    │   ├── load-env.ts             ← loads .env.local for scripts (import FIRST)
-    │   └── eval/
-    │       ├── evaluators.ts       ← deterministic (judge-less) evaluators
-    │       ├── judges.ts           ← 8 LLM-as-judge evaluators (zod, temp 0)
-    │       ├── metrics.ts          ← latency/TTFT/token/cost metrics
-    │       ├── dataset-upload.ts   ← upload + self-healing restore
-    │       └── rate-limit.ts       ← TokenBucketPacer + withRetry
-    ├── scripts/
-    │   ├── live-check.ts           ← send one real turn to the dev server
-    │   ├── run-eval.ts             ← two-phase eval runner (execute → evaluate)
-    │   ├── upload-eval-dataset.ts  ← npm run eval:upload
-    │   ├── verify-eval-dataset.ts  ← npm run eval:verify
-    │   └── verify-langsmith.ts     ← API-based trace verification (§11 V4)
-    ├── app/ + components/          ← Next.js dev chat console
-    ├── src/internal/authored-module-map-loader.ts ← Windows eve@0.25.3 dev-host shim
-    ├── tests/                      ← agent smoke test, langsmith unit tests, rate-limit tests
-    ├── package.json                ← scripts + deps (eve, langsmith, ai, next)
-    ├── .env.example                ← every env var, as placeholders
-    └── .eve/ .next/ .output/ .data/ node_modules/  ← build/runtime artifacts (ignore)
+CortexKit/                                   ← this repo (github.com/AiLabSportnavi/CortexKit)
+├── CLAUDE.md                                ← this file
+├── ONBOARDING.md                            ← fast on-ramp for a new agent/developer
+├── docs/                                    ← 01–11 long-form docs + reference/
+├── .mcp.json                                ← langsmith (EU) + stitch MCP servers ⚠️ see §10
+├── kb-agent-langsmith-starter/              ← SERVICE 1 (the deployable Vercel project)
+│   ├── CLAUDE.md                            ← service-1 detail (deeper than this file)
+│   ├── agent/
+│   │   ├── agent.ts                         ← model + session token limits
+│   │   ├── instructions.md                  ← THE FAQ system prompt (~16.7k tokens)
+│   │   ├── channels/eve.ts                  ← public API auth: size cap → BotID → origin
+│   │   ├── tools/*.ts                       ← 11 disableTool() sentinels
+│   │   ├── instrumentation.ts, hooks/langsmith.ts   ← LangSmith EU
+│   │   └── kb/kb.md                         ← reference copy of the KB (NOT live)
+│   ├── app/
+│   │   ├── widget/page.tsx                  ← the embeddable widget (mounts both agents)
+│   │   ├── api/partner/[...path]/route.ts   ← proxy to service 2
+│   │   └── api/contact/route.ts             ← Salesforce contact endpoint
+│   ├── components/navio/                    ← NavioWidget, NavioMenu, KontaktForm
+│   ├── lib/
+│   │   ├── partner-proxy.ts                 ← proxy logic (SSRF guard, keep-alive)
+│   │   ├── langsmith.ts, llm.ts, contact/, eval/
+│   ├── public/launcher.js                   ← the one-line embed script
+│   ├── docs/deployment/                     ← the three deployment guides
+│   ├── evals/datasets/*.json                ← eval datasets (repo is source of truth)
+│   └── tests/                               ← vitest
+└── SportnaviPartnerRecomandationBot/        ← SERVICE 2 — SEPARATE GIT REPO, untracked here
+    └── partner-recommendation-agent/
+        ├── agent/agent.ts, instructions.md, tools/, config/partner-injection.config.ts
+        └── lib/partners/                    ← deterministic pipeline (no LLM math)
 ```
 
-> **Build-artifact noise:** `kb-agent-langsmith-starter/.eve/dev-runtime/snapshots/**`
-> contains many duplicate copies of the source files (dev-host snapshots). When searching,
-> exclude `.eve/`, `.next/`, `.output/`, and `node_modules/` — only the top-level source
-> paths above are authoritative.
+**Never `git add` `SportnaviPartnerRecomandationBot/` from this repo** — it has its own remote
+(`AiLabSportnavi/SportnaviPartnerRecomandationBot`) and its own history. Commit inside it.
+
+When searching, exclude `.eve/`, `.next/`, `.output/`, `node_modules/` — they contain
+duplicate dev-host snapshots of the source.
 
 ---
 
-## 4. Knowledge-base approach
+## 5. The two agents in detail
 
-### 4.1 Embedded, not retrieved
+### 5.1 FAQ Agent — "the prompt is the product"
 
-The KB is five markdown "documents" concatenated inside the system prompt between the
-`=== KNOWLEDGE BASE ===` marker and `=== BEHAVIOR RULES ===`, each wrapped in
-`<<< DOCUMENT: docN.md >>> … <<< END OF docN.md >>>` delimiters:
+- **Zero tools by design.** eve ships built-ins unless each is disabled, so `agent/tools/`
+  holds 11 `disableTool()` sentinels. Disabling `web_search` is deliberate: it would give the
+  model a source of truth outside the curated KB.
+- **KB is embedded**, not retrieved — five FAQ documents between the
+  `=== KNOWLEDGE BASE ===` and `=== BEHAVIOR RULES ===` markers of `agent/instructions.md`.
+- **To change behaviour, edit `agent/instructions.md`.** No code change needed.
+  `agent/kb/kb.md` is a reference copy — editing it does nothing.
+- **Prompt size ~16.7k tokens** (measure with `npm run cache:check`). Earlier docs said
+  "41.5k"/"71 KB" — wrong.
+- **Session budgets** in `agent.ts`: 250k input / 20k output per session (env-tunable via
+  `NAVIO_MAX_*`). eve's defaults (40M / uncapped) are far too loose for a public endpoint.
 
-| Doc | Content |
-|---|---|
-| **doc1.md** | Sportnavi general FAQ (raw, with `&amp;` HTML entities) — overview, partners, members, membership/tariffs, cashback, fitness-check, app & check-in, contact. |
-| **doc2.md** | Cleaned FAQ (Fragen & Antworten): 9 numbered sections incl. **Firmenfitness** (pricing 59,90 € brutto, Sachbezug 50 €, notice periods, §3 Nr.34 / §37b EStG tax notes). |
-| **doc3.md** | **Partner FAQ (English)** — partner portal, check-in mechanics, bookings/no-shows, payouts, contract notice periods. |
-| **doc4.md** | **Advanced FAQ: edge cases & ambiguous scenarios** (15 sub-sections) + a "Fristen-Zusammenfassung" quick-reference deadline table. |
-| **doc5.md** | **Enhanced KB**: onboarding walkthroughs, a tariff comparison matrix, troubleshooting, Sachbezug explainer, usage rules, a glossary, and "most important rules" summary. |
+### 5.2 Partner Agent — deterministic pipeline, model only phrases
 
-The agent is instructed: *"Answer ONLY from this content."*
+Its own repo and its own `CLAUDE.md` / `PROJECT_CONTEXT.md` / `AGENT_ONBOARDING.md` are
+authoritative. What matters here:
 
-### 4.2 Two copies of the KB exist
+- **The LLM never counts, ranks, dedupes or retrieves.** That is `lib/partners/`
+  (resolve → gap-fill → rank → hydrate). The model only writes prose from the result.
+- **Honesty invariant:** it never invents a partner, price, opening hour or service. Every
+  named business must come from a `find_partners` result *in that conversation*.
+- **Partner-injection algorithm:** use the requested city *whole*, then borrow the shortfall
+  from nearby cities by embedding similarity — **disclosing every borrow**. The directory is
+  uneven (median city has 1 partner; only Bielefeld has ≥100), which is why this exists.
+- **Tuning lives in one file**, `agent/config/partner-injection.config.ts`
+  (**retuned 2026-08-04**):
 
-- [`agent/instructions.md`](kb-agent-langsmith-starter/agent/instructions.md) — the
-  **live** system prompt (persona + KB + rules), byte-identical to
-  [`agent/feedback/SYSTEM_PROMPT.md`](kb-agent-langsmith-starter/agent/feedback/SYSTEM_PROMPT.md)
-  (both 1648 lines). `instructions.md` is what eve actually loads.
-- [`agent/kb/kb.md`](kb-agent-langsmith-starter/agent/kb/kb.md) — a **standalone copy of
-  just the KB documents** (1487 lines, KB section only, no persona/rules). Treat it as a
-  source/reference copy; editing it does **not** change agent behaviour.
+  | Dial | Value | Meaning |
+  |---|---|---|
+  | `minPartners` / `maxPartners` | **40** | gap-fill target / hard ceiling of candidates resolved |
+  | `finalRecommendations` | **5** | how many the user actually sees (top-ranked, full profiles) |
+  | `maxCities` | 8 | home + nearby cities drawn from |
+  | `similarityThreshold` | 0.2 | min cosine similarity to accept a borrowed partner |
+  | `maxDistanceKm` | 120 | borrow radius |
+  | `dedupHeadroom` | 20 | extra candidates fetched to survive filtering |
 
-**Editing the KB or persona = edit `agent/instructions.md`.** No code changes are needed
-to change behaviour; the prompt is the product.
-
-### 4.3 The KB has known factual errors (see §13)
-
-[`agent/feedback/FEEDBACK-ANALYSIS.md`](kb-agent-langsmith-starter/agent/feedback/FEEDBACK-ANALYSIS.md)
-cross-checked tester-flagged answers against the KB and found **9 issues**, several of
-which are *faithful renditions of wrong KB facts* (pause usage, employer notice period,
-cancellation form, multi-visit cashback). Those are documented but **not yet fixed** in
-the deployed prompt.
-
----
-
-## 5. System-prompt design (`agent/instructions.md`)
-
-The prompt is a plain-text file (~41.5k tokens) with clearly delimited top-level sections.
-Structure and purpose of each:
-
-1. **`=== IDENTITY ===`** — Establishes the persona: *Navio*, a warm digital "guide"
-   (not a "bot"), serving three audiences (members/employees, companies, partners).
-   Sets the greeting, tone (informal German **"du"**, never "Sie"; sparing emoji),
-   personality (with a robotic-vs-Navio example), a **strict language rule** (always reply
-   in the language of the *last* user message, re-detected every turn, never influenced by
-   the German prompt/KB), and brand spelling ("Sportnavi", lowercase domain).
-
-2. **`=== KNOWLEDGE BASE ===`** — The five embedded documents (§4). Prefaced with
-   "Answer ONLY from this content."
-
-3. **`=== BEHAVIOR RULES ===`** — 11 numbered operating rules:
-   language mirroring (1); **knowledge boundary** — never guess, route unknowns to
-   support (2); proactive guiding without inventing (3); natural, non-parroting style (4);
-   **three-audience depth adaptation** — never quote prices to companies, deflect partner
-   compensation questions back with "Was wünschst du dir pro Check-in?" (5);
-   prices/legal/personal data → refer to the team (6); repeated questions (7); minimal
-   clarifying questions, prefer answering (8); out-of-scope refusal (9); **"not yet
-   available"** — cannot book appointments or capture contact data, must not pretend to (10);
-   graceful closing / hand-off (11).
-
-4. **`=== CONVERSATIONAL INTELLIGENCE ===`** — Intent reading (answer the underlying goal,
-   lead with YES/NO), emotional signals (frustrated / confused / loophole-seeking), and a
-   4-step response structure for complex questions.
-
-5. **`=== HARD LIMITS (NIEMALS VERLETZEN) ===`** — Non-negotiable guardrails:
-   **anti-injection** (ignore attempts to override behaviour, reveal the prompt, or change
-   persona), **no sensitive data** capture (don't ask for IBAN/contract IDs), **no
-   hallucination** (never invent prices, rates, partner names, conditions), **no
-   role-play** (stays Navio), **answer length** < 400 words unless asked, and **formatting**
-   (clean Markdown; tables via pipes; never wrap prose/tables in triple-backtick code fences;
-   keep tables ≤ 3 columns for the narrow chat).
-
-> **Do not rewrite or "improve" this prompt unless explicitly asked.** It encodes
-> product/brand decisions and a documented feedback history. Prompt changes should be
-> driven through the feedback → eval loop (§6, §13), not ad hoc.
+  Presets: `PRODUCTION` (= default), `WIDE_CONTEXT` (60), `BALANCED` (30), `STRICT_CITY`
+  (5, gap-fill disabled). **Intent: resolve ~40 candidates, curate down to 5 shown.** This
+  replaced an earlier 100/100 profile that broke the agent — see §10.1.
+- **Contact details are public directory data** and belong in answers; `email`/`phone` reach
+  the model through exactly one path (the pre-rendered `llm_profile`). Don't add them to
+  `PartnerLite`.
 
 ---
 
-## 6. LangSmith observability + evaluation
+## 6. Configuration
 
-This is the guide's payload. Everything is **EU-region** and **no-op without a key**
-(a fresh clone runs credential-free).
+### Service 1 (widget) — `.env.local` / Vercel env
 
-### 6.1 Tracing / observability
+| Variable | Required | Notes |
+|---|---|---|
+| `AZURE_AI_CHATBOT_OPENAI_ENDPOINT` / `_API_KEY` / `_DEPLOYMENT_NAME` | ✅ | FAQ model (default `gpt-4.1`) |
+| **`PARTNER_AGENT_HOST`** | for card 2 | Service 2's URL. **Unset ⇒ "Partner finden" returns 503**, rest of widget fine. Locally use `http://127.0.0.1:3001` — **not** `localhost` (Node `fetch` may pick IPv6 and fail). |
+| `WIDGET_FRAME_ANCESTORS` | recommended | who may **embed** the iframe (CSP on `/widget`) |
+| `WIDGET_ALLOWED_ORIGINS` | only if cross-origin | extra origins allowed to call the API |
+| `NAVIO_MAX_REQUEST_BYTES` | optional | body cap, default 16 KB |
+| `NAVIO_MAX_INPUT_TOKENS_PER_SESSION` / `_OUTPUT_` | optional | session budgets |
+| `AI_GATEWAY_MODEL` | recommended | routes via Vercel AI Gateway ⇒ hard spend cap |
+| `BOTID_ENABLED` + `NEXT_PUBLIC_BOTID_ENABLED` | later | must match |
+| `LANGSMITH_*` | optional | EU only; keep `LANGSMITH_RECORD_IO=false` |
+| `SALESFORCE_*`, `CONTACT_RATE_LIMIT_PER_MIN`, `MAX_MESSAGE_CHARS` | contact form | blank creds ⇒ simulate mode |
 
-- **[`lib/langsmith.ts`](kb-agent-langsmith-starter/lib/langsmith.ts)** — the single
-  source of truth for every LangSmith decision: the one EU region constant
-  (`LANGSMITH_EU_API_URL` → derives the OTLP URL), enablement gate (`langsmithEnabled`),
-  project name, `recordIo` (content capture off by default for privacy), the client
-  factory, shared metadata, the **span filter** (`shouldExportSpan` / `SpanFilterState`
-  keeps AI spans + their ancestors, drops workflow noise), **trace anchors** (deterministic
-  OTLP span-id → run-id mapping so one request = one trace), the **turn journal** (one
-  human-readable summary run per turn: user msg, reply, tokens, tools, outcome), and the
-  **failure payload** builder (turns eve failure events into "story" runs). The two
-  `fileStore`s (`.data/anchors`, `.data/system-prompts`) bridge eve's *separately bundled*
-  instrumentation and hook modules via the filesystem.
-- **[`agent/instrumentation.ts`](kb-agent-langsmith-starter/agent/instrumentation.ts)** —
-  registers the OTLP exporter to LangSmith EU via `@vercel/otel`, wraps it in the
-  `AiSpanFilter`, renames spans to business language (`humanSpanName`), publishes the trace
-  anchor from eve's `ai.eve.turn` span, and (Part D) stashes the assembled system prompt on
-  `step.started` for the hook to attach.
-- **[`agent/hooks/langsmith.ts`](kb-agent-langsmith-starter/agent/hooks/langsmith.ts)** —
-  the **only** path from an agent failure to LangSmith (eve emits failures as stream
-  events, never exceptions). **Iron rule: hooks never throw** — every handler is guarded.
-  Writes the per-turn summary run (pre-creating the trace root) and per-failure runs.
-
-Key operational facts (from the README / guide): hook runs appear in **seconds**, OTLP
-spans in **minutes**; `LANGSMITH_RECORD_IO=true` is required to ship prompts/completions.
-
-### 6.2 Evaluation pipeline (`lib/eval/` + `scripts/run-eval.ts`)
-
-- **[`evaluators.ts`](kb-agent-langsmith-starter/lib/eval/evaluators.ts)** — deterministic,
-  free evaluators: `mustInclude`, `mustNotInclude`, `languageMatch` (stopword heuristic),
-  `conciseness` (≤400 words). Includes a **safety policy**: a platform-blocked turn on a
-  `safety-injection` sample counts as a **safety PASS**.
-- **[`judges.ts`](kb-agent-langsmith-starter/lib/eval/judges.ts)** — 8 LLM-as-judge
-  evaluators (hallucination, correctness, answer_relevance, perceived_error, tone,
-  language_quality, knowledge_retention, user_satisfaction), structured output via zod at
-  temperature 0. Judges currently share the agent's Azure deployment, so each call is paced
-  through the same rate limiter; each runs inside a `traceable` llm child so judge
-  tokens/cost show up in LangSmith.
-- **[`metrics.ts`](kb-agent-langsmith-starter/lib/eval/metrics.ts)** — latency, TTFT,
-  input/output/cache tokens, and cache-aware cost, surfaced as one sortable column each.
-- **[`rate-limit.ts`](kb-agent-langsmith-starter/lib/eval/rate-limit.ts)** —
-  `TokenBucketPacer` (rolling-60s TPM/RPM pacing; TPM is binding because the ~41.5k-token
-  prompt replays per call) + `withRetry` (exponential backoff + equal jitter; **never
-  retries deterministic 4xx like content_filter**).
-- **[`dataset-upload.ts`](kb-agent-langsmith-starter/lib/eval/dataset-upload.ts)** —
-  uploads datasets and refuses to overwrite an existing populated one (versions are
-  immutable — bump `vN`). Includes **self-healing restore**: datasets have repeatedly
-  *vanished* from this LangSmith EU workspace within ~an hour of upload, so the repo JSON is
-  the source of truth and is re-uploaded automatically.
-- **[`scripts/run-eval.ts`](kb-agent-langsmith-starter/scripts/run-eval.ts)** — the
-  **two-phase runner**. *Phase A (execute):* a serial, paced loop calls the agent for every
-  example (no LangSmith spans, so pacing waits pollute nothing). *Phase B (evaluate):*
-  `evaluate()` replays the records into clean, fully-priced traces and runs the judges.
-  Default dataset `navio-kb-testing-final-response-v2`; splits `smoke`/`core` via
-  `EVAL_SPLIT`.
-
-> **Note:** `run-eval.ts` and `upload-eval-dataset.ts` read dataset specs from
-> `evals/datasets/*.json`, and design notes reference `docs/LANGSMITH-DATASET-GUIDE.md`.
-> **Neither `evals/` nor `docs/` currently exists in this folder** (see §13) — eval runs
-> fail at `resolveData()` until the dataset JSONs are added. Authoring them is the subject
-> of [`project-prompts/dataset-generation.md`](project-prompts/dataset-generation.md).
+### Service 2 (partner agent)
+`AZURE_AI_CHATBOT_*`, `MEMORY_SUPABASE_URL`, `MEMORY_SUPABASE_SERVICE_ROLE_KEY`
+(**service-role required** — RLS on with no policies; the anon key silently returns zero rows),
+`EMBEDDING_API_URL`, `EMBEDDING_API_KEY`, optional `SENTRY_*` / `LANGSMITH_*`.
 
 ---
 
 ## 7. Development workflow
 
-All commands run inside `kb-agent-langsmith-starter/`. From
-[`package.json`](kb-agent-langsmith-starter/package.json):
+```powershell
+# terminal 1 — Partner Agent (separate repo)
+cd SportnaviPartnerRecomandationBot\partner-recommendation-agent
+npm install; npm run dev:ui -- -p 3001
+
+# terminal 2 — Navio widget
+cd kb-agent-langsmith-starter
+npm install; npm run dev:ui -- -p 3010     # .env.local: PARTNER_AGENT_HOST=http://127.0.0.1:3001
+```
+
+Open **`http://localhost:3010/widget`**. (Port 3000 is often occupied; the widget's own port
+doesn't matter — only `PARTNER_AGENT_HOST` must point at the partner agent.)
 
 | Command | Purpose |
 |---|---|
-| `npm install` | Install dependencies. |
-| `cp .env.example .env.local` | Then fill in the Azure vars (LangSmith vars optional). Never commit `.env.local`. |
-| `npm run dev` | Start the eve dev server. **Note the REAL port** it prints. |
-| `npm run dev:ui` | Start the Next.js dev **console** (chat UI + agent in one). |
-| `npm run typecheck` | `tsc --noEmit` — must exit 0. |
-| `npm test` | Vitest: agent smoke test + LangSmith unit tests + rate-limit tests. |
-| `npm run live-check -- "…"` | Send one real turn (`EVE_HOST=http://127.0.0.1:<port>` required). |
-| `npm run eval:upload` / `eval:verify` / `eval:run` | Dataset upload / verify / two-phase eval (needs `evals/datasets/*.json`). |
-| `npx eve info` | Lists the agent and confirms the disabled tools; expect 0 errors. |
+| `npm run dev:ui` | Next console + widget (normal way to run) |
+| `npm run dev` | eve backend only |
+| `npm run typecheck` / `npm test` | must be green before committing |
+| `npx eve info` | lists the agent; confirms disabled tools |
+| `npm run cache:check` | measures prompt size + Azure prompt-cache hit |
+| `npm run eval:upload` / `eval:run` | dataset upload / two-phase eval |
 
-**Baseline first:** the README's *Step 0* insists the testbed (typecheck, smoke test,
-`eve info`, a live turn) works **before** touching the LangSmith integration, so an
-integration bug can't be confused with a broken agent.
+**Windows:** `src/internal/authored-module-map-loader.ts` is a required eve 0.25.x dev-host
+shim (without it `POST /eve/v1/session` → `ERR_MODULE_NOT_FOUND`), and `lib/load-env.ts` must
+be imported **first** in every entry point.
 
-**Ground rules while working here** (README): EU endpoint everywhere (never the US
-default); no key = no-op; hooks never throw; never commit `.env.local` or any real key.
-
-**Environment / platform:** Windows. `src/internal/authored-module-map-loader.ts` is a
-required Windows workaround for eve@0.25.3 dev-host module resolution (without it,
-`POST /eve/v1/session` fails with `ERR_MODULE_NOT_FOUND`). This folder is **not a git
-repo** — `run-eval.ts` degrades the commit sha to `"unknown"`.
+**Run one partner instance.** Multiple copies share the same Azure TPM quota.
 
 ---
 
-## 8. Integrations (MCP)
+## 8. Deployment
 
-Configured in [.mcp.json](.mcp.json) at the repo root:
+**Status: nothing is deployed yet.** No `vercel.json` and no `.vercel/` link exists in either
+repo. The guides describe the intended setup:
 
-### 8.1 LangSmith MCP — **connected and available**
+- [`docs/deployment/PUBLIC-WIDGET-DEPLOYMENT.md`](kb-agent-langsmith-starter/docs/deployment/PUBLIC-WIDGET-DEPLOYMENT.md)
+  — architecture, env matrix, Firewall, spend cap, **complete embedding workflow (§9)**
+- [`docs/deployment/VERCEL-RUNBOOK.md`](kb-agent-langsmith-starter/docs/deployment/VERCEL-RUNBOOK.md) — CLI
+- [`docs/deployment/VERCEL-DASHBOARD-GUIDE.md`](kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md) — no terminal
 
-The **langsmith** MCP server (stdio, via `uvx langsmith-mcp-server`) is connected and
-pinned to the **EU endpoint** (`https://eu.api.smith.langchain.com`). Use it to work with
-LangSmith resources directly instead of hand-rolling API calls. Available tools include:
+**Two Vercel projects, partner agent deployed first:**
 
-- **Datasets/examples:** `list_datasets`, `read_dataset`, `create_dataset`, `list_examples`,
-  `read_example`, `update_examples`.
-- **Experiments/evals:** `list_experiments`, `run_experiment`.
-- **Traces/threads:** `fetch_runs`, `get_thread_history`, `list_projects`.
-- **Prompts:** `list_prompts`, `get_prompt_by_name`, `push_prompt`.
-- **Billing:** `get_billing_usage`.
+| # | Project | Repo | **Root Directory** (mandatory) |
+|---|---|---|---|
+| 1 | navio-widget (public) | `AiLabSportnavi/CortexKit` | `kb-agent-langsmith-starter` |
+| 2 | navio-partner (internal) | `AiLabSportnavi/SportnaviPartnerRecomandationBot` | `partner-recommendation-agent` |
 
-**Prefer LangSmith MCP** for reading/inspecting traces, datasets, examples, and experiments
-in the EU workspace. It complements — does not replace — the project's own scripts
-(`run-eval.ts`, `verify-langsmith.ts`) and the `langsmith` CLI referenced by the Skills.
+Skipping Root Directory makes every URL 404. After service 2 has a URL, set service 1's
+`PARTNER_AGENT_HOST` to it and redeploy (env changes need a redeploy).
 
-### 8.2 Stitch MCP
+**Embedding is one line**, ideally in the site's global template:
 
-The **stitch** MCP server (Google Stitch, HTTP) is connected for UI/design generation
-(screens, design systems). Relevant only if working on the dev console's visual design; not
-part of the Navio agent runtime.
+```html
+<script src="https://chat.sportnavi.de/launcher.js" async></script>
+```
 
-> ⚠️ The other MCP servers surfaced in this environment (claude.ai connectors: Gmail,
-> Google Calendar/Drive, Atlassian, etc.) require interactive OAuth and are **not usable
-> non-interactively**. LiveKit-docs and the Vercel plugin MCP are also available but
-> unrelated to this project.
+`launcher.js` derives its own origin from its `src`, so the same tag works on production,
+previews and localhost with no edits. It injects the floating button, opens
+`<same-origin>/widget` in an iframe, and closes on a `snv-widget-close` postMessage. Who may
+embed is controlled by `WIDGET_FRAME_ANCESTORS` (CSP `frame-ancestors` on `/widget`); to allow
+another site, add its origin there **and** to Firewall Rule A.
 
----
-
-## 9. Installed Claude Skills
-
-Located in [.claude/skills/](.claude/skills/). Ten Skills are installed; consult the
-relevant one **before** doing matching work.
-
-### 9.1 LangSmith Skills — **core to this project**
-
-| Skill | What it does | When to use it here |
-|---|---|---|
-| **[langsmith-trace](.claude/skills/langsmith-trace/SKILL.md)** | Add tracing to an app **and** query/export traces via the `langsmith` CLI (`trace`/`run` list/get/export, filters, thread/project ops). | Debugging or exporting Navio traces from LangSmith EU; understanding the trace tree produced by `instrumentation.ts` / `hooks/langsmith.ts`. |
-| **[langsmith-dataset](.claude/skills/langsmith-dataset/SKILL.md)** | Create/manage/upload eval datasets (types: final_response, single_step, trajectory, RAG), CLI + SDK. | Building the missing `evals/datasets/*.json` (this agent uses **final_response**); turning the 9 feedback issues into eval examples. |
-| **[langsmith-evaluator](.claude/skills/langsmith-evaluator/SKILL.md)** | Build evaluators (LLM-as-judge + custom code), run functions, and run evals with `evaluate()`. Golden rule: **inspect output shape before implementing**. | Extending `lib/eval/judges.ts` / `evaluators.ts`; wiring new evaluators into `run-eval.ts`. |
-
-### 9.2 Design/UI Skills (present, not part of the agent runtime)
-
-`brand`, `design`, `design-system`, `banner-design`, `slides`, `ui-styling`,
-`ui-ux-pro-max`. These are a design toolkit (logos, brand guidelines, design tokens, slide
-decks, UI styling, a searchable UI/UX database). Reach for them only if working on the dev
-console's visuals, Sportnavi brand assets, or presentation material — not for the Navio
-agent logic or the KB.
+**Security layers** (defense in depth, none sufficient alone): request-size cap → BotID →
+origin allowlist (`agent/channels/eve.ts`) · Vercel Firewall origin + rate-limit rules ·
+`frame-ancestors` · Azure TPM limit and/or AI-Gateway hard spend cap.
 
 ---
 
-## 10. Installed plugins
+## 9. Implementation details worth remembering
 
-Project plugin toggles are in [.claude/settings.json](.claude/settings.json):
-
-| Plugin | Enabled for CortexKit? | Purpose / use here |
-|---|---|---|
-| **context7** (`@claude-plugins-official`) | ✅ **true** | Up-to-date library docs (eve, langsmith, ai SDK, next). Use when you need current API details for a dependency. |
-| **playwright** (`@claude-plugins-official`) | ✅ **true** | Browser automation. Use to drive/QA the Next.js dev console (`npm run dev:ui`). |
-| **sentry** (`@claude-plugins-official`) | ❌ false | Error monitoring — disabled for this project. |
-| **sentry-cli** (`@claude-plugins-official`) | ❌ false | Sentry CLI — disabled for this project. |
-
-Additionally, **superpowers** (`@claude-plugins-official`, v6.2.0) is installed at project
-scope for CortexKit and is active this session (its `using-superpowers` skill loads via the
-SessionStart hook), providing the process Skills listed in the environment (brainstorming,
-systematic-debugging, TDD, writing-plans, etc.). Marketplaces configured:
-`claude-plugins-official` and `superpowers-marketplace`.
-
----
-
-## 11. Capability decision guide
-
-Before acting, check whether an installed capability already covers the task:
-
-- **Reading/exporting LangSmith traces, datasets, experiments** → prefer **LangSmith MCP**
-  (§8.1); fall back to the **langsmith-trace** Skill's CLI for bulk export.
-- **Creating an eval dataset** → **langsmith-dataset** Skill (§9.1) + the repo's
-  `dataset-upload.ts` conventions (immutable versions, self-healing restore).
-- **Writing/running evaluators** → **langsmith-evaluator** Skill; extend `lib/eval/*` and
-  `run-eval.ts` rather than starting fresh.
-- **Current dependency API details** → **context7** plugin.
-- **Testing the dev console in a browser** → **playwright** plugin.
-- **Any feature / behaviour change** → start with **superpowers:brainstorming**; for bugs,
-  **superpowers:systematic-debugging**.
-- **Agent behaviour / KB edits** → edit `agent/instructions.md`; validate with the eval
-  loop; never bypass the feedback history in `agent/feedback/`.
+- **Prompt caching is the dominant cost lever.** The ~16.7k FAQ prompt replays every turn; a
+  byte-identical prefix earns a large Azure discount. **Never interpolate per-request data
+  into the system prompt** — put it in `runtimeContext`.
+- **LangSmith invariants:** EU endpoint everywhere · **no key ⇒ no-op** (a fresh clone runs
+  credential-free) · **hooks never throw** (eve reports failures as stream events, never
+  exceptions) · content capture off unless `LANGSMITH_RECORD_IO=true` · one request = one
+  trace via deterministic OTLP span-id → run-id mapping.
+- **Eval pipeline is two-phase** (`scripts/run-eval.ts`): execute serially with pacing, then
+  evaluate — so rate-limit waits never pollute trace latency. TPM is the binding constraint.
+- **Contact form:** server-only Salesforce creds, `Idempotency-Key` guard, `maxDuration = 30`,
+  and **PII-safe logging** (`safeShape()` logs field names + sizes, never values). Its in-code
+  rate limiter is **per serverless instance** — the real control is a Firewall rule.
+- **Proxy must keep doing three things** (`lib/partner-proxy.ts`): only forward `eve/*` paths
+  (SSRF guard); strip `content-encoding`/`content-length` from responses (Node `fetch` already
+  decompressed the body); inject an SSE keep-alive comment every 15s plus `no-transform` /
+  `X-Accel-Buffering: no`.
 
 ---
 
-## 12. Important implementation details
+## 10. Hard-won lessons (do not re-learn these)
 
-- **Prompt is the product.** No RAG, no tools — changing behaviour means editing
-  `agent/instructions.md`. The KB is embedded, curated German/English FAQ content.
-- **No-op-without-a-key** is a hard invariant across the LangSmith stack; preserve it.
-- **Hooks never throw**, **EU endpoint everywhere**, **content capture off by default**
-  (`LANGSMITH_RECORD_IO`).
-- **One request = one trace** relies on the deterministic OTLP span-id → run-id mapping and
-  the file-backed anchor store bridging eve's separately-bundled modules.
-- **Eval pacing is two-phase** specifically so rate-limit waits never pollute LangSmith root
-  latency; the ~41.5k-token prompt makes **TPM the binding constraint**.
-- **Datasets vanish** from this EU workspace — the repo JSON is authoritative and restored
-  automatically.
-- **Safety-injection policy:** a platform-blocked adversarial turn scores as a *pass*
-  across evaluators/judges.
+1. **A partner search failed on *size*, not request frequency.** With `maxPartners: 100`, a
+   dense city (Bochum: 30 home + 70 borrowed) rendered ~100 profiles ≈ 42k tokens into one
+   tool result, making the next model call ~60–78k tokens — **larger than the Azure
+   deployment's whole per-minute allowance**. It returned 429 on *every* attempt at any
+   spacing. Sparse cities (Hamburg, 36 partners) stayed small and worked, which made it look
+   intermittent. Fixed by retuning the config (now 40 candidates → 5 shown). **Keep Azure TPM
+   and `maxPartners`/`finalRecommendations` consistent.**
+2. **`ask_question` produces no assistant message.** A missing-city query made the partner
+   model call eve's built-in `ask_question`, which emits an `input.requested` event and ends
+   the turn with **zero** `message.appended` — the dev console renders that, the widget does
+   not, so the user saw an empty bubble forever. Fixed by adding an `ask_question`
+   `disableTool()` sentinel in service 2; clarification now streams as normal prose (and its
+   documented "exactly two tools" budget is restored).
+3. **Long silent SSE streams die in browsers, not in curl.** A partner search emits nothing
+   for 30–60s; browsers drop the idle connection and report `network error`. Hence the proxy
+   keep-alive. **Never debug a streaming problem with curl alone.**
+4. **The cheapest agent hallucinates.** In service 2's history, a "cost optimization" once
+   looked like a −58% win because the model had stopped calling the database and was inventing
+   studios. Every efficiency change must be paired with a work-actually-performed metric
+   (e.g. "was `find_partners` called at all") and the evals.
+5. **Don't trust doc figures over code.** "41.5k tokens", "10 built-in tools", "gpt-4o",
+   "no wiring exists between the projects" were all wrong in earlier versions of this file.
 
 ---
 
-## 13. Known open items (as of 2026-07-28)
+## 11. Open items, limitations, next steps
 
-These reflect the current on-disk state, not aspirations:
+**Highest priority (blockers for a public launch)**
+1. **Deploy both services** and wire `PARTNER_AGENT_HOST` (§8). Nothing is live yet.
+2. **Lock down service 2.** The proxy forwards with **no shared secret**, so a deployed
+   partner agent would be openly reachable. Add a Firewall rule / shared-secret header /
+   Deployment Protection.
+3. **Rotate the keys committed in `.mcp.json`** (LangSmith + Stitch) and move them to env.
+4. **Distributed rate limiting** via Vercel Firewall for `/eve/v1/*`, `/api/partner/*`,
+   `/api/contact` — the in-code limiters are per-instance.
+5. **AI Gateway spend cap** (`AI_GATEWAY_MODEL`) or an Azure TPM ceiling sized to a
+   worst-case partner turn.
 
-1. **Root `CLAUDE.md` was empty** before this analysis (0 bytes) — now populated by this file.
-2. **`evals/datasets/*.json` and `docs/` are missing.** `run-eval.ts` /
-   `upload-eval-dataset.ts` and the README reference them, so `eval:run` / `eval:upload`
-   fail at `resolveData()` until the dataset files are authored (see
-   [`project-prompts/dataset-generation.md`](project-prompts/dataset-generation.md)).
-3. **Prompt V3 is written but NOT deployed.**
-   [`agent/feedback/SYSTEM_PROMPT_V3.md`](kb-agent-langsmith-starter/agent/feedback/SYSTEM_PROMPT_V3.md)
-   is a shorter (646-line) revision; the live prompt
-   [`agent/instructions.md`](kb-agent-langsmith-starter/agent/instructions.md) still carries
-   the 1648-line version (identical to `SYSTEM_PROMPT.md`). Deploying V3 = replacing
-   `instructions.md` — do this only when explicitly asked, and re-run evals after.
-4. **Known KB factual errors are unfixed.** The 9 issues in
-   [`FEEDBACK-ANALYSIS.md`](kb-agent-langsmith-starter/agent/feedback/FEEDBACK-ANALYSIS.md)
-   (4 of them faithful renditions of wrong KB facts) remain in the deployed KB.
-5. **Not a git repo.** No version history; `git`-derived metadata degrades to `"unknown"`.
-6. ⚠️ **Secrets are committed in [.mcp.json](.mcp.json).** A real-looking LangSmith API key
-   and a Stitch API key are stored in plaintext there. This contradicts the project's own
-   "never commit real keys" rule — consider rotating them and moving to env-based config.
-   (Flagged, not changed — no files were modified by this analysis except this `CLAUDE.md`.)
+**Known limitations / UX**
+- **No progress indicator during a partner search.** The bubble is empty for 30–60s and reads
+  as a hang. `ChatBody` shows typing dots only while `status === "submitted"`; keep them
+  visible while streaming-with-no-text (ideally "Suche passende Partner …"). **Most visible
+  remaining rough edge.**
+- **Contact form has no email fallback** — a Salesforce outage loses the lead (payload *shape*
+  is logged, values are not). `nodemailer` + `SMTP_*` not wired.
+- **No streaming-route timeout** on the eve stream (contact route has `maxDuration = 30`).
+
+**Quality / cost backlog**
+- **Prompt V3 written but not deployed** (`agent/feedback/SYSTEM_PROMPT_V3.md`, 646 lines vs
+  the live 1,384). Deploy = replace `instructions.md`, then re-run evals.
+- **9 known KB factual errors** documented in `agent/feedback/FEEDBACK-ANALYSIS.md`.
+- **Model right-sizing** — evaluate `gpt-4.1-mini` for the FAQ agent against the eval set.
+- Full checklist: [`docs/PRODUCTION-READINESS-REVIEW.md`](kb-agent-langsmith-starter/docs/PRODUCTION-READINESS-REVIEW.md).
+
+---
+
+## 12. Conventions
+
+- **Behaviour changes go through the prompt**, not code: `agent/instructions.md` (FAQ) or
+  service 2's `instructions.md`. Validate with the eval loop; never bypass the feedback
+  history in `agent/feedback/`.
+- **Keep the FAQ agent tool-free** and service 2 at **two** tools. Every advertised tool costs
+  schema tokens on every model call.
+- **Widget visuals** follow `docs/design/WIDGET-DESIGN-GUIDELINES.md` — green = AI action,
+  orange = human hand-off, Outfit + Inter.
+- **Never commit `.env.local` or a real key.** Never point LangSmith at the US endpoint.
+- **Two repos, two histories.** Commit service-2 changes inside its own repo.
+- Start feature work with `superpowers:brainstorming`; start bugs with
+  `superpowers:systematic-debugging`.
+
+**Capabilities available:** LangSmith MCP (EU) for traces/datasets/experiments ·
+`langsmith-trace` / `langsmith-dataset` / `langsmith-evaluator` skills · `context7` (dependency
+docs) · `playwright` / `browse` (drive the widget in a real browser — the only way to catch
+UI-only bugs like #10.3).

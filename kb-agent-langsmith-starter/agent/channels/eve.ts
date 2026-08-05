@@ -31,6 +31,36 @@ import { type AuthFn, ForbiddenError, localDev } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 
 /**
+ * Max bytes accepted on any request that carries a body (chat session-create +
+ * follow-up messages). Guards against oversized-message abuse: a huge pasted
+ * message inflates input tokens/cost on every turn, and the chat turn has no
+ * length cap of its own (unlike the contact form's MAX_MESSAGE_CHARS). Checked
+ * cheaply via `Content-Length` — we reject BEFORE the body is read or the model
+ * is called. Default 16 KB comfortably fits a normal message + JSON envelope
+ * while blocking multi-KB pastes. Env-tunable; `0` disables the check.
+ */
+const MAX_REQUEST_BYTES = Number(process.env.NAVIO_MAX_REQUEST_BYTES ?? 16_000);
+
+/**
+ * Reject requests whose declared body size exceeds MAX_REQUEST_BYTES. Returns
+ * `null` (continue the walk) for GET/stream requests and bodies within the cap;
+ * a missing/unparseable Content-Length is allowed here and left to the edge
+ * (Firewall body-size rules) — this is defense in depth, not the only control.
+ */
+function requestSizeLimit(): AuthFn<Request> {
+  return (request) => {
+    if (MAX_REQUEST_BYTES <= 0) return null;
+    const header = request.headers.get("content-length");
+    if (!header) return null; // no declared length (GET stream / chunked) → defer
+    const bytes = Number(header);
+    if (Number.isFinite(bytes) && bytes > MAX_REQUEST_BYTES) {
+      throw new ForbiddenError({ message: "Message too large." });
+    }
+    return null;
+  };
+}
+
+/**
  * Extra origins allowed to call the API in ADDITION to this deployment's own
  * origin (which is always allowed, since the widget iframe is same-origin).
  * Set `WIDGET_ALLOWED_ORIGINS` (comma-separated) only if you serve the widget
@@ -189,7 +219,9 @@ function widgetOrigin(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  auth: [botCheck(), widgetOrigin(), localDev()],
+  // Size gate runs FIRST so oversized bodies are rejected cheaply, before BotID
+  // or origin checks and long before the model call.
+  auth: [requestSizeLimit(), botCheck(), widgetOrigin(), localDev()],
   // Same-origin (iframe) calls need no CORS. Configure narrow CORS only if you
   // serve the widget cross-origin via WIDGET_ALLOWED_ORIGINS.
   ...(extraAllowedOrigins().length > 0
