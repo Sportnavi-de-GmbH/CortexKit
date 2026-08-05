@@ -153,6 +153,39 @@ describe("proxyToPartner", () => {
     }
   });
 
+  it("adds https:// when the configured host has no scheme", async () => {
+    // A host pasted without a scheme used to produce a relative URL, which Node's
+    // fetch rejects ("Failed to parse URL") → 502 on every partner turn.
+    let seenUrl = "";
+    const fetchImpl = vi.fn(async (url: string) => {
+      seenUrl = url;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const res = await proxyToPartner(req("POST"), ["eve", "v1", "session"], {
+      host: "navio-partner.vercel.app", // no scheme
+      fetchImpl,
+    });
+
+    expect(seenUrl).toBe("https://navio-partner.vercel.app/eve/v1/session");
+    expect(res.status).toBe(200);
+  });
+
+  it("preserves an explicit http:// host (local dev)", async () => {
+    let seenUrl = "";
+    const fetchImpl = vi.fn(async (url: string) => {
+      seenUrl = url;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    await proxyToPartner(req("POST"), ["eve", "v1", "session"], {
+      host: "http://127.0.0.1:3001",
+      fetchImpl,
+    });
+
+    expect(seenUrl).toBe("http://127.0.0.1:3001/eve/v1/session");
+  });
+
   it("does not forward content-encoding (fetch already decoded the body)", async () => {
     // Node fetch auto-decompresses; forwarding the stale content-encoding header
     // makes the browser try to gunzip plain text → 'Failed to fetch'.

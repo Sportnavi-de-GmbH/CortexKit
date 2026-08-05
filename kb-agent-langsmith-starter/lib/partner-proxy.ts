@@ -188,7 +188,13 @@ export async function proxyToPartner(
   pathSegments: string[],
   deps: ProxyDeps = {},
 ): Promise<Response> {
-  const host = (deps.host ?? process.env.PARTNER_AGENT_HOST ?? "").trim().replace(/\/+$/, "");
+  // Normalize the configured host. A value pasted without a scheme
+  // ("navio-partner.vercel.app") would make `${host}/...` a relative string, and
+  // Node's fetch rejects it with "Failed to parse URL" → an opaque 502 on every
+  // partner turn. Default to https:// so the common dashboard typo just works;
+  // an explicit http:// (local dev, e.g. http://127.0.0.1:3001) is preserved.
+  const rawHost = (deps.host ?? process.env.PARTNER_AGENT_HOST ?? "").trim().replace(/\/+$/, "");
+  const host = rawHost && !/^https?:\/\//i.test(rawHost) ? `https://${rawHost}` : rawHost;
   const doFetch = deps.fetchImpl ?? fetch;
 
   if (!host) return json({ detail: "Partner agent not configured." }, 503);
