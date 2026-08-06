@@ -23,6 +23,8 @@ import { Trend, Rate, Counter } from "k6/metrics";
 const WIDGET = __ENV.WIDGET_URL || "https://navio-widget.vercel.app";
 const FAQ_ITERS = Number(__ENV.FAQ_ITERS || 45);
 const PARTNER_ITERS = Number(__ENV.PARTNER_ITERS || 6);
+const FAQ_VUS = Number(__ENV.FAQ_VUS || 5); // concurrent simulated visitors
+const PARTNER_VUS = Number(__ENV.PARTNER_VUS || 2);
 
 // Metrics
 const createMs = new Trend("faq_session_create_ms");
@@ -65,7 +67,7 @@ export const options = {
     // Gentle concurrency ramp so we can see degradation before it becomes failure.
     faq_users: {
       executor: "shared-iterations",
-      vus: Math.min(5, FAQ_ITERS), // 5 simultaneous visitors (VUs can't exceed iterations)
+      vus: Math.min(FAQ_VUS, FAQ_ITERS), // VUs can't exceed iterations
       iterations: FAQ_ITERS,
       maxDuration: "10m",
       exec: "faqUser",
@@ -73,7 +75,7 @@ export const options = {
     // Partner searches start later so the two don't compound the TPM spike.
     partner_users: {
       executor: "shared-iterations",
-      vus: Math.min(2, PARTNER_ITERS),
+      vus: Math.min(PARTNER_VUS, PARTNER_ITERS),
       iterations: PARTNER_ITERS,
       maxDuration: "10m",
       startTime: "45s",
