@@ -13,6 +13,7 @@
 .claude/
 .vscode/
 .idea/
+.superpowers/
 .DS_Store
 Thumbs.db
 CLAUDE.md
