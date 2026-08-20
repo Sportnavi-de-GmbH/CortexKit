@@ -701,7 +701,7 @@ export const FAILURE_PATTERNS: {
     error_type: "misconfigured",
     cause: "PARTNER_AGENT_HOST is unset, so partner search is unavailable in this deployment.",
     recommended_action:
-      "Set PARTNER_AGENT_HOST to the partner agent's own host/port (locally http://127.0.0.1:3002 — NOT the widget's port).",
+      "Set PARTNER_AGENT_HOST to the partner agent's own host/port (locally e.g. http://127.0.0.1:3005 — NOT the widget's port).",
   },
   {
     match: /Partner service returned HTTP|Partner stream returned HTTP|Partner service unreachable/i,
