@@ -118,7 +118,7 @@ reseed, and no diff-clean exception**, and leaves every existing build untouched
 | Where | Change |
 |---|---|
 | `SportnaviPartnerRecomandationBot/partner-recommendation-agent-supabase-with-logo/` | New folder, copied from `…-supabase`. Deps via `npm ci` against the committed lockfile |
-| `lib/supabase.ts` | Add `logo_url` to `PARTNER_SELECT_COLUMNS`; add a `getPartnerLogos(ids)` backend method |
+| `lib/supabase.ts` | Add one `getPartnerLogos(ids)` backend method. `PARTNER_SELECT_COLUMNS` is **not** widened — see below |
 | `lib/partners/build-recommendations.ts` | Carry `logoUrl` onto the shortlist entries |
 | `agent/tools/find_partners.ts` | Attach `cards[]` to the `execute()` return value only |
 | `kb-agent-langsmith-starter/components/navio/PartnerCards.tsx` | New component |
@@ -127,6 +127,20 @@ reseed, and no diff-clean exception**, and leaves every existing build untouched
 
 Ports in use locally: widget 3001, Docker `sportnavi-web-local` 3002, orchestrator
 3003, Convex partner agent 3005, Supabase R13 build 3006. The new build takes 3007.
+
+### Logos take exactly ONE path
+
+`logo_url` is fetched **only** by `getPartnerLogos(shortlistIds)`, keyed on the final
+shortlist. It is deliberately not added to `PARTNER_SELECT_COLUMNS`.
+
+Two reasons. First, correctness: `PARTNER_SELECT_COLUMNS` feeds `getPartnersByCity`,
+which serves **home** partners only — gap-filled partners arrive through the
+`match_partners` RPC, which returns no `logo_url`. Sourcing logos there would give
+home studios a logo and borrowed studios a monogram, making the fallback look like a
+data gap when it is really a code path gap. Second, cost: the home projection is read
+for every candidate in the city, while only five partners are ever shown.
+
+One lookup, keyed on the ids actually rendered, covers home and nearby identically.
 
 ### The get_partner_profiles RPC is deliberately NOT modified
 
