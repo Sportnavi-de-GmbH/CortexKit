@@ -11,6 +11,12 @@
 // and content-length: Node's fetch auto-DECOMPRESSES the upstream body, so relaying
 // the stale `content-encoding: gzip` (with an already-decoded body) makes the browser
 // fail to decode it ("Failed to fetch"). The length no longer matches either.
+import {
+  TOO_LONG_API_DETAIL,
+  extractMessageText,
+  isMessageTooLong,
+} from "./message-limits";
+
 const STRIP = new Set([
   "host",
   "connection",
@@ -114,6 +120,36 @@ function json(body: unknown, status: number): Response {
 
 /** Same body-size cap as the eve channel (shared `NAVIO_MAX_REQUEST_BYTES`). */
 const MAX_REQUEST_BYTES = Number(process.env.NAVIO_MAX_REQUEST_BYTES ?? 16_000);
+
+/**
+ * Same message-length cap as the FAQ channel and the widget's counter
+ * (lib/message-limits.ts). The two chat screens share one input bar, so they
+ * must share one limit — otherwise the Partner screen would show "1000" and
+ * accept more, which is exactly the bypass this closes.
+ *
+ * Separate from `checkPartnerRequest` because it must read the body and is
+ * therefore async; the sync gate keeps its signature and its tests. The body is
+ * read from a CLONE, leaving the original stream for `proxyToPartner`.
+ * Returns a 413 Response to reject, or `null` to continue.
+ */
+export async function checkPartnerMessageLength(req: Request): Promise<Response | null> {
+  if (req.method !== "POST") return null;
+  const type = req.headers.get("content-type") ?? "";
+  if (!type.includes("json")) return null;
+
+  let body: unknown;
+  try {
+    body = await req.clone().json();
+  } catch {
+    return null; // unreadable/!JSON — leave it to the partner service
+  }
+
+  const message = extractMessageText(body);
+  if (message !== null && isMessageTooLong(message)) {
+    return json({ detail: TOO_LONG_API_DETAIL }, 413);
+  }
+  return null;
+}
 
 function requestHost(req: Request): string | null {
   return req.headers.get("x-forwarded-host") ?? req.headers.get("host");

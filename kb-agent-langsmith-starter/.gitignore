@@ -5,3 +5,7 @@ node_modules/
 *.tsbuildinfo
 
 .vercel
+
+# Local deployment reference (variable NAMES and sources only, never secrets).
+# Documents the Vercel configuration for auditing; must never be committed.
+vercel.env

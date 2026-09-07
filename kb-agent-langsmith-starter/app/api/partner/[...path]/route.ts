@@ -7,7 +7,11 @@
 // request is then authenticated to the partner service by a shared secret the
 // proxy injects (see lib/partner-proxy.ts).
 
-import { checkPartnerRequest, proxyToPartner } from "@/lib/partner-proxy";
+import {
+  checkPartnerMessageLength,
+  checkPartnerRequest,
+  proxyToPartner,
+} from "@/lib/partner-proxy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,5 +27,9 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const rejected = checkPartnerRequest(req);
   if (rejected) return rejected;
+  // Same message-length cap the widget's counter shows and the FAQ channel
+  // enforces. After the cheap size/origin gate, before anything is forwarded.
+  const tooLong = await checkPartnerMessageLength(req);
+  if (tooLong) return tooLong;
   return proxyToPartner(req, (await ctx.params).path);
 }

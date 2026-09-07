@@ -11,6 +11,7 @@
 import { FeedbackControls } from "./FeedbackControls";
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Bot,
@@ -28,6 +29,16 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
+// The SAME cap the API enforces (agent/channels/eve.ts + the /api/partner
+// route), so the counter never promises what the server would reject.
+import {
+  MAX_MESSAGE_CHARS,
+  MESSAGE_COUNTER_VISIBLE_AT,
+  isMessageTooLong,
+  messageLength,
+  nearLimitParts,
+  tooLongParts,
+} from "@/lib/message-limits";
 import { NavioMenu } from "./NavioMenu";
 import { PRIVACY_URL } from "./links";
 import { SportnaviLogo } from "./SportnaviLogo";
@@ -137,6 +148,10 @@ export function NavioWidget({
   function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || isBusy || !isChatScreen) return;
+    // The disabled send button covers the click path; this covers every other
+    // one (Enter, a quick reply) and keeps the draft intact so the visitor can
+    // shorten it rather than losing what they wrote.
+    if (isMessageTooLong(trimmed)) return;
     setDraft("");
     void activeAgent.send({ message: trimmed });
   }
@@ -609,6 +624,15 @@ function InfoPanel({ onBack }: { onBack: () => void }) {
 
 /* ── Input bar (shared shell) ─────────────────────────────────────────────── */
 
+/**
+ * The composer. Enforces the SHARED message cap (lib/message-limits.ts) that the
+ * server enforces too, so what the counter promises is what the API accepts.
+ *
+ * Deliberately NOT a hard `maxlength` on the input: truncating a paste silently
+ * discards the visitor's text and leaves them wondering what happened. Instead
+ * the text is kept, the send button is disabled, and the overflow is named with
+ * the exact number of characters to remove.
+ */
 function InputBar({
   draft,
   setDraft,
@@ -622,16 +646,23 @@ function InputBar({
   disabled: boolean;
   placeholder: string;
 }) {
-  const canSend = !disabled && draft.trim().length > 0;
+  const count = messageLength(draft);
+  const tooLong = count > MAX_MESSAGE_CHARS;
+  // Hidden while the visitor has plenty of room — a counter on every message is
+  // noise; one that appears as the limit nears is information.
+  const showCounter = count >= MESSAGE_COUNTER_VISIBLE_AT;
+  const canSend = !disabled && count > 0 && !tooLong;
+  const hint = tooLong ? tooLongParts(draft) : nearLimitParts(draft);
   return (
     <div className="border-t border-(--border)">
     <form
-      className="mx-auto flex w-full max-w-[584px] items-center gap-2 px-3 py-3"
+      className="mx-auto flex w-full max-w-[584px] flex-col gap-1.5 px-3 py-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (canSend) onSend();
       }}
     >
+      <div className="flex w-full items-center gap-2">
       <label htmlFor="navio-input" className="sr-only">
         Frage Navio
       </label>
@@ -642,7 +673,13 @@ function InputBar({
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
-        className="min-h-[40px] flex-1 rounded-full border border-(--border) bg-(--surface) px-4 py-2 text-sm text-(--fg) transition-colors placeholder:text-(--fg-subtle) focus:border-(--brand-green) focus:outline-none focus:ring-2 focus:ring-(--brand-green)/30 disabled:opacity-70"
+        aria-invalid={tooLong || undefined}
+        aria-describedby={showCounter ? "navio-input-status" : undefined}
+        className={`min-h-[40px] flex-1 rounded-full border bg-(--surface) px-4 py-2 text-sm text-(--fg) transition-colors placeholder:text-(--fg-subtle) focus:outline-none focus:ring-2 disabled:opacity-70 ${
+          tooLong
+            ? "border-(--brand-orange) focus:border-(--brand-orange) focus:ring-(--brand-orange)/30"
+            : "border-(--border) focus:border-(--brand-green) focus:ring-(--brand-green)/30"
+        }`}
       />
       <button
         type="submit"
@@ -652,6 +689,61 @@ function InputBar({
       >
         <Send size={16} strokeWidth={1.75} />
       </button>
+      </div>
+
+      {/* One live region for both states: a quiet "N left" while there is room,
+          a soft-tinted note with the exact overflow once past the cap. `polite`
+          so a screen reader is not interrupted on every keystroke. */}
+      {showCounter && (
+        <div
+          id="navio-input-status"
+          role="status"
+          aria-live="polite"
+          className={`flex items-center gap-2.5 rounded-2xl px-3 py-2 text-xs transition-colors duration-200 ${
+            tooLong ? "bg-(--brand-orange)/10" : "bg-transparent"
+          }`}
+        >
+          {tooLong && (
+            <AlertCircle
+              size={14}
+              strokeWidth={2}
+              className="mt-px shrink-0 text-(--brand-orange)"
+              aria-hidden="true"
+            />
+          )}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-snug">
+            <span className={tooLong ? "text-(--brand-orange)" : "text-(--fg-subtle)"}>
+              {hint.de}
+            </span>
+            <span className={tooLong ? "text-(--brand-orange)/70" : "text-(--fg-subtle)/70"}>
+              {hint.en}
+            </span>
+          </span>
+
+          {/* Counter as a compact pill with a fill bar: the number is exact, the
+              bar is the glanceable version of it. */}
+          <span
+            className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 tabular-nums transition-colors duration-200 ${
+              tooLong
+                ? "bg-(--brand-orange)/15 font-semibold text-(--brand-orange)"
+                : "bg-(--surface-muted) text-(--fg-muted)"
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className="hidden h-1 w-8 overflow-hidden rounded-full bg-(--border) sm:block"
+            >
+              <span
+                className={`block h-full rounded-full transition-[width,background-color] duration-200 ${
+                  tooLong ? "bg-(--brand-orange)" : "bg-(--brand-green)"
+                }`}
+                style={{ width: `${Math.min(100, (count / MAX_MESSAGE_CHARS) * 100)}%` }}
+              />
+            </span>
+            {count}/{MAX_MESSAGE_CHARS}
+          </span>
+        </div>
+      )}
     </form>
     </div>
   );
