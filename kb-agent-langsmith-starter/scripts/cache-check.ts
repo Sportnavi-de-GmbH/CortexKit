@@ -3,7 +3,7 @@
 //   npm run cache:check
 //
 // Azure OpenAI prompt caching is AUTOMATIC (no flag) for supported models
-// (gpt-4.1) with api-version >= 2024-10-01, when the prompt prefix is >= 1024
+// (gpt-4o-mini) with api-version >= 2024-10-01, when the prompt prefix is >= 1024
 // tokens and identical across requests. This makes two back-to-back calls that
 // share the FULL system prompt (the stable prefix) and differ only in the user
 // question, then prints the cached-token count so we can SEE whether caching is
@@ -56,7 +56,7 @@ function report(label: string, res: Awaited<ReturnType<typeof call>>) {
 async function main() {
   const approxTokens = Math.round(systemPrompt.length / 4);
   console.log(`System prompt (stable prefix): ${systemPrompt.length} chars ≈ ${approxTokens} tokens`);
-  console.log(`Deployment: ${process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4.1"}`);
+  console.log(`Deployment: ${process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o-mini"}`);
   console.log("Making 2 back-to-back calls sharing the same system prompt…");
 
   const r1 = await call("Was ist Firmenfitness? Antworte in einem Satz.");

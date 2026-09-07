@@ -8,7 +8,9 @@
     "dev:ui": "next dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "generate:coverage": "tsx scripts/generate-city-coverage.ts"
+    "langfuse:verify": "tsx scripts/verify-langfuse.ts",
+    "generate:coverage": "tsx scripts/generate-city-coverage.ts",
+    "feedback:check": "tsx scripts/check-feedback.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",

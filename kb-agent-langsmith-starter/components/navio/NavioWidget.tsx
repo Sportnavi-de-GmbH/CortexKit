@@ -8,6 +8,7 @@
 // the menu in NavioMenu, the contact form in KontaktForm. Business logic (the eve
 // agent) is passed in via `agent`; this file is design + flow only.
 
+import { FeedbackControls } from "./FeedbackControls";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -16,6 +17,7 @@ import {
   Check,
   Info,
   Lock,
+  MapPin,
   MessageSquare,
   Moon,
   RotateCcw,
@@ -27,6 +29,8 @@ import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
 import { NavioMenu } from "./NavioMenu";
+import { PRIVACY_URL } from "./links";
+import { SportnaviLogo } from "./SportnaviLogo";
 import { KontaktForm } from "./KontaktForm";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
@@ -45,9 +49,10 @@ const HEADER: Record<
   info: { title: "Über Navio Plus", subtitle: null, dot: false },
 };
 
-// Point this at the real Sportnavi privacy page (override via env if needed).
-const PRIVACY_URL =
-  process.env.NEXT_PUBLIC_PRIVACY_URL ?? "https://www.sportnavi.de/datenschutz/";
+
+// Public Microsoft Bookings link for the "Termin buchen" menu card. No default —
+// unset means the card is hidden (NavioMenu only renders it when a handler is given).
+const BOOKING_URL = process.env.NEXT_PUBLIC_BOOKING_URL || null;
 
 const QUICK_REPLIES = [
   "Angebote finden",
@@ -56,13 +61,20 @@ const QUICK_REPLIES = [
   "Sportnavi für Firmen",
 ];
 
-const GREETING_DE = "Hi, ich bin Navio 👋🏻\nDein Guide durch die Sportnavi Welt. Wobei kann ich dir helfen?";
-const GREETING_EN = "Hi, I'm Navio 👋🏻\nYour guide through the Sportnavi world. How can I help you?";
+// Intro copy, split into the three levels the composition needs. The waving-hand
+// emoji is gone: the design system bans emoji as UI furniture, and a brand tile with
+// a line icon does the same job without looking like a 2016 chatbot.
+const INTRO_CHAT = {
+  title: "Hi, ich bin Navio",
+  de: "Dein Guide durch die Sportnavi Welt. Wobei kann ich dir helfen?",
+  en: "Your guide through the Sportnavi world. How can I help you?",
+} as const;
 
-const PARTNER_GREETING_DE =
-  "Sag mir, wo und was du trainieren willst – z. B. 'Yoga in Bochum' 📍\nIch zeige dir passende Sportnavi-Partner in deiner Nähe.";
-const PARTNER_GREETING_EN =
-  "Tell me where and what you want to train — e.g. 'Yoga in Bochum' 📍\nI'll show you matching Sportnavi partners near you.";
+const INTRO_PARTNER = {
+  title: "Partner finden",
+  de: "Sag mir, wo und was du trainieren willst – z. B. „Yoga in Bochum“.",
+  en: "Tell me where and what you want to train — e.g. “Yoga in Bochum”.",
+} as const;
 const PARTNER_QUICK_REPLIES = [
   "Yoga in Bochum",
   "Klettern für Anfänger",
@@ -73,16 +85,14 @@ const PARTNER_QUICK_REPLIES = [
 // Per-chat-screen copy so the FAQ and Partner screens reuse ChatBody/InputBar.
 const CHAT_CFG = {
   chat: {
-    greetingDe: GREETING_DE,
-    greetingEn: GREETING_EN,
+    intro: INTRO_CHAT,
     quickReplies: QUICK_REPLIES,
     placeholder: "Frage Navio …",
   },
   partner: {
-    greetingDe: PARTNER_GREETING_DE,
-    greetingEn: PARTNER_GREETING_EN,
+    intro: INTRO_PARTNER,
     quickReplies: PARTNER_QUICK_REPLIES,
-    placeholder: "Stadt & Sportart, z. B. 'Yoga in Bochum' …",
+    placeholder: "Stadt & Sportart, z. B. „Yoga in Bochum“ …",
   },
 } as const;
 
@@ -95,6 +105,12 @@ const ADVANTAGES: { de: string; en: string }[] = [
 
 function closeWidget() {
   window.parent?.postMessage("snv-widget-close", "*");
+}
+
+// Opens the Bookings link in a new tab. Never called with a null URL — NavioMenu
+// only renders the card when onSelectMeeting is defined.
+function openBooking() {
+  if (BOOKING_URL) window.open(BOOKING_URL, "_blank", "noopener,noreferrer");
 }
 
 export function NavioWidget({
@@ -140,49 +156,56 @@ export function NavioWidget({
 
   return (
     <div className={root}>
-      {/* Header — brand-green shell (spec §2); left slot + controls vary by screen */}
-      <header className="flex items-center gap-3 bg-(--brand-green) px-4 py-3 text-white">
-        {showBack ? (
-          <button
-            type="button"
-            aria-label="Zurück zum Menü"
-            onClick={() => setScreen("menu")}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
-          >
-            <ArrowLeft size={18} strokeWidth={1.75} />
-          </button>
-        ) : (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-(--brand-green)" aria-hidden="true">
-            <Bot size={20} strokeWidth={1.75} />
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-headline text-sm font-semibold leading-tight">{header.title}</p>
-          {header.subtitle && (
-            <span className="flex items-center gap-1.5 text-xs text-white/85">
-              {header.dot && <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden="true" />}
-              {header.subtitle}
-            </span>
+      {/* ONE header, one shape, on every screen.
+          It was two stacked bars — a white logo strip over a solid brand-green slab
+          — costing ~100px of chrome and putting white text on #95c11e at 1.9:1. The
+          green is gone from the chrome entirely and now survives only where it MEANS
+          something: the online dot, the send button, selected states, focus rings.
+          Every screen carries the same lockup: logo on its own line, status beneath.
+          Sub-screens only add the back button in front, so the brand never changes
+          size or position as you move through the widget. */}
+      <header className="border-b border-(--border) bg-(--surface) text-(--fg)">
+        {/* gap-2 rather than gap-3 so back + a 30px logo + three 32px controls still
+            fit a 320px phone (measured: 315 of 320). */}
+        <div className="mx-auto flex w-full max-w-[452px] items-center gap-2 px-4 py-3.5">
+          {showBack && (
+            <button
+              type="button"
+              aria-label="Zurück zum Menü"
+              onClick={() => setScreen("menu")}
+              className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-(--border) text-(--fg-muted) transition-colors hover:bg-(--surface-muted) hover:text-(--fg) after:absolute after:top-1/2 after:left-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
+            >
+              <ArrowLeft size={18} strokeWidth={1.75} />
+            </button>
           )}
-        </div>
-        {(screen === "consent" || screen === "menu") && (
+          <div className="min-w-0 flex-1">
+            <SportnaviLogo height={30} />
+            <span className="mt-1.5 flex items-center gap-1.5 text-[11px] text-(--fg-subtle)">
+              {header.dot && (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-(--brand-green)" aria-hidden="true" />
+              )}
+              <span className="truncate">
+                {header.subtitle ? `${header.title} · ${header.subtitle}` : header.title}
+              </span>
+            </span>
+          </div>
           <HeaderBtn label={theme === "dark" ? "Helles Design" : "Dunkles Design"} onClick={toggle}>
             {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
           </HeaderBtn>
-        )}
-        {screen === "menu" && (
-          <HeaderBtn label="Über Navio Plus" onClick={() => setScreen("info")}>
-            <Info size={16} strokeWidth={1.75} />
+          {screen === "menu" && (
+            <HeaderBtn label="Über Navio Plus" onClick={() => setScreen("info")}>
+              <Info size={16} strokeWidth={1.75} />
+            </HeaderBtn>
+          )}
+          {isChatScreen && (
+            <HeaderBtn label="Chat zurücksetzen" onClick={() => activeAgent.reset()}>
+              <RotateCcw size={16} strokeWidth={1.75} />
+            </HeaderBtn>
+          )}
+          <HeaderBtn label="Schließen" onClick={closeWidget}>
+            <X size={16} strokeWidth={1.75} />
           </HeaderBtn>
-        )}
-        {isChatScreen && (
-          <HeaderBtn label="Chat zurücksetzen" onClick={() => activeAgent.reset()}>
-            <RotateCcw size={16} strokeWidth={1.75} />
-          </HeaderBtn>
-        )}
-        <HeaderBtn label="Schließen" onClick={closeWidget}>
-          <X size={16} strokeWidth={1.75} />
-        </HeaderBtn>
+        </div>
       </header>
 
       {/* Body — the only scroll region */}
@@ -194,6 +217,7 @@ export function NavioWidget({
           onSelectFaq={() => setScreen("chat")}
           onSelectPartner={() => setScreen("partner")}
           onSelectContact={() => setScreen("contact")}
+          onSelectMeeting={BOOKING_URL ? openBooking : undefined}
         />
       )}
       {isChatScreen && (
@@ -202,9 +226,12 @@ export function NavioWidget({
           isBusy={isBusy}
           messages={messages}
           onQuickReply={send}
-          greetingDe={cfg.greetingDe}
-          greetingEn={cfg.greetingEn}
+          intro={cfg.intro}
           quickReplies={cfg.quickReplies}
+          // Which agent answered — the two chat screens share this component but
+          // trace to two DIFFERENT Langfuse projects, so feedback has to say
+          // which one it belongs to.
+          surface={screen === "partner" ? "partner" : "faq"}
         />
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
@@ -227,9 +254,12 @@ export function NavioWidget({
           href={PRIVACY_URL}
           target="_blank"
           rel="noreferrer"
-          className="text-[11px] text-(--fg-subtle) underline underline-offset-2 hover:text-(--fg)"
+          className="inline-flex min-h-[32px] items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-(--fg-muted) transition-colors hover:bg-(--surface-muted) hover:text-(--fg)"
         >
-          Datenschutz · Privacy Policy
+          <Lock size={12} strokeWidth={2} className="text-(--fg-subtle)" aria-hidden="true" />
+          <span className="underline decoration-(--fg-subtle)/60 underline-offset-4">
+            Datenschutz · Privacy Policy
+          </span>
         </a>
       </footer>
     </div>
@@ -251,7 +281,10 @@ function HeaderBtn({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30"
+      // 32px circle, but a 44x44 hit area centred on it via ::after — the visual
+      // rhythm of the header is unchanged while the tap target clears the mobile
+      // minimum, which matters once launcher.js goes full-screen on phones.
+      className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-(--fg-subtle) transition-colors hover:bg-(--surface-muted) hover:text-(--fg) after:absolute after:top-1/2 after:left-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
     >
       {children}
     </button>
@@ -384,17 +417,17 @@ function ChatBody({
   isBusy,
   messages,
   onQuickReply,
-  greetingDe,
-  greetingEn,
+  intro,
   quickReplies,
+  surface,
 }: {
   agent: Agent;
   isBusy: boolean;
   messages: EveMessageData["messages"];
   onQuickReply: (text: string) => void;
-  greetingDe: string;
-  greetingEn: string;
+  intro: { title: string; de: string; en: string };
   quickReplies: readonly string[];
+  surface: "faq" | "partner";
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -405,21 +438,48 @@ function ChatBody({
   const waiting = agent.status === "submitted";
 
   return (
-    <div ref={scrollRef} className="flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
-      {/* Static bilingual greeting bubble */}
-      <BotBubble>
-        <p className="whitespace-pre-wrap">{greetingDe}</p>
-        <p className="mt-2 whitespace-pre-wrap text-(--fg-subtle)">{greetingEn}</p>
-      </BotBubble>
+    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-2.5">
+      {/* The intro is a COMPOSITION, not a chat bubble.
+          It used to be a grey bubble holding a 
+-joined bilingual blob with a
+          waving-hand emoji, so the assistant's identity was indistinguishable from
+          any other message. Now: brand tile, headline, German line, subordinate
+          English — the three levels the bilingual rule in §4 asks for, arranged.
+          It only shows while the thread is empty; once a conversation starts it
+          scrolls away and the messages take over. */}
+      {showQuickReplies && (
+        <div className="flex flex-col items-center px-2 pt-3 pb-1 text-center">
+          <span
+            className="flex h-14 w-14 items-center justify-center rounded-2xl bg-(--brand-green) text-(--ink)"
+            aria-hidden="true"
+          >
+            {surface === "partner" ? (
+              <MapPin size={26} strokeWidth={1.75} />
+            ) : (
+              <Bot size={26} strokeWidth={1.75} />
+            )}
+          </span>
+          <h2 className="mt-3.5 font-headline text-lg font-semibold tracking-[-0.01em] text-(--fg)">
+            {intro.title}
+          </h2>
+          <p className="mt-1.5 max-w-[30ch] text-[13px] leading-relaxed text-(--fg-muted)">
+            {intro.de}
+          </p>
+          <p className="mt-1 max-w-[32ch] text-[11px] leading-relaxed text-(--fg-subtle)">
+            {intro.en}
+          </p>
+        </div>
+      )}
 
       {showQuickReplies && (
-        <div className="flex flex-wrap gap-2 pt-1">
+        <div className="flex flex-wrap justify-center gap-2 pt-2 pb-1">
           {quickReplies.map((q) => (
             <button
               key={q}
               type="button"
               onClick={() => onQuickReply(q)}
-              className="rounded-full border border-(--border) bg-(--surface) px-3 py-1 text-xs text-(--fg-muted) transition-colors hover:border-black/30 hover:text-(--fg)"
+              className="min-h-[32px] rounded-full border border-(--border) bg-(--surface) px-3.5 text-[13px] text-(--fg-muted) transition-colors hover:border-(--fg)/25 hover:bg-(--surface-muted) hover:text-(--fg)"
             >
               {q}
             </button>
@@ -431,16 +491,27 @@ function ChatBody({
         m.role === "user" ? (
           <div
             key={m.id}
-            className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm"
+            className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm px-4 py-2.5 text-[15px] leading-[1.5]"
             style={{ background: "var(--user-bubble)", color: "var(--user-bubble-fg)" }}
           >
             <p className="whitespace-pre-wrap wrap-break-word">{messageText(m)}</p>
           </div>
         ) : (
-          <BotBubble key={m.id}>
-            <Markdown text={messageText(m)} />
-            {m.metadata?.status === "streaming" && <Cursor />}
-          </BotBubble>
+          <div key={m.id}>
+            <BotBubble>
+              <Markdown text={messageText(m)} />
+              {m.metadata?.status === "streaming" && <Cursor />}
+            </BotBubble>
+            {/* Only once the answer is finished: rating a half-written reply is
+                meaningless, and `turnId` is what ties it to the Langfuse trace. */}
+            {m.metadata?.status === "complete" && (
+              <FeedbackControls
+                sessionId={agent.session?.sessionId}
+                turnId={m.metadata?.turnId}
+                surface={surface}
+              />
+            )}
+          </div>
         ),
       )}
 
@@ -454,13 +525,14 @@ function ChatBody({
           {agent.error.message}
         </div>
       )}
+      </div>
     </div>
   );
 }
 
 function BotBubble({ children }: { children: React.ReactNode }) {
   return (
-    <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-(--surface-muted) px-3.5 py-2.5 text-sm text-(--fg) leading-relaxed">
+    <div className="max-w-[92%] rounded-2xl rounded-tl-sm bg-(--surface-muted) px-4 py-3.5 text-[15px] leading-[1.65] text-(--fg)">
       {children}
     </div>
   );
@@ -552,8 +624,9 @@ function InputBar({
 }) {
   const canSend = !disabled && draft.trim().length > 0;
   return (
+    <div className="border-t border-(--border)">
     <form
-      className="flex items-center gap-2 border-t border-(--border) px-3 py-3"
+      className="mx-auto flex w-full max-w-[584px] items-center gap-2 px-3 py-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (canSend) onSend();
@@ -569,17 +642,18 @@ function InputBar({
         disabled={disabled}
         placeholder={placeholder}
         autoComplete="off"
-        className="flex-1 rounded-full bg-(--surface-muted) px-4 py-2 text-sm text-(--fg) placeholder:text-(--fg-subtle) focus:outline-none focus:ring-2 focus:ring-[#95c11e]/40 disabled:opacity-70"
+        className="min-h-[40px] flex-1 rounded-full border border-(--border) bg-(--surface) px-4 py-2 text-sm text-(--fg) transition-colors placeholder:text-(--fg-subtle) focus:border-(--brand-green) focus:outline-none focus:ring-2 focus:ring-(--brand-green)/30 disabled:opacity-70"
       />
       <button
         type="submit"
         disabled={!canSend}
         aria-label="Senden"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--brand-green) text-white transition-opacity disabled:bg-zinc-200 disabled:text-zinc-400"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-(--brand-green) text-(--ink) transition-transform hover:scale-[1.04] active:scale-95 disabled:scale-100 disabled:bg-(--surface-muted) disabled:text-(--fg-subtle)"
       >
         <Send size={16} strokeWidth={1.75} />
       </button>
     </form>
+    </div>
   );
 }
 
@@ -602,24 +676,32 @@ function Cursor() {
   );
 }
 
-/** Bot replies as styled markdown (spec §6): green links, lists, code, tables. */
+/** Bot replies as styled markdown (spec §6): links, lists, code, tables. */
 function Markdown({ text }: { text: string }) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-2 whitespace-pre-wrap last:mb-0">{children}</p>,
-        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+        p: ({ children }) => <p className="mb-3 whitespace-pre-wrap last:mb-0">{children}</p>,
+        strong: ({ children }) => <strong className="font-semibold text-(--fg)">{children}</strong>,
+        // Ink text with a thick GREEN underline: unmistakably a link and on-brand,
+        // without ever using green as body text (~1.9:1 on the bubble). The
+        // underline thickens on hover so the affordance survives a colour-blind read.
         a: ({ href, children }) => (
-          <a href={href} target="_blank" rel="noreferrer" className="font-medium text-(--brand-green) underline underline-offset-2 hover:opacity-80">
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-(--fg) decoration-(--brand-green) decoration-2 underline underline-offset-[3px] transition-[text-decoration-color,background-color] hover:bg-(--brand-green)/15 hover:decoration-(--fg)"
+          >
             {children}
           </a>
         ),
-        ul: ({ children }) => <ul className="mb-2 flex list-disc flex-col gap-1 pl-5 last:mb-0">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 flex list-decimal flex-col gap-1 pl-5 last:mb-0">{children}</ol>,
+        ul: ({ children }) => <ul className="mb-3 flex list-disc flex-col gap-2 pl-5 marker:font-semibold marker:text-(--fg) last:mb-0">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-3 flex list-decimal flex-col gap-2 pl-5 marker:font-semibold marker:text-(--fg) last:mb-0">{children}</ol>,
         li: ({ children }) => <li className="leading-relaxed [&>p]:mb-0">{children}</li>,
-        h1: ({ children }) => <h4 className="mb-1 mt-2 font-headline text-sm font-semibold first:mt-0">{children}</h4>,
-        h2: ({ children }) => <h4 className="mb-1 mt-2 font-headline text-sm font-semibold first:mt-0">{children}</h4>,
-        h3: ({ children }) => <h4 className="mb-1 mt-2 font-headline text-sm font-semibold first:mt-0">{children}</h4>,
+        h1: ({ children }) => <h4 className="mt-5 mb-2 font-headline text-base font-semibold first:mt-0">{children}</h4>,
+        h2: ({ children }) => <h4 className="mt-5 mb-2 font-headline text-base font-semibold first:mt-0">{children}</h4>,
+        h3: ({ children }) => <h4 className="mt-5 mb-2 font-headline text-base font-semibold first:mt-0">{children}</h4>,
         code: ({ children, className }) =>
           className ? (
             <code className="mono block overflow-x-auto rounded-lg bg-black/10 p-2.5 text-xs leading-relaxed">{children}</code>

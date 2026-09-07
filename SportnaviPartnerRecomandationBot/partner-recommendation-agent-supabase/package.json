@@ -1,0 +1,48 @@
+{
+  "name": "supabase-partner-agent",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Navio partner-recommendation agent, Supabase/Postgres data layer. R13 pipeline ported 1:1 from ../partner-recommendation-agent-convex (the reference implementation); only lib/supabase.ts differs.",
+  "scripts": {
+    "dev": "eve dev",
+    "dev:ui": "next dev",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "supabase:verify": "tsx scripts/verify-supabase-setup.ts",
+    "generate:coverage": "tsx scripts/generate-city-coverage.ts",
+    "smoke": "tsx scripts/smoke-live.ts",
+    "langfuse:verify": "tsx scripts/verify-langfuse.ts",
+    "feedback:check": "tsx scripts/check-feedback.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4.0.16",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@sentry/node": "^10.68.0",
+    "@supabase/supabase-js": "^2.110.7",
+    "@tailwindcss/postcss": "^4.0.0",
+    "ai": "^7.0.31",
+    "eve": "0.25.2",
+    "framer-motion": "^12.4.0",
+    "langsmith": "^0.8.7",
+    "lucide-react": "^0.469.0",
+    "next": "^15.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^9.0.3",
+    "tailwindcss": "^4.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "dotenv": "^17.4.2",
+    "just-bash": "^3.1.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

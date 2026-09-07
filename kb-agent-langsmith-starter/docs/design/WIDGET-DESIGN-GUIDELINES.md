@@ -176,11 +176,34 @@ Only two named elevations exist — soft, wide, low-opacity. Never use hard/dark
 
 ## 6. Component Styling
 
-### 6.1 Header
-`bg-brand-green px-4 py-3 text-white`, a horizontal `flex items-center gap-3`.
-- **Leading slot:** either a `h-9 w-9 rounded-full bg-white text-brand-green` avatar (inverse fill) holding the bot icon, or a back-arrow icon button.
-- **Title block:** `flex-1 min-w-0` → title (`font-display text-sm font-semibold`, `truncate`) + status row (`text-xs text-white/85`) with a `h-1.5 w-1.5 rounded-full bg-white` "online" dot.
-- **Action buttons:** right-aligned cluster of round `h-8 w-8 rounded-full bg-white/15 hover:bg-white/30` icon buttons (theme toggle, info, reset, close).
+### 6.1 Header — one bar, one shape, every screen
+
+**There is no green header bar.** The widget used to stack two: a white logo strip over a solid
+`brand-green` slab. That cost ~100px of chrome on the chat screens, put white text on `#95c11e`
+at **1.9:1**, and contradicted §3's own principle — a full-bleed saturated colour field is colour
+as decoration, not colour as signal. Green now appears only where it *means* something: the online
+dot, the send button, selected and focus states, icon tiles, list markers.
+
+One header, `border-b border-border bg-surface text-fg`, contents centred at `max-w-[452px]` in a
+full-bleed bar so the divider spans the widget. **Every screen gets the identical lockup** — the
+Sportnavi logo at **30px** on its own line, with the screen's status beneath it (`text-[11px]
+fg-subtle`, green dot + *"FAQ-Agent · Online"*, *"Navio Plus · Online"*, …). Sub-screens only add
+the back button in front, so the brand never changes size or position as you move through the
+widget.
+
+**Controls, in order:** back (sub-screens) · **theme toggle (every screen)** · info (menu) ·
+reset (chat) · close. The theme toggle used to be gated to the home screens, which meant anyone
+who opened a chat could not switch back to light — the control vanished exactly where a visitor
+spends the most time reading.
+
+**`gap-2`, not `gap-3`** — that is what makes back + a 30px logo + three 32px controls fit a 320px
+phone (measured: 315 of 320, no overflow, title not truncated). An earlier attempt kept `gap-3`
+and a one-row layout with the title beside the logo; adding the fourth control squeezed the title
+to 32px at 380 and to **zero** at 320.
+
+Header icon buttons are one style (the `tone` prop went with the green bar): a 32px ghost circle,
+`text-fg-subtle hover:bg-surface-muted hover:text-fg`, carrying a 44×44 hit area via
+`after:h-11 after:w-11`. The back button is the same shape with a hairline border.
 
 ### 6.2 Icon buttons
 Always circular. On the green header: `h-8 w-8 rounded-full bg-white/15 hover:bg-white/30 text-white`. On light surfaces (greeting card): `h-7 w-7 rounded-full text-fg-subtle hover:bg-fg/5 hover:text-fg`. All have `transition-colors` and an `aria-label`.
@@ -198,16 +221,204 @@ Always circular. On the green header: `h-8 w-8 rounded-full bg-white/15 hover:bg
 
 **Disabled state:** either `disabled:opacity-60` (with `cursor-not-allowed`) or the explicit muted zinc swap on the send button. Primary buttons animate on hover via `hover:scale-[1.02]` (subtle lift), never a color change.
 
-### 6.4 Chat bubbles
+### 6.3a Menu option cards — the priority grid
 
-| Bubble | Classes |
-|---|---|
-| Bot / intro | `max-w-[85%] rounded-2xl rounded-tl-sm bg-surface-muted px-3.5 py-2.5 text-sm text-fg` |
-| User | `ml-auto max-w-[80%] rounded-2xl rounded-tr-sm bg-user-bubble px-3.5 py-2.5 text-sm text-user-bubble-fg` |
-| Error | `max-w-[88%] rounded-2xl rounded-tl-sm border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700` |
-| Form (embedded card) | `w-full rounded-2xl border border-border bg-surface soft-shadow` |
+The menu is one `<nav aria-label="Navio Plus Hauptmenü">` split into **two tiers**, and the tiers
+differ in **layout**, not only in colour. That is the point: four identically-shaped cards made
+the two-colour rule in §3 something you had to decode, and it did not fit the panel.
 
-Bot bubbles align left, user bubbles push right with `ml-auto`. Bubbles stack with `space-y-2.5` and `whitespace-pre-wrap` where raw text needs its line breaks preserved.
+| Tier | Eyebrow | Shape | Accent | Options |
+|---|---|---|---|---|
+| Talk to an agent | *Mit Navio chatten* | full **row** — icon, title, two-line description, chevron | `brand-green`, **solid** tile | FAQ-Agent, Partner finden |
+| Reach a human | *Direkter Kontakt* | compact **2-up tile** — icon over label, no description | `brand-orange`, **20% tint** tile | Kontaktformular, Termin buchen |
+
+Solid green on the primary path carries the brand; a tint on the secondary path stays quiet
+without looking disabled. Both share `CARD_BASE`, so borders, radius, shadow, motion and focus
+behave identically.
+
+**This is what makes all four options fit.** Measured: the whole menu is scroll-free at 380×560
+*and* at 320×568. The previous all-rows layout pushed the fourth option below the fold at both.
+
+- **Glyph colour is decided by contrast, per tier, per theme** — never by taste:
+  - on the **solid green** tile, `--ink`. Green stays `#95c11e` in both themes, so ink is right in
+    both (8.5:1). White would be 1.9:1.
+  - on the **orange tint**, `--fg`. Not orange (`#ec6607` on its own tint is ~2.9:1, under the 3:1
+    non-text floor) and not ink (a 20% orange tint over `#1a1a1a` is a dark brown that swallows an
+    ink glyph in dark mode). `--fg` is the only value that clears both themes, because it flips
+    with the surface.
+- **Hover and `focus-visible` share one state**, so keyboard and pointer see the same thing: an
+  accent rail scales in on the left edge, the border goes `accent/60`, the card tints `accent/5`,
+  the chevron fills with the accent, the card lifts to `soft-shadow-lg`. 200ms.
+- **Descriptions stay at two lines**; the chevron hides below 360px (`hidden min-[360px]:flex`)
+  because it is decorative on touch and costs 40px of a 168px text column.
+- **Focus ring colour and radius are set INLINE**, not with utilities: `globals.css` carries an
+  unlayered `button:focus-visible { outline: 2px solid var(--accent); border-radius: 6px }` that
+  beats anything in `@layer utilities`, which would otherwise put a green ring on the orange cards
+  and square off every focused card.
+- When `NEXT_PUBLIC_BOOKING_URL` is unset the grid drops to `grid-cols-1` so the lone contact tile
+  spans the full width instead of sitting in a half-empty row.
+
+### 6.3b Outbound links
+
+`components/navio/links.ts` is the single definition of every link that leaves the widget —
+`PRIVACY_URL` (env-overridable via `NEXT_PUBLIC_PRIVACY_URL`) plus `SITE_LINKS`. The privacy URL
+appears in **four** places (menu chips, privacy footer, consent gate, info panel) and is a legal
+requirement, so it gets one definition, not four literals.
+
+**Menu link chips** sit under a *"Mehr auf sportnavi.de"* eyebrow, below a hairline rule, so they
+read as leaving the widget rather than as a fifth menu option: `rounded-full border border-border
+px-3 py-1.5 text-[13px]`, 32px minimum height, with a trailing `ArrowUpRight` and an
+`sr-only` *"(öffnet in neuem Tab)"*. This reuses the quick-reply pill language from §6.3.
+
+**Every outbound link opens in a new tab** (`target="_blank" rel="noreferrer"`). The widget runs
+inside an iframe — navigating in place would replace the chat instead of the host page.
+
+**The privacy footer stays on every screen** and is deliberately not the quietest thing on the
+panel: `text-xs font-medium` on `fg-muted` (7.3:1, versus 4.6:1 when it was 11px on `fg-subtle`),
+a `Lock` glyph, a pill-shaped 32px hover target, and an explicit underline on the text. For a
+legally-required link, *obviously a link* beats *tidy*.
+
+**Cost:** the chips push the menu past the 380×560 panel (content ≈ 590px against 414px of body).
+That is the correct thing to spend height on — all four primary options stay above the fold, and
+only the outbound links need a scroll.
+
+**Responsive.** `public/launcher.js` serves a 380×560 iframe on desktop but switches to a
+**full-screen 100%×100% iframe under 480px wide *or* 480px tall** — so the menu must survive a
+320px phone and a 740×400 landscape phone, not just the panel. Header contents and the option
+list share one measure (`max-w-[452px]` incl. `px-4` / `max-w-[420px]`), centred, which is what
+stops rows stretching to 740px in landscape; the header bar itself stays full-bleed so its bottom
+border still spans the widget. Header icon buttons keep their 32px circle but carry a **44×44 hit
+area** via `after:h-11 after:w-11`. Verified at 320/375/380/390/740 with no horizontal overflow.
+
+### 6.3c The answer screen (FAQ / Partner)
+
+The chat screens render long-form answers, not one-line replies, so they are set like a document.
+
+**Brand strip.** Sub-screens carry the Sportnavi logo on a **white strip above the green bar**
+(`SportnaviLogo height={20}`). The artwork is green + orange and can never sit on the green fill —
+giving it its own light surface is what lets the FAQ, Partner, contact and info screens show the
+brand at all.
+
+**Measure.** The conversation is capped at `max-w-[560px]` and centred; the composer at
+`max-w-[584px]` (560 + its `px-3`), inside a full-bleed bar so the divider still spans the widget.
+Without this the bubbles were `max-w-[85%]` of an **uncapped** column — at a 1900px viewport an
+answer ran ~1615px per line. Measured after the fix: 515px.
+
+**Long-form rhythm** in `Markdown`: paragraphs `mb-3`, sub-headings `mt-4 mb-1.5` at 15px so they
+get air above them, list items `gap-2` (4px read as one block of text), bubble leading `1.6`.
+List markers are `brand-green` — a decorative glyph carrying no meaning the text does not already
+carry, which is the one place green is allowed outside a fill.
+
+**Inline links are NOT green.** `#95c11e` on the grey bubble is ~1.9:1 and breaks §3's own rule.
+They are ink text with a **2px green underline** that inverts on hover (underline goes ink, a soft
+green wash appears behind) — unmistakably a link, on-brand, and legible.
+
+**The send button glyph is `--ink`**, not white: white on `brand-green` is 1.9:1, ink is 8.5:1.
+
+### 6.3c-bis Reading scale — the answer is a document
+
+The answer surface was sized for a 380px panel (14px, one weight, one colour) and read small and
+flat everywhere else, since the widget also runs full-screen and standalone. The scale is now set
+for reading:
+
+| Element | Value | Why |
+|---|---|---|
+| Answer body | `text-[15px]`, leading `1.65` | The reading size. 14px was chat-sized, not document-sized. |
+| Bold lead-in (`strong`) | `font-semibold text-fg` | Carries the scan. A reader takes the three steps from the lead-ins alone. |
+| Sub-heading (`h1`-`h3`) | `text-base font-semibold`, `mt-5 mb-2` | A real step above the body, with air above it. |
+| **List numerals** | `marker:font-semibold marker:text-fg` | They were `brand-green` on grey — **~1.9:1**, which is what read as washed out. Ink at 600 makes them legible. Green markers were a mistake; the marker is the only navigation a numbered list has. |
+| User bubble | `text-[15px]` | Matches the answer, so the thread has one reading size. |
+| Screen title in header | `text-[15px] font-semibold` | Weighted against the 26px logo beside it. |
+
+**The logo on sub-screens is 26px**, not 20px. At 20px it read as a decoration next to the title;
+at 26px it is a brand anchor without crowding the row.
+
+### 6.3d The Navio intro — a composition, not a bubble
+
+An empty chat screen opens with an intro block, NOT a greeting message. It used to be a grey
+bubble holding a `
+`-joined bilingual blob with a waving-hand emoji, which made the assistant's
+identity indistinguishable from any other message and put an emoji in the UI the design system
+bans.
+
+Centred stack, in order: a **56px `rounded-2xl` tile in `brand-green` with an ink line-icon**
+(`Bot` on the FAQ screen, `MapPin` on Partner — the same icons those options carry in the menu,
+so the screen you landed on is recognisable); the headline in `font-headline text-lg font-semibold`;
+the German line at 13px `fg-muted`; the English line at 11px `fg-subtle`. That is exactly the
+three-level bilingual hierarchy §4 asks for, arranged rather than printed.
+
+Copy lives in `INTRO_CHAT` / `INTRO_PARTNER` as `{ title, de, en }` — split into levels so the
+composition can set each one, and the reason the old `
+`-joined strings are gone.
+
+The intro and the quick-reply chips render together and **only while the thread is empty**; once a
+conversation starts both scroll away and the messages take over. Chips are centred to match the
+composition, 32px minimum height.
+
+### 6.3e Answer feedback — compact, but unmistakably buttons
+
+`FeedbackControls` closes every completed answer with **one inline row**, not a card:
+`inline-flex rounded-2xl border bg-surface px-3.5 py-2`, a 13px `fg-muted` question, and two
+pills. It was once a full-width card that competed with the answer; it was then over-corrected to
+26px pills with hairline borders that stopped reading as controls at all. The settled values:
+
+- **32px pills**, `text-[13px] font-medium`, 14px thumb glyphs, `px-3` — footnote-scale next to a
+  15px answer, but still obviously buttons.
+- **Resting border `border-(--fg)/15`**, not the `--border` hairline: at `rgba(0,0,0,.08)` on a
+  white surface the buttons had no edge.
+- **Selected is a SOLID brand fill with an ink glyph** (green for Ja, orange for Nein), not a tint.
+  A cast vote has to be obvious at a glance; a 15% tint was not.
+- A **44px hit area** sits behind each pill (`after:h-11 after:min-w-[44px]`) so the small visual
+  size never costs touch usability.
+
+The question swaps to *"Danke für dein Feedback!"* on vote and *"Danke — das hilft uns weiter!"*
+once the reason panel is submitted, while both pills stay live so a vote can be changed.
+
+The behavioural contract is unchanged and load-bearing: **the vote posts on click**; the reason
+panel is enrichment, never a gate; failures never surface to the visitor. All copy is German.
+
+**The reason panel is the SAME container, expanded** — not a second card. It previously rendered
+as a detached sibling below the row, so one interaction read as two unrelated components. Open, the
+row's container grows a hairline divider and the detail section beneath it.
+
+| Element | Treatment | Why |
+|---|---|---|
+| The eight reasons | **`grid grid-cols-2 gap-2`**, 36px min height, 13px, left-aligned | Free-wrapping pills put eight German labels of very different lengths across five ragged rows — it read as a tag cloud. A grid gives even rows and real targets. |
+| Selected reason | **ink border + `surface-muted` fill + medium weight** | Deliberately NOT green. Green is the product's call-to-action colour; this is the "what went wrong" flow, and a green highlight reads as approval. Neutral reads as a choice. |
+| Free-text field | `min-h-[68px] rounded-xl`, 13px, hairline border | It was 12px with a `border-black/30` focus that was invisible; it read as an afterthought, not an input. |
+| `Senden` | pill, `bg-brand-green text-ink`, 36px | Was an 11px button with a raw inline `style={{background}}` that bypassed the tokens. |
+| `Senden` **disabled** | **`bg-surface-muted text-fg-subtle`** | Was `opacity-40` on green — barely legible and still looked clickable. A neutral fill is honestly inert. |
+| `Überspringen` | quiet pill, `fg-muted`, 36px | Equal height to the primary so the action row aligns. |
+| Character counter | appears only within 200 of `MAX_COMMENT` | A counter that is always visible on a 1000-char optional field is noise. |
+
+The panel stays visually light: it is optional, the vote is already recorded, and it must feel
+quick to dismiss.
+
+**The panel is bilingual**, following §4: German leads, English follows one step smaller and
+lighter (`text-[11px] fg-subtle`). That covers the question/thanks line, the *"Was war das
+Problem?"* heading, all eight reason labels, and a hint under the free-text field (a placeholder
+cannot hold two lines). The reason `code` values are deliberately untouched — the server validates
+against `lib/feedback.ts` REASONS, so a drift in codes surfaces as a silently dropped reason
+rather than an error.
+
+### 6.4 Chat bubbles — the conversation needs sides
+
+Bot and user bubbles used to be **the same `#efefef`**, so a question and the answer to it looked
+identical and the thread had no sides. They are now told apart by *who is speaking*:
+
+| | Fill | Text | Corner |
+|---|---|---|---|
+| **Navio** | `surface-muted` (`#efefef` / `#2b2b2b`) | `fg` | `rounded-2xl rounded-tl-sm` |
+| **You** | `user-bubble` — **ink**, inverted per theme (`#1a1a1a` light / `#f4f4f5` dark) | `user-bubble-fg` | `rounded-2xl rounded-tr-sm` |
+
+Ink is the only option the palette leaves: black and white are in the brand, a third hue is not.
+
+**Do not make the bot bubble a white card.** It was tried: on a `surface` page a `surface` bubble
+is separated only by its shadow, and `soft-shadow` is invisible on `#1a1a1a` — the dark theme lost
+the bubble outright. Differentiate by fill, never by elevation.
+
+Answer bubbles run `max-w-[92%]`, `px-4 py-3`, leading `1.6` — they carry long-form documents, not
+one-line replies (§6.3c).
 
 ### 6.5 Typing indicator
 Three `h-1.5 w-1.5 rounded-full bg-brand-green` dots in a `bg-surface-muted` bubble, each pulsing opacity `[0.3, 1, 0.3]` over `1s`, staggered by `delay: i * 0.18`.

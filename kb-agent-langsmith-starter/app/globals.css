@@ -13,8 +13,8 @@
   --fg: #1a1a1a;
   --fg-muted: #52525b;
   --fg-subtle: #71717a;
-  --user-bubble: #efefef;
-  --user-bubble-fg: #1a1a1a;
+  --user-bubble: #1a1a1a;
+  --user-bubble-fg: #ffffff;
 
   /* Back-compat aliases so existing components keep working, now brand-tuned. */
   --bg: #fafaf9;
@@ -48,7 +48,7 @@
   --fg-muted: #b8b8c0;
   --fg-subtle: #8c8c94;
   --border: rgba(255, 255, 255, 0.14);
-  --user-bubble: #efefef;
+  --user-bubble: #f4f4f5;
   --user-bubble-fg: #1a1a1a;
   /* back-compat aliases */
   --bg: #1a1a1a;

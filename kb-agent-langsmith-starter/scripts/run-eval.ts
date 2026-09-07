@@ -70,11 +70,12 @@ const EVE_HOST = process.env.EVE_HOST ?? "http://127.0.0.1:3000";
 // through the same pacers (EVAL_JUDGE_TOKENS estimate per call).
 const JUDGES = (process.env.EVAL_JUDGES ?? "all").trim();
 const JUDGE_TOKENS = Number(process.env.EVAL_JUDGE_TOKENS) || 2_500;
-// Azure gpt-4.1 list prices per 1M tokens — verify against the current price
-// list; override via env when prices change or the deployment differs.
-const PRICE_IN_PER_M = Number(process.env.EVAL_PRICE_IN_PER_M) || 2.0;
-const PRICE_OUT_PER_M = Number(process.env.EVAL_PRICE_OUT_PER_M) || 8.0;
-const PRICE_CACHED_PER_M = Number(process.env.EVAL_PRICE_CACHED_PER_M) || 0.5;
+// Azure gpt-4o-mini list prices per 1M tokens (the deployment this project
+// runs) — verify against the current price list; override via env when prices
+// change.
+const PRICE_IN_PER_M = Number(process.env.EVAL_PRICE_IN_PER_M) || 0.15;
+const PRICE_OUT_PER_M = Number(process.env.EVAL_PRICE_OUT_PER_M) || 0.6;
+const PRICE_CACHED_PER_M = Number(process.env.EVAL_PRICE_CACHED_PER_M) || 0.075;
 
 for (const key of ["LANGSMITH_API_KEY", "LANGSMITH_ENDPOINT"]) {
   if (!process.env[key]) throw new Error(`${key} is not set — copy .env.example to .env.local and fill it in.`);
@@ -106,7 +107,7 @@ interface TurnResult {
   [k: string]: unknown;
 }
 
-const MODEL_NAME = process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4.1";
+const MODEL_NAME = process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o-mini";
 
 interface TurnRecord {
   input: string;

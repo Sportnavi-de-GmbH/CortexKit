@@ -378,6 +378,13 @@ crisp; every ambiguous rule costs tokens on every turn.
 - **Recommendation:** add alerts on: model error rate, **cache-hit ratio drop** (regression
   detector for P3.7), p95 TTFT, and daily spend. Surface the AI Gateway spend metric.
 - **Impact:** Low (polish on a strong base).
+- **✅ Update 2026-08-19:** alerting shipped — see `docs/MONITORING-ALERTING.md`. Covers
+  cost, turn latency (a p95-TTFT stand-in — true TTFT needs a separate `completionStartTime`
+  fast-follow, documented there), errors and volume/heartbeat via Langfuse Monitors → Teams +
+  email. **Cache-hit-ratio-drop is a regression-detector pattern, not a threshold, and remains
+  a distinct fast-follow** — not yet covered. Tracing itself has also since moved off
+  LangSmith onto self-hosted Langfuse (root `CLAUDE.md` §16); the "LangSmith" wording above is
+  historical and superseded there.
 
 ### G7 — Rate limiting & abuse prevention
 
@@ -474,7 +481,9 @@ crisp; every ambiguous rule costs tokens on every turn.
 
 **🟡 Optimization & hardening**
 
-- [ ] **Alerts**: model error rate, cache-hit-ratio drop, p95 TTFT, daily spend. *(G6)*
+- [x] **Alerts**: model error rate, p95 turn latency (TTFT stand-in), daily spend, volume/
+      heartbeat — shipped 2026-08-19, `docs/MONITORING-ALERTING.md`. cache-hit-ratio drop
+      remains open (a regression-detector pattern, not a threshold). *(G6)*
 - [ ] **`LANGSMITH_TRACE_COMPLETENESS=ai`** in high-traffic prod to trim exported spans.
       *(P2.5)*
 - [ ] **Log (don't block) prompt-injection heuristics** to LangSmith for monitoring. *(G2)*

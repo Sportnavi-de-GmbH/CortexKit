@@ -24,13 +24,13 @@ function resolveModel() {
   try {
     return getAzureChatModel();
   } catch {
-    return "openai/gpt-4.1";
+    return "openai/gpt-4o-mini";
   }
 }
 
 // Per-session execution budgets (production-readiness review §P2.6). Navio is a
 // PUBLIC, ANONYMOUS endpoint, so an uncapped session is a direct cost/abuse risk:
-// eve's default is 40M input tokens/session (~$80 at gpt-4.1 list) with output
+// eve's default is 40M input tokens/session with output
 // UNCAPPED. A support session is a handful of short turns, so we cap both far
 // lower. eve checks the input cap before each model call and blocks further
 // calls in the session once it is crossed (the crossing call is allowed to
@@ -58,10 +58,11 @@ export default defineAgent({
     "Knowledge Base & FAQ agent: answers questions using only the knowledge " +
     "base injected into its system prompt.",
   // eve resolves compaction metadata for the fallback model at compile time
-  // via the AI Gateway catalog; this override skips that lookup with
-  // gpt-4.1's known context window. The Azure deployment (the model actually
-  // used) is resolved above.
-  modelContextWindowTokens: 1_047_576,
+  // via the AI Gateway catalog; this override skips that lookup with the
+  // deployed model's known context window. It MUST track the Azure deployment
+  // (resolved above), which is gpt-4o-mini — a 128k window, not gpt-4.1's ~1M.
+  // A too-large value tells eve's compaction there is more room than exists.
+  modelContextWindowTokens: 128_000,
   model: resolveModel(),
   limits: {
     // ~250k input tokens ≈ 15 turns of the full ~16.7k prompt — generous for a

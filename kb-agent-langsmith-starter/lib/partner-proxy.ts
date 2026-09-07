@@ -18,6 +18,9 @@ const STRIP = new Set([
   "content-encoding",
   "transfer-encoding",
   "keep-alive",
+  // undici refuses to send `Expect` (UND_ERR_NOT_SUPPORTED), so forwarding a
+  // client's `Expect: 100-continue` makes every proxied request 502.
+  "expect",
 ]);
 
 export interface ProxyDeps {
@@ -25,6 +28,63 @@ export interface ProxyDeps {
   host?: string;
   /** Defaults to global fetch (injectable for tests). */
   fetchImpl?: typeof fetch;
+}
+
+/** Spellings that all mean "this machine". A string compare of the configured
+ *  host against our own is not enough: the browser addresses the widget as
+ *  `localhost` while `PARTNER_AGENT_HOST` is written `127.0.0.1` (or the other
+ *  way round), which is exactly how the 2026-08-18 misroute went unnoticed. */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
+
+/** `host:port`, with loopback spellings folded together and the default port
+ *  made explicit so `https://x` and `https://x:443` compare equal. */
+function originKey(url: URL): string {
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const name = LOOPBACK.has(hostname) ? "localhost" : hostname;
+  const port = url.port || (url.protocol === "https:" ? "443" : "80");
+  return `${name}:${port}`;
+}
+
+/**
+ * True when the configured partner host resolves to THIS service.
+ *
+ * Forwarding `/api/partner/eve/*` to our own origin sends the request straight
+ * back into the FAQ agent's `/eve/*`, so the widget's "Partner finden" screen
+ * is answered by the FAQ agent — with no error anywhere. Observed live on
+ * 2026-08-18: "Fitnessstudio in Bielefeld" was answered with "go back and
+ * choose Partner finden", and the turn was traced into the FAQ Langfuse
+ * project instead of the Partner one.
+ *
+ * This is never a valid configuration, so it is detected rather than served.
+ */
+export function isSelfTarget(requestUrl: string, target: string, hostHeader?: string | null): boolean {
+  let targetKey: string;
+  try {
+    targetKey = originKey(new URL(target));
+  } catch {
+    return false; // an unparseable target fails later, with its own error
+  }
+
+  const candidates: string[] = [];
+  let protocol = "http:";
+  try {
+    const self = new URL(requestUrl);
+    protocol = self.protocol;
+    candidates.push(originKey(self));
+  } catch {
+    // request URL not absolute — fall back to the Host header alone
+  }
+  // Behind a proxy the Host header is the address the CLIENT used, which is the
+  // one a misconfigured env var is most likely to have been copied from.
+  if (hostHeader) {
+    try {
+      candidates.push(originKey(new URL(`${protocol}//${hostHeader}`)));
+    } catch {
+      // ignore a malformed Host header
+    }
+  }
+
+  return candidates.includes(targetKey);
 }
 
 /** Only eve's own routes may be forwarded — this is NOT an open proxy. */
@@ -203,6 +263,25 @@ export async function proxyToPartner(
   const search = new URL(req.url).search;
   const target = `${host}/${pathSegments.join("/")}${search}`;
 
+  // FAIL LOUDLY rather than serve the wrong agent. See isSelfTarget().
+  if (isSelfTarget(req.url, target, req.headers.get("host"))) {
+    console.error(
+      `[partner-proxy] PARTNER_AGENT_HOST (${host}) points at THIS service. ` +
+        "Refusing to forward: it would make the FAQ agent answer partner questions " +
+        "and log them to the FAQ Langfuse project. Point it at the partner agent's " +
+        "own host/port (they must not share a port).",
+    );
+    return json(
+      {
+        detail:
+          "Partner agent misconfigured: PARTNER_AGENT_HOST points at this service itself " +
+          "(its own origin), which would route partner requests to the FAQ agent. " +
+          "Set it to the partner agent's own host and port.",
+      },
+      503,
+    );
+  }
+
   const headers = new Headers();
   for (const [k, v] of req.headers) {
     if (!STRIP.has(k.toLowerCase())) headers.set(k, v);
@@ -232,7 +311,12 @@ export async function proxyToPartner(
   try {
     upstream = await doFetch(target, init);
   } catch (e) {
-    return json({ detail: `Upstream unreachable: ${(e as Error).message}` }, 502);
+    // Surface the real network error: undici wraps it as a generic "fetch failed"
+    // whose useful part (ECONNREFUSED, EACCES, …) lives in `cause`.
+    const cause = (e as Error & { cause?: Error & { code?: string } }).cause;
+    const causeText = cause ? ` (${cause.code ?? ""} ${cause.message})`.trimEnd() : "";
+    console.error(`[partner-proxy] fetch to ${target} failed: ${(e as Error).message}${causeText}`);
+    return json({ detail: `Upstream unreachable: ${(e as Error).message}${causeText}` }, 502);
   }
 
   // Stream the body straight back (SSE for the eve stream). Preserve status; copy

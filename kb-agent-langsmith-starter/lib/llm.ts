@@ -25,5 +25,5 @@ export function getAzureChatModel(): LanguageModel {
   }
 
   const azure = createOpenAI({ baseURL, apiKey });
-  return azure.chat(process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4.1");
+  return azure.chat(process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o-mini");
 }

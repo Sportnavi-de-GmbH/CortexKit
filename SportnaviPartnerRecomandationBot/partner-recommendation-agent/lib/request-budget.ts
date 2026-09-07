@@ -46,13 +46,17 @@ export const DEFAULT_REQUEST_BUDGET: RequestBudgetLimits = {
 };
 
 /**
- * gpt-4.1 list price (Azure OpenAI, per-token), deliberately NOT applying
+ * gpt-4o-mini list price (Azure OpenAI, per-token), deliberately NOT applying
  * the ~93% prompt-cache discount this agent actually gets — a conservative
  * over-estimate is the safe direction for a budget check that exists to
  * catch runaway cost, not to reconcile a bill.
+ *
+ * MUST track AZURE_AI_CHATBOT_DEPLOYMENT_NAME. Left at gpt-4.1's $2/$8 while
+ * running gpt-4o-mini, this over-estimates by ~13x, so `maxEstimatedCostUsd`
+ * would trip on a normal turn and degrade it to the needsClarification path.
  */
-const LIST_PRICE_PER_INPUT_TOKEN_USD = 2.0 / 1_000_000;
-const LIST_PRICE_PER_OUTPUT_TOKEN_USD = 8.0 / 1_000_000;
+const LIST_PRICE_PER_INPUT_TOKEN_USD = 0.15 / 1_000_000;
+const LIST_PRICE_PER_OUTPUT_TOKEN_USD = 0.6 / 1_000_000;
 
 export interface BudgetState {
   toolCalls: number;

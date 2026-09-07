@@ -206,3 +206,83 @@ describe("proxyToPartner", () => {
     expect(await res.text()).toBe('{"ok":true}');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Self-proxy guard.
+//
+// REGRESSION (2026-08-18, reproduced live): PARTNER_AGENT_HOST was set to
+// http://127.0.0.1:3001 while the WIDGET itself was served on :3001. Every
+// "Partner finden" turn was proxied back into this service's own /eve/v1/*,
+// so the FAQ agent silently answered partner questions — it replied "go back
+// and choose Partner finden" to "Fitnessstudio in Bielefeld" — and those turns
+// were traced into the FAQ Langfuse project instead of the Partner one.
+//
+// Nothing errored. That is what made it expensive: a misrouted agent looks
+// exactly like a working one. Forwarding /api/partner/* to our own origin can
+// never be correct, so it must fail loudly.
+// ---------------------------------------------------------------------------
+describe("self-proxy guard", () => {
+  const selfReq = (url: string) => new Request(url, { method: "POST", body: "{}" });
+
+  it("refuses to forward to its own origin instead of silently serving the FAQ agent", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const res = await proxyToPartner(
+      selfReq("http://127.0.0.1:3001/api/partner/eve/v1/session"),
+      ["eve", "v1", "session"],
+      { host: "http://127.0.0.1:3001", fetchImpl },
+    );
+    expect(res.status).toBe(503);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(await res.json())).toMatch(/itself|own origin/i);
+  });
+
+  // THE case that actually shipped: the browser addresses the widget as
+  // `localhost`, the env var says `127.0.0.1`. Different strings, same server —
+  // a plain string comparison would have missed it entirely.
+  it("treats localhost and 127.0.0.1 on the same port as the SAME origin", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const res = await proxyToPartner(
+      selfReq("http://localhost:3001/api/partner/eve/v1/session"),
+      ["eve", "v1", "session"],
+      { host: "http://127.0.0.1:3001", fetchImpl },
+    );
+    expect(res.status).toBe(503);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("still forwards to a DIFFERENT port on the same machine (the correct local setup)", async () => {
+    const fetchImpl = vi.fn(async () => new Response("ok", { status: 200 })) as unknown as typeof fetch;
+    const res = await proxyToPartner(
+      selfReq("http://localhost:3001/api/partner/eve/v1/session"),
+      ["eve", "v1", "session"],
+      { host: "http://127.0.0.1:3002", fetchImpl },
+    );
+    expect(res.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:3002/eve/v1/session",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("still forwards to a remote host in production", async () => {
+    const fetchImpl = vi.fn(async () => new Response("ok", { status: 200 })) as unknown as typeof fetch;
+    const res = await proxyToPartner(
+      selfReq("https://chat.sportnavi.de/api/partner/eve/v1/session"),
+      ["eve", "v1", "session"],
+      { host: "https://navio-partner.vercel.app", fetchImpl },
+    );
+    expect(res.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalled();
+  });
+
+  it("catches a production self-proxy too (same host, no port)", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const res = await proxyToPartner(
+      selfReq("https://chat.sportnavi.de/api/partner/eve/v1/session"),
+      ["eve", "v1", "session"],
+      { host: "https://chat.sportnavi.de", fetchImpl },
+    );
+    expect(res.status).toBe(503);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});

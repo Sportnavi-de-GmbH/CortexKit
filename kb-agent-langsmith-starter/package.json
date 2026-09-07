@@ -11,13 +11,17 @@
     "live-check": "tsx scripts/live-check.ts",
     "contact:check": "tsx scripts/contact-live-check.ts",
     "cache:check": "tsx scripts/cache-check.ts",
+    "langfuse:verify": "tsx scripts/verify-langfuse.ts",
     "eval:upload": "tsx scripts/upload-eval-dataset.ts",
     "eval:verify": "tsx scripts/verify-eval-dataset.ts",
     "eval:run": "tsx scripts/run-eval.ts",
-    "eval:dev": "tsx scripts/eval-dev.ts"
+    "eval:dev": "tsx scripts/eval-dev.ts",
+    "feedback:check": "tsx scripts/check-feedback.ts",
+    "alert:test": "tsx scripts/test-alert-webhook.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",
+    "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@vercel/otel": "^2.1.3",

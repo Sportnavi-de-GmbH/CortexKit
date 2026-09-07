@@ -137,7 +137,7 @@ function buildContext(run: JudgeRun, example: JudgeExample): JudgeContext {
 export function makeJudgeEvaluators(opts: { names: string[] | "all"; pace: Pace; estimatedTokens: number }) {
   const active = opts.names === "all" ? JUDGE_SPECS : JUDGE_SPECS.filter((j) => opts.names.includes(j.key));
   const model = getAzureChatModel();
-  const judgeModelName = process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4.1";
+  const judgeModelName = process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o-mini";
 
   // Every judge call runs inside a traceable llm child carrying usage_metadata
   // + ls_model_name — otherwise judge tokens/cost are invisible in LangSmith

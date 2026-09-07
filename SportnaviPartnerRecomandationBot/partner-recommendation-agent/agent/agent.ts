@@ -15,7 +15,7 @@ function resolveModel() {
   try {
     return getAzureChatModel();
   } catch {
-    return "openai/gpt-4.1";
+    return "openai/gpt-4o-mini";
   }
 }
 
@@ -25,10 +25,12 @@ export default defineAgent({
     "partners for a city-based request and returns clear recommendations.",
   // eve resolves compaction metadata for the `fallback` model at compile
   // time via the AI Gateway catalog, offline, before any session runs — so
-  // this override skips that lookup with gpt-4.1's known context window. The
+  // this override skips that lookup with a hardcoded context window. The
   // Azure deployment (the model actually used) is resolved lazily above, at
-  // session start.
-  modelContextWindowTokens: 1_047_576,
+  // session start, so this MUST track that deployment, not the fallback:
+  // gpt-4o-mini's window is 128k, not gpt-4.1's ~1M. Leaving the 1M value
+  // here would tell eve's compaction there is 8x more room than exists.
+  modelContextWindowTokens: 128_000,
   model: resolveModel(),
   // Explicit session-wide token ceiling (production-readiness review item
   // 6): eve's own default (`maxInputTokensPerSession`) is unset, which
