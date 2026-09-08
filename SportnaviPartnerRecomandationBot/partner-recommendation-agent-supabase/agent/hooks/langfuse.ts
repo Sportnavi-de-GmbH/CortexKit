@@ -25,11 +25,19 @@
 // IRON RULE: never throw. eve escalates a thrown hook to `turn.failed`, and a
 // throw inside a failure-cascade handler to `session.failed`
 // (node_modules/eve/docs/guides/hooks.md). Every handler goes through `guard`.
-import { ROOT_CONTEXT, SpanStatusCode, TraceFlags, trace, type Context } from "@opentelemetry/api";
+import {
+  ROOT_CONTEXT,
+  SpanStatusCode,
+  TraceFlags,
+  context,
+  trace,
+  type Context,
+} from "@opentelemetry/api";
 import { defineHook } from "eve/hooks";
 
 import {
   failureSpan,
+  flushActiveTraceProvider,
   feedbackRefs,
   langfuseRecordIo,
   retrievalFactsFrom,
@@ -59,9 +67,32 @@ export interface SpanEmitter {
 }
 
 /** Builds the OTel parent context from ids alone. The parent span object is
- *  long gone by the time a turn ends — OTel only needs its identity. */
+ *  long gone by the time a turn ends — OTel only needs its identity.
+ *
+ * ── WHY THE AMBIENT-CONTEXT FALLBACK (serverless) ────────────────────────────
+ *
+ * `traceRefs` is PROCESS-LOCAL: an in-memory map with a `.data/` file fallback.
+ * That is enough in dev, where one long-lived process serves the whole turn.
+ * It is NOT enough on Vercel: a tool-using turn is split by eve's durable
+ * workflow into SEVERAL function invocations (measured 2026-09-08 — six
+ * `POST /.well-known/workflow/v1/flow` calls for one "Yoga in Bochum" turn),
+ * and the turn-end event lands in a different invocation from the one that
+ * opened the trace. There the memory map is empty, and the file fallback never
+ * wrote anything because the project directory is read-only on Vercel.
+ *
+ * Returning ROOT_CONTEXT in that situation started a BRAND NEW trace carrying
+ * no session, which the span filter then dropped as a session-less orphan
+ * (CLAUDE.md §16.6.14) — so the turn summary vanished entirely in production
+ * while passing every local check.
+ *
+ * The live OTel context is the right parent anyway: the instrumentation spans
+ * already share one trace id across those invocations, so whatever span is
+ * active when the turn ends belongs to the trace we want to attach to. When
+ * nothing is active, `context.active()` IS the root context, so this is a
+ * no-op on the paths that already worked (dev, and any single-invocation turn).
+ */
 function parentContext(ref: TraceRef | undefined): Context {
-  if (!ref) return ROOT_CONTEXT;
+  if (!ref) return context.active();
   return trace.setSpanContext(ROOT_CONTEXT, {
     traceId: ref.traceId,
     spanId: ref.rootSpanId,
@@ -250,6 +281,13 @@ export function handlersFor(
     "turn.completed": guard(async (event, ctx) => {
       const turnId = event.data?.turnId;
       await finalizeTurn("answered", ctx, typeof turnId === "string" ? turnId : undefined);
+      // SERVERLESS: this is the last hook of the turn, and on Vercel the
+      // instance freezes right after — whatever the batch exporter still
+      // holds (the final model pass, the trace root, the summary above) is
+      // lost unless it leaves NOW. Measured before this flush existed: one
+      // turn's final spans arrived ~15 min late via warm reuse, the next
+      // turn's never arrived at all.
+      await flushActiveTraceProvider();
     }),
 
     // --- Tool results: provenance on success, a story on failure -----------
@@ -286,12 +324,14 @@ export function handlersFor(
     "turn.failed": guard(async (event, ctx) => {
       await capture("turn", String(event.data?.code ?? "turn_error"), event.data, ctx);
       await finalizeTurn("failed", ctx);
+      await flushActiveTraceProvider(); // see turn.completed
     }),
 
     // The last event of a dead session — capture, then release the cache.
     "session.failed": guard(async (event, ctx) => {
       await capture("session", String(event.data?.code ?? "session_error"), event.data, ctx);
       lastRef.delete(ctx.session.id);
+      await flushActiveTraceProvider(); // see turn.completed
     }),
     // Deliberately absent: turn.cancelled — a cancel is not a failure, and
     // would fire on every stop click.

@@ -1,0 +1,9 @@
+# CLI deploys upload from the repo root (each project applies its own Root
+# Directory). These are LOCAL dev-host artifacts that no build needs, and a
+# running `eve dev` creates/deletes files inside them mid-upload, which aborts
+# the archive with ENOENT. Already gitignored, so Git-triggered builds never
+# saw them either.
+.eve
+**/.eve
+.data
+**/.data

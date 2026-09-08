@@ -35,6 +35,7 @@
 //   * observability never throws and never blocks a turn
 //   * content capture is off unless LANGFUSE_RECORD_IO=true
 //   * partner PII (email/phone) never enters an attribute this module builds
+import { trace as otelTrace } from "@opentelemetry/api";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 
@@ -578,6 +579,26 @@ function fileSafe(sessionId: string): string {
   return sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
+/**
+ * Where the cross-invocation stores live.
+ *
+ * ── WHY THIS IS NOT ALWAYS `.data/` (measured 2026-09-08) ────────────────────
+ *
+ * These stores exist to carry per-turn state between the two bundles that need
+ * it (instrumentation writes, the hook reads). In dev that is one process and
+ * even the in-memory half suffices. On Vercel it is NOT: eve's durable
+ * workflow splits ONE tool-using turn across several serverless invocations
+ * (measured: six `POST /.well-known/workflow/v1/flow` calls for a single
+ * partner search), so the memory map is empty in the invocation that ends the
+ * turn and the file is the only bridge left.
+ *
+ * And the project directory is READ-ONLY on Vercel, so every write here failed
+ * silently into the `catch` below — leaving no bridge at all. `/tmp` is the one
+ * writable path, and it is shared by invocations that reuse the same warm
+ * instance, which is the normal case for consecutive steps of one turn.
+ */
+const STORE_ROOT = process.env.VERCEL ? "/tmp/navio-langfuse" : ".data";
+
 function fileStore<T>(dir: string) {
   const memory = new Map<string, T>();
   const pathFor = (sessionId: string) => `${dir}/${fileSafe(sessionId)}.json`;
@@ -620,12 +641,12 @@ export interface TraceRef {
   rootSpanId: string;
 }
 
-export const traceRefs = fileStore<TraceRef>(".data/langfuse-traces");
+export const traceRefs = fileStore<TraceRef>(`${STORE_ROOT}/langfuse-traces`);
 
 /** The assembled system prompt for the session's current turn. gen_ai spans
  *  never carry it (eve passes `instructions` as a separate parameter), so
  *  instrumentation captures it in events["step.started"]. */
-export const systemPromptStore = fileStore<string>(".data/langfuse-prompts");
+export const systemPromptStore = fileStore<string>(`${STORE_ROOT}/langfuse-prompts`);
 
 /** What the visitor asked, what Navio replied, and what was retrieved for the
  *  CURRENT turn.
@@ -642,7 +663,7 @@ export interface TurnIo {
   retrieval?: RetrievalFacts;
 }
 
-export const turnIoStore = fileStore<TurnIo>(".data/langfuse-turn-io");
+export const turnIoStore = fileStore<TurnIo>(`${STORE_ROOT}/langfuse-turn-io`);
 
 /**
  * (session, turn) → the trace that answered it. The bridge for user feedback.
@@ -661,7 +682,7 @@ export interface FeedbackRef {
   traceId: string;
 }
 
-const feedbackRefStore = fileStore<FeedbackRef>(".data/langfuse-feedback-refs");
+const feedbackRefStore = fileStore<FeedbackRef>(`${STORE_ROOT}/langfuse-feedback-refs`);
 
 export const feedbackRefs = {
   set(sessionId: string, turnId: string, ref: FeedbackRef): void {
@@ -681,7 +702,7 @@ export const feedbackRefs = {
  * Langfuse, not expire on its own.
  */
 const queuedMarkerStore = fileStore<{ queuedAt: string }>(
-  ".data/langfuse-annotation-queue-markers",
+  `${STORE_ROOT}/langfuse-annotation-queue-markers`,
 );
 
 export const queuedMarkers = {
@@ -785,20 +806,63 @@ export function contextSummary(args: {
 const MAX_TRACKED_TRACES = 2000;
 const sessionByTraceId = new Map<string, string>();
 
+/** Durable sibling of the in-memory map, for the serverless case: the
+ *  `workflow.route.flow` span (renamed `visitor-request`, the trace ROOT) can
+ *  end in a DIFFERENT invocation from the one that saw the session id, and the
+ *  span filter drops it as a session-less orphan when this lookup misses —
+ *  which is exactly why production traces had no root while dev always did. */
+const sessionByTraceStore = fileStore<string>(`${STORE_ROOT}/langfuse-trace-sessions`);
+
 export function rememberSession(traceId: string, sessionId: string): void {
   if (sessionByTraceId.size >= MAX_TRACKED_TRACES) {
     const oldest = sessionByTraceId.keys().next();
     if (!oldest.done) sessionByTraceId.delete(oldest.value);
   }
   sessionByTraceId.set(traceId, sessionId);
+  sessionByTraceStore.set(traceId, sessionId);
 }
 
 export function sessionForTrace(traceId: string): string | undefined {
-  return sessionByTraceId.get(traceId);
+  return sessionByTraceId.get(traceId) ?? sessionByTraceStore.get(traceId);
 }
 
 export function forgetTrace(traceId: string): void {
   sessionByTraceId.delete(traceId);
+  sessionByTraceStore.delete(traceId);
+}
+
+// ---------------------------------------------------------------------------
+// Serverless flush — the one call that makes the FINAL invocation's spans real
+// ---------------------------------------------------------------------------
+
+/**
+ * Force-flush every span processor on the ACTIVE OTel provider (Sentry's, which
+ * carries the Langfuse and LangSmith pipes — see agent/instrumentation.ts).
+ *
+ * WHY THIS EXISTS (measured 2026-09-08): spans are exported by a
+ * BatchSpanProcessor on a timer. On Vercel the instance is FROZEN the moment
+ * the response ends, so whatever the last invocation of a turn still holds in
+ * its batch — the second model pass, the turn root, the summary — is exported
+ * only if that same instance happens to serve another request later, and is
+ * silently DISCARDED if it never does. Verified live: one turn's final spans
+ * arrived ~15 minutes late via warm reuse; the next turn's never arrived at
+ * all. Flushing at turn end removes the gamble.
+ *
+ * `trace.getTracerProvider()` returns OTel's ProxyTracerProvider; the real
+ * provider (with forceFlush) is its delegate. Never throws, resolves fast, and
+ * is a no-op when no real provider is registered (tests, credential-free runs).
+ */
+export async function flushActiveTraceProvider(): Promise<void> {
+  try {
+    const proxy = otelTrace.getTracerProvider() as {
+      getDelegate?: () => unknown;
+      forceFlush?: () => Promise<void>;
+    };
+    const delegate = (proxy.getDelegate?.() ?? proxy) as { forceFlush?: () => Promise<void> };
+    await delegate.forceFlush?.();
+  } catch {
+    // Observability must never break the agent.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1142,16 +1206,51 @@ export interface TurnSummarySpan {
   attributes: Record<string, string | string[]>;
 }
 
+/**
+ * Durable backing for the journal below.
+ *
+ * ── WHY THE JOURNAL CANNOT BE MEMORY-ONLY (root cause, measured 2026-09-08) ──
+ *
+ * The journal accumulates a turn from several events — `message.received`
+ * (the question), `step.completed` (tokens), `action.result` (retrieval),
+ * `message.completed` (the reply) — and `finalize()` turns them into the
+ * `answer-delivered` summary span. That span is what gives a trace its NAME
+ * and its input/output; without it a trace lists as an opaque id.
+ *
+ * It used to be a plain in-memory Map. In dev that is fine: one process serves
+ * the whole turn. On Vercel it is not. eve's durable workflow splits a
+ * tool-using turn across SEVERAL serverless invocations, and `turn.completed`
+ * fires in a LATER invocation than the one that recorded the question and the
+ * steps. There the map was empty, so `finalize()` hit its
+ * `if (!t || …) return undefined` guard and the hook emitted NOTHING —
+ * silently, with no error, no orphan span, and no entry in the span-filter
+ * debug log. Production therefore had every instrumentation span but no
+ * summary, while every local check passed.
+ *
+ * Persisting each mutation through the same `fileStore` the other bridges use
+ * (now rooted at a writable path — see STORE_ROOT) lets the invocation that
+ * ends the turn read back what earlier invocations wrote.
+ */
+const turnStateStore = fileStore<TurnState>(`${STORE_ROOT}/langfuse-turn-journal`);
+
 export class TurnJournal {
   private readonly turns = new Map<string, TurnState>();
 
+  /** Load-through: memory first, then the cross-invocation store. */
   private turn(sessionId: string): TurnState {
     let t = this.turns.get(sessionId);
     if (!t) {
-      t = freshTurn();
+      t = turnStateStore.get(sessionId) ?? freshTurn();
       this.turns.set(sessionId, t);
     }
     return t;
+  }
+
+  /** Write-through, so the next invocation can pick the turn up. Best-effort
+   *  by construction: `fileStore.set` swallows its own I/O errors. */
+  private persist(sessionId: string, t: TurnState): void {
+    this.turns.set(sessionId, t);
+    turnStateStore.set(sessionId, t);
   }
 
   record(
@@ -1166,8 +1265,8 @@ export class TurnJournal {
         const fresh = freshTurn();
         fresh.userMessage = typeof data?.message === "string" ? data.message : undefined;
         fresh.startedAt = now;
-        this.turns.set(sessionId, fresh);
-        break;
+        this.persist(sessionId, fresh);
+        return;
       }
       case "step.completed": {
         t.steps += 1;
@@ -1216,6 +1315,9 @@ export class TurnJournal {
         break;
       }
     }
+    // Every branch above mutates `t` in place; write it through so the
+    // invocation that ends the turn sees it (see turnStateStore).
+    this.persist(sessionId, t);
   }
 
   /** Build the summary span for a finished turn and clear its state. Returns
@@ -1232,8 +1334,12 @@ export class TurnJournal {
     env?: NodeJS.ProcessEnv;
   }): TurnSummarySpan | undefined {
     const env = args.env ?? process.env;
-    const t = this.turns.get(args.sessionId);
+    // Read through the cross-invocation store: on Vercel this event lands in a
+    // DIFFERENT invocation from the ones that journaled the turn, so memory
+    // alone is empty here and the summary span was never emitted.
+    const t = this.turns.get(args.sessionId) ?? turnStateStore.get(args.sessionId);
     this.turns.delete(args.sessionId);
+    turnStateStore.delete(args.sessionId);
     if (!t || (t.userMessage === undefined && t.steps === 0)) return undefined;
 
     const userMessage = args.recordContent ? (t.userMessage ?? "") : REDACTED;

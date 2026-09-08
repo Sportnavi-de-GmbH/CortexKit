@@ -63,6 +63,7 @@ import {
   isMeaningfulSpanName,
   isOversizedAttribute,
   isTurnScopedSpanName,
+  traceTitle,
   isUsageAggregatorSpan,
   isUsageAttribute,
   langfuseEnabled,
@@ -397,6 +398,24 @@ function buildLangfuseAttributes(span: ReadableSpan, name: string): ReadableSpan
   const purpose = STEP_PURPOSE[name];
   if (purpose) attributes["step.purpose"] = purpose;
 
+  /** The model's own answer text, straight off the AI SDK span. Used when the
+   *  hook has not journaled a reply yet (the serverless case). The key names
+   *  differ across AI SDK versions, so all the known spellings are tried and
+   *  the first non-empty string wins; returns undefined when none is present,
+   *  which leaves the existing behaviour untouched. */
+  function modelCompletionFrom(attrs: Record<string, unknown>): string | undefined {
+    for (const key of [
+      "ai.response.text",
+      "gen_ai.response.text",
+      "gen_ai.completion",
+      "ai.response.object",
+    ]) {
+      const v = attrs[key];
+      if (typeof v === "string" && v.trim() !== "") return v;
+    }
+    return undefined;
+  }
+
   if (sessionId !== undefined) {
     const io = langfuseTurnIo.get(sessionId) ?? {};
     const systemPrompt = langfusePromptStore.get(sessionId);
@@ -439,8 +458,49 @@ function buildLangfuseAttributes(span: ReadableSpan, name: string): ReadableSpan
       name === SPAN.step ||
       name === SPAN.generate
     ) {
-      const reply = LANGFUSE_RECORD_IO ? io.reply : LF_REDACTED;
+      // Fall back to the model's OWN completion when the hook's reply has not
+      // been journaled yet. Setting an explicit `observation.input` stops
+      // Langfuse falling back to the framework's `gen_ai.*` attributes for the
+      // matching output, so without this the billed call exported with
+      // `output: null` in production — the turn ends in a LATER serverless
+      // invocation than the model call, so `io.reply` is simply not there yet.
+      const reply = LANGFUSE_RECORD_IO
+        ? (io.reply ?? modelCompletionFrom(span.attributes))
+        : LF_REDACTED;
       if (reply) attributes[LF.observationOutput] = reply;
+    }
+
+    // ---------------------------------------------------------------------
+    // TRACE-LEVEL fields, stamped HERE rather than on the hook's summary span.
+    //
+    // Langfuse reads `langfuse.trace.*` from ANY span in the trace, so the
+    // trace title and its input/output do not need a dedicated span — they
+    // need a span that HAS the data. On Vercel the hook's `answer-delivered`
+    // never gets that data: eve splits a tool-using turn across several
+    // serverless invocations and the turn-end event lands in one where the
+    // journal is empty (measured 2026-09-08), so the summary was never emitted
+    // and every production trace listed as an opaque id with no I/O.
+    //
+    // The model call does have it, in the same invocation that produced it.
+    // Stamping the trace fields here removes the cross-invocation dependency
+    // instead of trying to carry state across it. When the hook DOES run (dev,
+    // and any single-invocation turn) it writes the same fields afterwards and
+    // simply wins — the values agree, so there is no conflict either way.
+    // ---------------------------------------------------------------------
+    if (name === SPAN.generate) {
+      const question = io.question;
+      const reply = LANGFUSE_RECORD_IO
+        ? (io.reply ?? modelCompletionFrom(span.attributes))
+        : undefined;
+      if (attributes[LF.traceName] === undefined) {
+        attributes[LF.traceName] = traceTitle(question, LANGFUSE_RECORD_IO, 1);
+      }
+      if (attributes[LF.traceInput] === undefined) {
+        attributes[LF.traceInput] = LANGFUSE_RECORD_IO ? (question ?? "") : LF_REDACTED;
+      }
+      if (reply && attributes[LF.traceOutput] === undefined) {
+        attributes[LF.traceOutput] = reply;
+      }
     }
   }
 
