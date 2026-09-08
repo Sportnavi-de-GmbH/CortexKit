@@ -29,6 +29,10 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
+// Action markers → the button row under a finished answer (prompt §7).
+import { parseMessageActions, resolveActions } from "../../lib/navio-actions";
+import { MessageActions } from "./MessageActions";
+import { DataNotice } from "./DataNotice";
 // The SAME cap the API enforces (agent/channels/eve.ts + the /api/partner
 // route), so the counter never promises what the server would reject.
 import {
@@ -42,6 +46,7 @@ import {
 import { NavioMenu } from "./NavioMenu";
 import { PRIVACY_URL } from "./links";
 import { SportnaviLogo } from "./SportnaviLogo";
+import { NavioLogo } from "./NavioLogo";
 import { KontaktForm } from "./KontaktForm";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
@@ -247,6 +252,10 @@ export function NavioWidget({
           // trace to two DIFFERENT Langfuse projects, so feedback has to say
           // which one it belongs to.
           surface={screen === "partner" ? "partner" : "faq"}
+          // Action chips navigate the widget, so the screen setter and the
+          // booking URL have to come from here — same ownership as NavioMenu.
+          onAction={setScreen}
+          bookingUrl={BOOKING_URL}
         />
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
@@ -319,48 +328,81 @@ function GreetingCard({
 }) {
   return (
     <div className="flex h-full items-center justify-center p-3">
-      <div className="w-full max-w-[340px] overflow-hidden rounded-3xl border border-(--border) bg-(--surface) text-(--fg) soft-shadow-lg">
-        <div className="flex items-start gap-3 p-5">
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-(--accent-dim) text-(--brand-green)" aria-hidden="true">
-            <Bot size={24} strokeWidth={1.75} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="font-headline text-base font-semibold text-(--fg)">Hi, ich bin Navio 👋🏻</p>
-            <p className="mt-1 text-sm leading-relaxed text-(--fg-muted)">
-              Dein Guide durch die Sportnavi Welt. Stell deine Fragen und bekomm schnelle Antworten. 💚
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-(--fg-subtle)">
-              Your guide through the Sportnavi world — ask away and get answers fast.
-            </p>
-          </div>
-          <div className="flex shrink-0 flex-col gap-1">
-            <button
-              type="button"
-              aria-label={theme === "dark" ? "Helles Design" : "Dunkles Design"}
-              onClick={onToggleTheme}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-(--fg-subtle) transition-colors hover:bg-black/5 hover:text-(--fg)"
-            >
-              {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
-            </button>
-            <button
-              type="button"
-              aria-label="Schließen"
-              onClick={closeWidget}
-              className="flex h-7 w-7 items-center justify-center rounded-full text-(--fg-subtle) transition-colors hover:bg-black/5 hover:text-(--fg)"
-            >
-              <X size={15} strokeWidth={1.75} />
-            </button>
-          </div>
+      <div className="relative w-full max-w-[340px] overflow-hidden rounded-3xl border border-(--border) bg-(--surface) text-(--fg) soft-shadow-lg">
+        {/* A single soft green wash bleeding down from behind Navio's head. It is
+            the one decorative flourish on this screen — the brand's "hello"
+            moment — and it stays a tint (§4: tints via opacity, never new
+            colours), so it reads on the light and the dark surface alike. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-(--brand-green)/12 to-transparent"
+        />
+
+        {/* Window controls float over the wash rather than taking a column of
+            their own, so the mascot can sit dead centre. */}
+        <div className="absolute top-3 right-3 z-10 flex gap-1">
+          <button
+            type="button"
+            aria-label={theme === "dark" ? "Helles Design" : "Dunkles Design"}
+            onClick={onToggleTheme}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-(--fg-subtle) transition-colors hover:bg-(--fg)/5 hover:text-(--fg)"
+          >
+            {theme === "dark" ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
+          </button>
+          <button
+            type="button"
+            aria-label="Schließen"
+            onClick={closeWidget}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-(--fg-subtle) transition-colors hover:bg-(--fg)/5 hover:text-(--fg)"
+          >
+            <X size={15} strokeWidth={1.75} />
+          </button>
         </div>
-        <div className="px-5 pb-5">
+
+        <div className="relative flex flex-col items-center px-6 pt-8 pb-6 text-center">
+          {/* Navio's face, on a green halo so the dark badge has something to sit
+              in on the light surface and does not read as a hole in the card. */}
+          <span
+            aria-hidden="true"
+            className="flex h-[88px] w-[88px] items-center justify-center rounded-full bg-(--brand-green)/15"
+          >
+            <NavioLogo size={72} />
+          </span>
+
+          <h1 className="mt-4 font-headline text-[19px] leading-tight font-semibold text-(--fg)">
+            Hi, ich bin Navio 👋🏻
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-(--fg-muted)">
+            Dein Guide durch die Sportnavi Welt. Stell deine Fragen und bekomm schnelle Antworten. 💚
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-(--fg-subtle)">
+            Your guide through the Sportnavi world — ask away and get answers fast.
+          </p>
+
+          {/* The vouching line. Navio is the character; Sportnavi is who stands
+              behind it — so the wordmark gets its own quiet row under a hairline
+              instead of competing with the mascot for the top of the card. */}
+          <div className="mt-5 flex w-full items-center gap-3">
+            <span className="h-px flex-1 bg-(--border)" aria-hidden="true" />
+            <span className="flex items-center gap-2 text-[11px] text-(--fg-subtle)">
+              von
+              <SportnaviLogo height={15} />
+            </span>
+            <span className="h-px flex-1 bg-(--border)" aria-hidden="true" />
+          </div>
+
           <button
             type="button"
             onClick={onStart}
-            className="flex w-full items-center justify-center gap-2 rounded-full bg-(--brand-green) px-4 py-3 text-sm font-medium text-white transition-transform hover:scale-[1.02]"
+            // Ink, not white: `#95c11e` carries white text at 1.9:1 and ink at
+            // 8.5:1 (design guidelines §3/§6.4). §6.2's button row still says
+            // `text-white` — it contradicts the contrast rule two sections above
+            // it, and the accessible value is the one that wins.
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-(--brand-green) px-4 py-3 text-sm font-semibold text-(--ink) transition-transform hover:scale-[1.02] active:scale-100"
           >
-            <MessageSquare size={18} strokeWidth={1.75} />
+            <MessageSquare size={18} strokeWidth={2} />
             Mit Navio chatten
-            <ArrowRight size={18} strokeWidth={1.75} />
+            <ArrowRight size={18} strokeWidth={2} />
           </button>
         </div>
       </div>
@@ -435,6 +477,8 @@ function ChatBody({
   intro,
   quickReplies,
   surface,
+  onAction,
+  bookingUrl,
 }: {
   agent: Agent;
   isBusy: boolean;
@@ -443,6 +487,8 @@ function ChatBody({
   intro: { title: string; de: string; en: string };
   quickReplies: readonly string[];
   surface: "faq" | "partner";
+  onAction: (screen: "chat" | "partner" | "contact") => void;
+  bookingUrl: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -512,21 +558,14 @@ function ChatBody({
             <p className="whitespace-pre-wrap wrap-break-word">{messageText(m)}</p>
           </div>
         ) : (
-          <div key={m.id}>
-            <BotBubble>
-              <Markdown text={messageText(m)} />
-              {m.metadata?.status === "streaming" && <Cursor />}
-            </BotBubble>
-            {/* Only once the answer is finished: rating a half-written reply is
-                meaningless, and `turnId` is what ties it to the Langfuse trace. */}
-            {m.metadata?.status === "complete" && (
-              <FeedbackControls
-                sessionId={agent.session?.sessionId}
-                turnId={m.metadata?.turnId}
-                surface={surface}
-              />
-            )}
-          </div>
+          <BotMessage
+            key={m.id}
+            message={m}
+            sessionId={agent.session?.sessionId}
+            surface={surface}
+            onAction={onAction}
+            bookingUrl={bookingUrl}
+          />
         ),
       )}
 
@@ -541,6 +580,58 @@ function ChatBody({
         </div>
       )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * One assistant reply: the bubble, then the action chips the agent asked for,
+ * then the feedback thumbs.
+ *
+ * The marker line is stripped on EVERY render, streaming included — a marker is
+ * never something the visitor should read. The chips themselves wait for
+ * `status === "complete"`, for the same reason FeedbackControls does: the last
+ * line is still arriving, so a chip row rendered early would grow and reflow
+ * under the reader's cursor.
+ */
+function BotMessage({
+  message,
+  sessionId,
+  surface,
+  onAction,
+  bookingUrl,
+}: {
+  message: EveMessageData["messages"][number];
+  sessionId: string | undefined;
+  surface: "faq" | "partner";
+  onAction: (screen: "chat" | "partner" | "contact") => void;
+  bookingUrl: string | null;
+}) {
+  const streaming = message.metadata?.status === "streaming";
+  const complete = message.metadata?.status === "complete";
+  const { text, actions, notices } = parseMessageActions(messageText(message));
+  // The screen's guaranteed chips ride along even when the agent forgot to ask.
+  const chips = resolveActions(actions, surface);
+
+  return (
+    <div>
+      <BotBubble>
+        <Markdown text={text} />
+        {streaming && <Cursor />}
+      </BotBubble>
+      {complete && notices.includes("data") && <DataNotice />}
+      {complete && (
+        <MessageActions actions={chips} onScreen={onAction} bookingUrl={bookingUrl} />
+      )}
+      {/* Only once the answer is finished: rating a half-written reply is
+          meaningless, and `turnId` is what ties it to the Langfuse trace. */}
+      {complete && (
+        <FeedbackControls
+          sessionId={sessionId}
+          turnId={message.metadata?.turnId}
+          surface={surface}
+        />
+      )}
     </div>
   );
 }

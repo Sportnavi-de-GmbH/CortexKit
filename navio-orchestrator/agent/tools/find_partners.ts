@@ -18,7 +18,9 @@ import { searchPartners } from "../../lib/partner-client.ts";
 export default defineTool({
   description:
     "Findet echte Sportnavi-Partner: Studios, Kurse und Sportangebote an einem " +
-    "konkreten Ort. Braucht immer eine Stadt und möglichst eine Sportart. " +
+    "konkreten Ort. Braucht immer eine Stadt und möglichst eine Sportart — die Stadt " +
+    "darf aus einer früheren Nachricht oder der Antwort auf eine Rückfrage stammen, " +
+    "auch mit Tippfehler (der Dienst korrigiert Schreibfehler selbst). " +
     "NICHT für allgemeine Fragen zu Sportnavi, Tarifen, Verträgen oder Regeln — " +
     "dafür ist faq zuständig. Eine Suche dauert 30–60 Sekunden.",
   inputSchema: z.object({
@@ -27,12 +29,21 @@ export default defineTool({
       .min(3)
       .describe(
         "Der vollständige, für sich allein verständliche Suchauftrag auf Deutsch, " +
-          "inklusive Stadt, Sportart und allen bisher genannten Wünschen. " +
+          "inklusive Stadt, Sportart und allen bisher genannten Wünschen — auch wenn " +
+          "Stadt und Sportart aus verschiedenen Nachrichten stammen. Verwechsle nie " +
+          'Sportart und Stadt. Beispiel: "Suche nach einem Boxstudio in Berlin. ' +
+          'Antworte auf Deutsch." ' +
           "Der Partner-Dienst sieht euren bisherigen Chat NICHT. " +
           "Gib am Ende die gewünschte Antwortsprache an.",
       ),
-    city: z.string().optional().describe("Die Stadt, falls eindeutig genannt."),
-    sport: z.string().optional().describe("Die Sportart, falls eindeutig genannt."),
+    city: z
+      .string()
+      .optional()
+      .describe(
+        "Die Stadt, exakt wie von der Nutzerin geschrieben — Tippfehler NICHT " +
+          'korrigieren und NICHT weglassen ("Verlin" wird serverseitig aufgelöst).',
+      ),
+    sport: z.string().optional().describe("Die Sportart, falls genannt. Gehört niemals in city."),
   }),
   async execute({ query, city, sport }) {
     const result = await searchPartners(query);

@@ -29,12 +29,17 @@
 
 import { type AuthFn, ForbiddenError, localDev } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
+import {
+  TOO_LONG_API_DETAIL,
+  extractMessageText,
+  isMessageTooLong,
+} from "../../lib/message-limits";
 
 /**
  * Max bytes accepted on any request that carries a body (chat session-create +
  * follow-up messages). Guards against oversized-message abuse: a huge pasted
- * message inflates input tokens/cost on every turn, and the chat turn has no
- * length cap of its own (unlike the contact form's MAX_MESSAGE_CHARS). Checked
+ * message inflates input tokens/cost on every turn. The finer per-message
+ * character cap lives in messageLengthLimit() below. Checked
  * cheaply via `Content-Length` — we reject BEFORE the body is read or the model
  * is called. Default 16 KB comfortably fits a normal message + JSON envelope
  * while blocking multi-KB pastes. Env-tunable; `0` disables the check.
@@ -55,6 +60,41 @@ function requestSizeLimit(): AuthFn<Request> {
     const bytes = Number(header);
     if (Number.isFinite(bytes) && bytes > MAX_REQUEST_BYTES) {
       throw new ForbiddenError({ message: "Message too large." });
+    }
+    return null;
+  };
+}
+
+/**
+ * Reject a chat message longer than the SHARED cap (lib/message-limits.ts), the
+ * same number the widget's counter shows. Runs after the byte cap, so the body
+ * read here is already bounded to a few KB.
+ *
+ * Why a body check at all, when MAX_REQUEST_BYTES exists: the byte cap is a
+ * blunt transport guard on the whole envelope, and it cannot be shown to the
+ * visitor as "you have N characters left". This one enforces exactly what the
+ * UI promises, so a caller that skips the UI gets the same answer the UI gives.
+ *
+ * The body is read from a CLONE — the original stream stays intact for eve.
+ * Anything that is not a JSON object with a string `message` is passed through
+ * untouched: this is a length guard, not a protocol validator.
+ */
+function messageLengthLimit(): AuthFn<Request> {
+  return async (request) => {
+    if (request.method !== "POST") return null;
+    const type = request.headers.get("content-type") ?? "";
+    if (!type.includes("json")) return null;
+
+    let body: unknown;
+    try {
+      body = await request.clone().json();
+    } catch {
+      return null; // unreadable/!JSON — not this gate's business
+    }
+
+    const message = extractMessageText(body);
+    if (message !== null && isMessageTooLong(message)) {
+      throw new ForbiddenError({ message: TOO_LONG_API_DETAIL });
     }
     return null;
   };
@@ -222,9 +262,10 @@ function widgetOrigin(): AuthFn<Request> {
 }
 
 export default eveChannel({
-  // Size gate runs FIRST so oversized bodies are rejected cheaply, before BotID
+  // Size gate runs FIRST so oversized bodies are rejected cheaply, then the
+  // character cap (the same number the widget's counter shows), before BotID
   // or origin checks and long before the model call.
-  auth: [requestSizeLimit(), botCheck(), widgetOrigin(), localDev()],
+  auth: [requestSizeLimit(), messageLengthLimit(), botCheck(), widgetOrigin(), localDev()],
   // Same-origin (iframe) calls need no CORS. Configure narrow CORS only if you
   // serve the widget cross-origin via WIDGET_ALLOWED_ORIGINS.
   ...(extraAllowedOrigins().length > 0

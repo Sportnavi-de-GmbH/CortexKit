@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Navio mascot — STAND-IN.
+
+  Redrawn from the reference artwork because the master file was not available
+  in the repo, on sportnavi.b-cdn.net, or anywhere on sportnavi.de. Replace this
+  file with the real export when it exists: the filename is what NavioLogo.tsx
+  loads, so dropping the master here needs no code change.
+
+  Brand values are exact: green #95c11e, orange #ec6607, ink #1a1a1a.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Navio">
+  <defs>
+    <!-- The rim: green sweeping into orange, the two brand colours and nothing else. -->
+    <linearGradient id="rim" x1="0.12" y1="0.05" x2="0.88" y2="0.95">
+      <stop offset="0" stop-color="#c3dd7e"/>
+      <stop offset="0.45" stop-color="#95c11e"/>
+      <stop offset="1" stop-color="#f0a06a"/>
+    </linearGradient>
+
+    <!-- Badge: not flat black — a touch of green in the falloff keeps it from
+         reading as a hole punched in the card. -->
+    <radialGradient id="badge" cx="0.4" cy="0.32" r="0.85">
+      <stop offset="0" stop-color="#2a2f22"/>
+      <stop offset="0.55" stop-color="#141712"/>
+      <stop offset="1" stop-color="#000000"/>
+    </radialGradient>
+
+    <linearGradient id="pin" x1="0.25" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#a9d426"/>
+      <stop offset="0.5" stop-color="#95c11e"/>
+      <stop offset="1" stop-color="#6f9412"/>
+    </linearGradient>
+
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f57a20"/>
+      <stop offset="1" stop-color="#ec6607"/>
+    </linearGradient>
+
+    <!-- Gloss, kept as a gradient to transparent so it works on any backdrop. -->
+    <linearGradient id="gloss" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <clipPath id="headClip">
+      <circle cx="256" cy="210" r="118"/>
+    </clipPath>
+  </defs>
+
+  <circle cx="256" cy="256" r="254" fill="url(#rim)"/>
+  <circle cx="256" cy="256" r="245" fill="url(#badge)"/>
+
+  <!-- Pin: teardrop drawn as one path so the head and the point share an edge.
+       Geometry is measured off the reference — head centre a little above the
+       badge centre, tip reaching close to the lower rim. -->
+  <path
+    d="M256 452 C256 452 138 320 138 210 a118 118 0 0 1 236 0 c0 110 -118 242 -118 242 Z"
+    fill="url(#pin)"
+  />
+  <ellipse cx="210" cy="140" rx="70" ry="40" fill="url(#gloss)" clip-path="url(#headClip)"/>
+
+  <!-- Face: sits BELOW the head centre, so the green reads as a hood around it. -->
+  <circle cx="256" cy="252" r="86" fill="#121212"/>
+  <ellipse cx="223" cy="248" rx="15" ry="23" fill="#ffffff"/>
+  <ellipse cx="289" cy="248" rx="15" ry="23" fill="#ffffff"/>
+  <path
+    d="M219 288 Q256 320 293 288"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="14"
+    stroke-linecap="round"
+  />
+
+  <!-- Headband across the brow. Its lower edge clears the eyes, which is what
+       makes it read as a sweatband rather than a blindfold. -->
+  <path d="M136 178 Q256 122 376 178 L376 224 Q256 168 136 224 Z" fill="url(#band)"/>
+  <path
+    d="M158 186 Q256 138 354 186"
+    fill="none"
+    stroke="#ffffff"
+    stroke-opacity="0.45"
+    stroke-width="7"
+    stroke-linecap="round"
+  />
+</svg>

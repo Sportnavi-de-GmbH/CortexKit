@@ -11,6 +11,7 @@
     "live-check": "tsx scripts/live-check.ts",
     "contact:check": "tsx scripts/contact-live-check.ts",
     "cache:check": "tsx scripts/cache-check.ts",
+    "prompt:use": "tsx scripts/use-prompt.ts",
     "langfuse:verify": "tsx scripts/verify-langfuse.ts",
     "eval:upload": "tsx scripts/upload-eval-dataset.ts",
     "eval:verify": "tsx scripts/verify-eval-dataset.ts",

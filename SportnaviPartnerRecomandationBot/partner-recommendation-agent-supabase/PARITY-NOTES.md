@@ -54,6 +54,36 @@ The six `SupabaseBackend` operations and their Postgres counterparts (`lib/supab
 | H | **PostgREST's silent 1,000-row cap.** Any unbounded `select` returns at most 1,000 rows with no error. | Platform. | Every unbounded read is an RPC or paged; the only per-request table reads are per-city (≤ ~100 rows) and per-id lists. `scripts/generate-city-coverage.ts` pages and cross-checks an exact count. |
 | I | **`filters.exclude_ids`** is applied inside the SQL `base` CTE here, after the vector search on Convex. | Documented Convex deviation. | No caller passes it. |
 
+## 3b. DELIBERATE PROMPT DIVERGENCE — this build leads, 2026-09-08
+
+**Golden rule 1 ("the reference wins") is suspended for `agent/instructions.md`.** The owner
+directed the Navio widget's button/redirect work at THIS build, because
+`kb-agent-langsmith-starter/.env.local` has `PARTNER_AGENT_HOST=http://127.0.0.1:3006` — the
+Supabase build is what actually answers. So the prompt was extended here first, and the Convex
+build does not have these sections yet.
+
+**Do NOT re-copy `agent/instructions.md` from the Convex build** without porting these forward,
+or the widget's buttons silently stop appearing (an unknown or absent marker is dropped without
+error — see `tests/marker-contract.test.ts`).
+
+What is new here and missing there:
+
+| Section | What it does |
+|---|---|
+| `## Not your question — hand it to the FAQ agent` | Sportnavi-topic questions (tariffs, cancellation, check-in, cashback, Firmenfitness…) are handed to the FAQ agent instead of guessed at, via `[[action:faq-agent]]`. |
+| `## The marker line — buttons and the freshness notice` | The `[[action:…]]` / `[[notice:data]]` vocabulary the widget renders as buttons and the amber callout. |
+| Closing block of `## Presenting recommendations` | "Current details always come from the studio itself" (hours/prices/availability, once per message) + emit `[[notice:data]]` whenever partners were named. |
+
+**Prompt versioning** now mirrors the widget build: authored versions live in `agent/prompts/`
+(`instructions-v1.md` = the pre-buttons prompt, `instructions-v2.md` = live), `agent/instructions.md`
+is the active copy, and `npm run prompt:use v1|v2` switches. Never hand-edit `agent/instructions.md`
+— that edit is what the next switch overwrites.
+
+The widget half of the contract is `kb-agent-langsmith-starter/lib/navio-actions.ts`
+(`NAVIO_ACTION_IDS`, `NAVIO_NOTICE_IDS`, `ALWAYS_ACTIONS`). The two services deploy separately so
+there is nothing to import; `tests/marker-contract.test.ts` duplicates the ids and fails loudly if
+this prompt drifts off them.
+
 ## 4. Known inherited state
 
 - **One unit test fails in both builds:** `tests/agent-assembly.test.ts › keeps contact details bound

@@ -51,7 +51,7 @@ export function getAzureChatModel(deployment?: string): LanguageModel {
   return build(
     baseURL!,
     apiKey!,
-    deployment ?? process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o-mini",
+    deployment ?? process.env.AZURE_AI_CHATBOT_DEPLOYMENT_NAME ?? "gpt-4o",
   );
 }
 
@@ -73,13 +73,13 @@ export function getAzureRouterModel(): LanguageModel {
     "AZURE_ROUTER_API_KEY (or AZURE_AI_CHATBOT_API_KEY)": apiKey,
   });
 
-  return build(baseURL!, apiKey!, process.env.AZURE_ROUTER_DEPLOYMENT_NAME ?? "gpt-4o-mini");
+  return build(baseURL!, apiKey!, process.env.AZURE_ROUTER_DEPLOYMENT_NAME ?? "gpt-4o");
 }
 
 /**
  * Context window for the router deployment. eve resolves compaction metadata at
  * compile time, so a wrong number here means compaction fires at the wrong point.
- * The configured deployment is gpt-4o-mini: a 128k window. Override with
+ * The configured deployment is gpt-4o: a 128k window. Override with
  * AZURE_ROUTER_CONTEXT_WINDOW only if the deployment ever changes.
  */
 export function routerContextWindowTokens(): number {

@@ -16,6 +16,16 @@
   --user-bubble: #1a1a1a;
   --user-bubble-fg: #ffffff;
 
+  /* Semantic WARNING tokens. Not a third brand colour: brand green/orange carry
+     meaning (AI action / human hand-off), so a data-freshness caveat cannot borrow
+     either without muddying both. Amber sits on the same semantic axis the error
+     alert already uses red on, and it is the only tone that reads as "caution"
+     without reading as "failure". */
+  --warn-surface: #fffbeb;
+  --warn-border: #fcd34d;
+  --warn-fg: #78350f;
+  --warn-icon: #b45309;
+
   /* Back-compat aliases so existing components keep working, now brand-tuned. */
   --bg: #fafaf9;
   --bg-panel: #ffffff;
@@ -50,6 +60,12 @@
   --border: rgba(255, 255, 255, 0.14);
   --user-bubble: #f4f4f5;
   --user-bubble-fg: #1a1a1a;
+  /* Warning, tonal rather than inverted (design guidelines §3): a dim amber wash
+     on the dark surface, never the light theme's near-white #fffbeb. */
+  --warn-surface: rgba(180, 83, 9, 0.16);
+  --warn-border: rgba(252, 211, 77, 0.38);
+  --warn-fg: #fde68a;
+  --warn-icon: #fbbf24;
   /* back-compat aliases */
   --bg: #1a1a1a;
   --bg-panel: #1a1a1a;

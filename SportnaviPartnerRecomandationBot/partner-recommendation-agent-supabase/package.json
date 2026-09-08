@@ -9,6 +9,8 @@
     "dev:ui": "next dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "live-check": "tsx scripts/live-check.ts",
+    "prompt:use": "tsx scripts/use-prompt.ts",
     "supabase:verify": "tsx scripts/verify-supabase-setup.ts",
     "generate:coverage": "tsx scripts/generate-city-coverage.ts",
     "smoke": "tsx scripts/smoke-live.ts",

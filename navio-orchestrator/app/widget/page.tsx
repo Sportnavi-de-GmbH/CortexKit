@@ -5,14 +5,15 @@
 // (/eve/v1/*) are the SAME origin, so useEveAgent() talks to the agent with no
 // CORS and the invisible BotID check runs within our own deployment.
 //
-// ONE AGENT. Service 1 mounted two clients here (faqAgent + partnerAgent via the
-// /api/partner proxy) and let the screen decide which one was active. In the
-// multi-agent design the MASTER decides, so there is exactly one session, one
-// conversation history, and one place for context to live.
+// ONE AGENT, ONE CONVERSATION (chat-first redesign — see
+// docs/superpowers/specs/2026-09-08-chat-first-redesign.md). The MASTER decides
+// which capability answers each message, so there is exactly one session, one
+// conversation history, and one place for context to live — which is what lets
+// follow-up messages switch intent (FAQ → partner → FAQ) naturally.
 //
-// The partner agent is still a separate deployment — it is just reached
-// server-side now, from agent/tools/find_partners.ts, instead of from the
-// browser. That is why there is no /api/partner route in this project.
+// The partner agent is still a separate deployment — it is reached server-side,
+// from agent/tools/find_partners.ts, never from the browser. That is why there
+// is no /api/partner route in this project.
 
 import { useEffect } from "react";
 import { useEveAgent } from "eve/react";

@@ -17,10 +17,11 @@ import { getAzureRouterModel, routerContextWindowTokens } from "../lib/llm.ts";
 //   agent/tools/find_partners   HTTP tool       → partner agent deployment
 //   agent/tools/request_human_contact           → approval-gated escalation
 //
-// The router and the FAQ subagent both run the single configured Azure
-// deployment, gpt-4o-mini (AZURE_ROUTER_DEPLOYMENT_NAME /
-// AZURE_AI_CHATBOT_DEPLOYMENT_NAME). The routing turn runs on EVERY message but
-// only has to pick a route and relay; answer quality lives in the FAQ subagent.
+// The router and the FAQ subagent both run gpt-4o (AZURE_ROUTER_DEPLOYMENT_NAME /
+// AZURE_AI_CHATBOT_DEPLOYMENT_NAME, upgraded from gpt-4o-mini 2026-09-08 after a
+// live transcript reproduced §2.4c's 40%-accuracy failure modes). The routing
+// turn runs on EVERY message but only has to pick a route and relay; answer
+// quality lives in the FAQ subagent.
 //
 // KEEP agent/instructions.md SMALL (≤2k tokens). It replays on every turn. The
 // 16.7k-token knowledge base belongs to the FAQ subagent and must never leak up
@@ -38,7 +39,7 @@ function resolveRouterModel() {
   try {
     return getAzureRouterModel();
   } catch {
-    return "openai/gpt-4o-mini";
+    return "openai/gpt-4o";
   }
 }
 
