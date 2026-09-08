@@ -15,7 +15,10 @@
     "generate:coverage": "tsx scripts/generate-city-coverage.ts",
     "smoke": "tsx scripts/smoke-live.ts",
     "langfuse:verify": "tsx scripts/verify-langfuse.ts",
-    "feedback:check": "tsx scripts/check-feedback.ts"
+    "feedback:check": "tsx scripts/check-feedback.ts",
+    "feedback:setup": "tsx scripts/setup-feedback-workflow.ts",
+    "feedback:report": "tsx scripts/feedback-report.ts",
+    "feedback:promote": "tsx scripts/feedback-promote.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",

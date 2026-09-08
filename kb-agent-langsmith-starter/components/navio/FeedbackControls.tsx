@@ -16,19 +16,10 @@
 import { useCallback, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 
-/** Kept in sync with lib/feedback.ts REASONS — the server rejects anything
- *  off-taxonomy, so a drift here shows up as a dropped reason, never as a
- *  corrupted breakdown. */
-const REASONS: { code: string; label: string; en: string }[] = [
-  { code: "too_slow", label: "Zu langsam", en: "Too slow" },
-  { code: "not_relevant", label: "Nicht relevant", en: "Not relevant" },
-  { code: "incorrect", label: "Inhaltlich falsch", en: "Factually wrong" },
-  { code: "unclear", label: "Unklar formuliert", en: "Unclear wording" },
-  { code: "unanswered", label: "Frage nicht beantwortet", en: "Question not answered" },
-  { code: "tool_failed", label: "Hat technisch nicht geklappt", en: "Technical problem" },
-  { code: "misunderstood", label: "Falsch verstanden", en: "Misunderstood me" },
-  { code: "other", label: "Sonstiges", en: "Something else" },
-];
+// The taxonomy is shared with the server (lib/feedback-taxonomy.ts) — the two
+// used to be hand-synced copies, and the server silently drops anything
+// off-taxonomy, so drift showed up as vanished reasons.
+import { REASONS } from "../../lib/feedback-taxonomy";
 
 const MAX_COMMENT = 1_000;
 
@@ -80,9 +71,11 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
       setComment("");
       return;
     }
-    // Recorded IMMEDIATELY — the panel is optional enrichment.
+    // Recorded IMMEDIATELY — the panel is optional enrichment. It now opens
+    // for BOTH thumbs: a 👍 comment is what routes an answer into the
+    // "Positive Examples" review queue, so it deserves a (reason-free) box too.
     post({ thumb: value, reason: null, comment: "" });
-    setPanelOpen(value === "down");
+    setPanelOpen(true);
     if (value === "up") {
       setReason(null);
       setComment("");
@@ -90,7 +83,11 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
   };
 
   const submitDetail = () => {
-    post({ thumb: "down", reason, comment: comment.trim() || undefined });
+    post({
+      thumb: thumb ?? "down",
+      reason: thumb === "down" ? reason : null,
+      comment: comment.trim() || undefined,
+    });
     setPanelOpen(false);
     setSent(true);
   };
@@ -170,14 +167,17 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
         {panelOpen && (
           <div className="mt-3 border-t border-(--border) pt-3">
             <p className="font-headline text-[13px] font-semibold text-(--fg)">
-              Was war das Problem?{" "}
+              {thumb === "down" ? "Was war das Problem?" : "Was war gut?"}{" "}
               <span className="font-normal text-(--fg-subtle)">(optional)</span>
             </p>
-            <p className="text-[11px] text-(--fg-subtle)">What went wrong? (optional)</p>
+            <p className="text-[11px] text-(--fg-subtle)">
+              {thumb === "down" ? "What went wrong? (optional)" : "What did you like? (optional)"}
+            </p>
 
             {/* Two even columns rather than free-wrapping pills. Eight German labels
                 of very different lengths wrapped into five ragged rows and read as a
                 tag cloud; a grid gives predictable rows and 36px targets. */}
+            {thumb === "down" && (
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               {REASONS.map((r) => {
                 const active = reason === r.code;
@@ -197,7 +197,7 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
                         : "border-(--border) text-(--fg-muted) hover:border-(--fg)/25 hover:bg-(--surface-muted) hover:text-(--fg)",
                     ].join(" ")}
                   >
-                    <span className="block">{r.label}</span>
+                    <span className="block">{r.de}</span>
                     <span
                       className={`block text-[11px] leading-tight ${
                         active ? "text-(--fg-muted)" : "text-(--fg-subtle)"
@@ -209,15 +209,18 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
                 );
               })}
             </div>
+            )}
 
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
               rows={2}
-              placeholder="Was hätte besser sein können?"
+              placeholder={thumb === "down" ? "Was hätte besser sein können?" : "Was hat dir geholfen?"}
               className="mt-2.5 min-h-[68px] w-full resize-none rounded-xl border border-(--border) bg-(--surface) px-3 py-2 text-[13px] leading-relaxed text-(--fg) placeholder:text-(--fg-subtle) focus:border-(--fg)/30"
             />
-            <p className="mt-1 px-1 text-[11px] text-(--fg-subtle)">What could have been better?</p>
+            <p className="mt-1 px-1 text-[11px] text-(--fg-subtle)">
+              {thumb === "down" ? "What could have been better?" : "What helped you?"}
+            </p>
 
             <div className="mt-2.5 flex items-center justify-end gap-2">
               {/* Only appears when the limit is actually in reach. */}

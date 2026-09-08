@@ -18,6 +18,9 @@
     "eval:run": "tsx scripts/run-eval.ts",
     "eval:dev": "tsx scripts/eval-dev.ts",
     "feedback:check": "tsx scripts/check-feedback.ts",
+    "feedback:setup": "tsx scripts/setup-feedback-workflow.ts",
+    "feedback:report": "tsx scripts/feedback-report.ts",
+    "feedback:promote": "tsx scripts/feedback-promote.ts",
     "alert:test": "tsx scripts/test-alert-webhook.ts"
   },
   "dependencies": {

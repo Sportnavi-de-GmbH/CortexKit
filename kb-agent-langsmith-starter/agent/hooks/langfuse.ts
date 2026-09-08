@@ -28,6 +28,7 @@ import { defineHook } from "eve/hooks";
 
 import {
   failureSpan,
+  flushActiveTraceProvider,
   feedbackRefs,
   langfuseRecordIo,
   systemPromptStore,
@@ -245,6 +246,8 @@ export function handlersFor(
     "turn.completed": guard(async (event, ctx) => {
       const turnId = event.data?.turnId;
       await finalizeTurn("answered", ctx, typeof turnId === "string" ? turnId : undefined);
+      // Serverless: last hook of the turn — export the batch before the freeze.
+      await flushActiveTraceProvider();
     }),
 
     // --- Failure capture ---------------------------------------------------
@@ -264,12 +267,14 @@ export function handlersFor(
     "turn.failed": guard(async (event, ctx) => {
       await capture("turn", String(event.data?.code ?? "turn_error"), event.data, ctx);
       await finalizeTurn("failed", ctx);
+      await flushActiveTraceProvider(); // see turn.completed
     }),
 
     // The last event of a dead session — capture, then release the cache.
     "session.failed": guard(async (event, ctx) => {
       await capture("session", String(event.data?.code ?? "session_error"), event.data, ctx);
       lastRef.delete(ctx.session.id);
+      await flushActiveTraceProvider(); // see turn.completed
     }),
     // Deliberately absent: turn.cancelled — a cancel is not a failure.
   };

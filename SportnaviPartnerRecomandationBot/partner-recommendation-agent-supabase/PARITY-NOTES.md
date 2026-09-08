@@ -104,3 +104,15 @@ this prompt drifts off them.
 3. Run both unit suites; the pass/fail sets must match modulo the Convex-only tests.
 4. Re-run `npm run generate:coverage` in **both** builds after a partner import — the coverage list is
    baked into the prompt.
+
+## 6. Feedback quality loop (2026-09-08)
+
+This build carries the full feedback→improvement workflow, byte-mirrored from the widget
+(`kb-agent-langsmith-starter`): `lib/feedback-taxonomy.ts` (shared reason + review-verdict
+vocabulary), `lib/feedback-insights.ts` (pure stats/promote routing), positive-queue routing in
+`lib/feedback.ts` (👍-with-comment → "Feedback — Positive Examples"), and the
+`feedback:setup` / `feedback:report` / `feedback:promote` scripts (script copies here import
+`../lib/...` without the `.ts` extension — this tsconfig forbids it; that is the only diff).
+Operating manual: `../../kb-agent-langsmith-starter/docs/FEEDBACK-SYSTEM.md` (rituals, env-id
+table for BOTH projects, live-instance traps). The **Convex reference does not have this yet** —
+when it is next touched, copy these files there per §5, adjusting imports the same way.

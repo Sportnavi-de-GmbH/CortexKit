@@ -73,14 +73,23 @@ describe("the merge trap", () => {
     expect(up).toHaveProperty("comment");
   });
 
-  it("clears the comment on 👍 — an empty string is what erases it", () => {
+  it("keeps the comment on 👍 — it is the ticket into positive review", () => {
     const up = buildScorePayload(
-      { sessionId: "s", turnId: "t", thumb: "up", comment: "ignored" },
+      { sessionId: "s", turnId: "t", thumb: "up", comment: "sehr hilfreich" },
+      TRACE,
+      env(CREDS),
+    );
+    expect(up.comment).toBe("sehr hilfreich");
+    expect(up.metadata.reason).toBeNull();
+  });
+
+  it("a comment-less vote still clears the stored comment — empty string erases", () => {
+    const up = buildScorePayload(
+      { sessionId: "s", turnId: "t", thumb: "up" },
       TRACE,
       env(CREDS),
     );
     expect(up.comment).toBe("");
-    expect(up.metadata.reason).toBeNull();
   });
 
   it("keeps the comment on 👎", () => {
@@ -346,7 +355,7 @@ describe("annotation queue", () => {
     expect(queueCall?.body).toEqual({ objectId: "sess-queue-2", objectType: "SESSION" });
   });
 
-  it("never pushes on 👍", async () => {
+  it("never pushes a plain 👍 (no comment) anywhere", async () => {
     const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
     const fetchImpl = mockFn as unknown as typeof fetch;
     await submitFeedback(
@@ -356,6 +365,53 @@ describe("annotation queue", () => {
     );
     const calls = mockFn.mock.calls.map((c) => String(c[0]));
     expect(calls.some((u) => u.includes("/annotation-queues/"))).toBe(false);
+  });
+
+  it("routes 👍-with-comment into the POSITIVE queue, not the negative one", async () => {
+    const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
+    const fetchImpl = mockFn as unknown as typeof fetch;
+    const both = env({
+      ...CREDS,
+      LANGFUSE_FEEDBACK_QUEUE_ID: "queue-neg",
+      LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos",
+    });
+    await submitFeedback(
+      { sessionId: "s", turnId: "t", thumb: "up", comment: "super erklärt, danke!" },
+      { kind: "trace", traceId: "trace-pos-1" },
+      { fetchImpl, env: both },
+    );
+    const queueCalls = mockFn.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/annotation-queues/"));
+    expect(queueCalls).toHaveLength(1);
+    expect(queueCalls[0]).toContain("/annotation-queues/queue-pos/");
+  });
+
+  it("👍-with-comment is a silent no-op when the positive queue is unconfigured", async () => {
+    const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
+    const fetchImpl = mockFn as unknown as typeof fetch;
+    const res = await submitFeedback(
+      { sessionId: "s", turnId: "t", thumb: "up", comment: "toll" },
+      { kind: "trace", traceId: "trace-pos-2" },
+      { fetchImpl, env: withQueue }, // negative queue only
+    );
+    expect(res.ok).toBe(true);
+    const calls = mockFn.mock.calls.map((c) => String(c[0]));
+    expect(calls.some((u) => u.includes("/annotation-queues/"))).toBe(false);
+  });
+
+  it("retrying a 👍-with-comment queues exactly once (dedupe key includes the queue)", async () => {
+    const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
+    const fetchImpl = mockFn as unknown as typeof fetch;
+    const both = env({
+      ...CREDS,
+      LANGFUSE_FEEDBACK_QUEUE_ID: "queue-neg",
+      LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos",
+    });
+    const input = { sessionId: "s", turnId: "t", thumb: "up" as const, comment: "merci" };
+    const target = { kind: "trace" as const, traceId: "trace-pos-3" };
+    await submitFeedback(input, target, { fetchImpl, env: both });
+    await submitFeedback(input, target, { fetchImpl, env: both });
+    const queueCalls = mockFn.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/annotation-queues/"));
+    expect(queueCalls).toHaveLength(1);
   });
 
   it("is a silent no-op when the queue id is unset — never blocks the score write", async () => {

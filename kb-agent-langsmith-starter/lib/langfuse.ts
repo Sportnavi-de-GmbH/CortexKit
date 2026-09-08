@@ -26,6 +26,7 @@
 //   * missing credentials ⇒ complete no-op (a fresh clone runs credential-free)
 //   * observability never throws and never blocks a turn
 //   * content capture is off unless LANGFUSE_RECORD_IO=true
+import { trace as otelTrace } from "@opentelemetry/api";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 
@@ -349,9 +350,48 @@ export function knowledgeSource(systemPrompt: string | undefined): KnowledgeSour
 // All I/O is best-effort: observability never breaks the agent.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Serverless flush — makes the FINAL invocation's spans real
+// ---------------------------------------------------------------------------
+
+/**
+ * Force-flush every span processor on the ACTIVE OTel provider. Ported from
+ * the partner build (measured 2026-09-08): on Vercel the instance freezes the
+ * moment the response ends, so whatever the batch exporter still holds is
+ * exported only if the same warm instance serves a later request — or
+ * discarded. The FAQ turn is single-invocation, so this is protective rather
+ * than load-bearing here, but it also makes traces queryable immediately.
+ * Never throws; a no-op when no real provider is registered.
+ */
+export async function flushActiveTraceProvider(): Promise<void> {
+  try {
+    const proxy = otelTrace.getTracerProvider() as {
+      getDelegate?: () => unknown;
+      forceFlush?: () => Promise<void>;
+    };
+    const delegate = (proxy.getDelegate?.() ?? proxy) as { forceFlush?: () => Promise<void> };
+    await delegate.forceFlush?.();
+  } catch {
+    // Observability must never break the agent.
+  }
+}
+
 function fileSafe(sessionId: string): string {
   return sessionId.replace(/[^A-Za-z0-9_-]/g, "_");
 }
+
+/**
+ * Where the cross-invocation stores live.
+ *
+ * Ported from the partner build (measured there 2026-09-08): on Vercel the
+ * project directory is READ-ONLY, so every write to `.data/` silently died in
+ * the catch below — production feedback votes degraded to session precision
+ * (feedbackRefs never persisted) and the annotation-queue dedupe markers were
+ * lost, producing duplicate queue items. `/tmp` is the one writable path; it
+ * is per-instance, so this stays best-effort — but best-effort that actually
+ * works on a warm instance beats a bridge that never exists at all.
+ */
+const STORE_ROOT = process.env.VERCEL ? "/tmp/navio-langfuse" : ".data";
 
 function fileStore<T>(dir: string) {
   const memory = new Map<string, T>();
@@ -395,13 +435,13 @@ export interface TraceRef {
   rootSpanId: string;
 }
 
-export const traceRefs = fileStore<TraceRef>(".data/langfuse-traces");
+export const traceRefs = fileStore<TraceRef>(`${STORE_ROOT}/langfuse-traces`);
 
 /** The assembled system prompt for the session's current turn. gen_ai spans
  *  never carry it (eve passes `instructions` as a separate parameter), so
  *  instrumentation captures it in events["step.started"]. It is the agent's
  *  entire knowledge source — see knowledgeSource(). */
-export const systemPromptStore = fileStore<string>(".data/system-prompts");
+export const systemPromptStore = fileStore<string>(`${STORE_ROOT}/system-prompts`);
 
 /** What the visitor asked and what Navio replied, for the CURRENT turn.
  *
@@ -416,7 +456,7 @@ export interface TurnIo {
   reply?: string;
 }
 
-export const turnIoStore = fileStore<TurnIo>(".data/turn-io");
+export const turnIoStore = fileStore<TurnIo>(`${STORE_ROOT}/turn-io`);
 
 /**
  * (session, turn) → the trace that answered it. THE bridge for user feedback.
@@ -443,7 +483,7 @@ export interface FeedbackRef {
   summaryObservationId?: string;
 }
 
-const feedbackRefStore = fileStore<FeedbackRef>(".data/feedback-refs");
+const feedbackRefStore = fileStore<FeedbackRef>(`${STORE_ROOT}/feedback-refs`);
 
 /** One key per answered turn. */
 function feedbackKey(sessionId: string, turnId: string): string {
@@ -468,7 +508,7 @@ export const feedbackRefs = {
  * Langfuse, not expire on its own — an item that quietly re-queues itself
  * after a cache eviction would be confusing, not helpful.
  */
-const queuedMarkerStore = fileStore<{ queuedAt: string }>(".data/annotation-queue-markers");
+const queuedMarkerStore = fileStore<{ queuedAt: string }>(`${STORE_ROOT}/annotation-queue-markers`);
 
 export const queuedMarkers = {
   has(key: string): boolean {

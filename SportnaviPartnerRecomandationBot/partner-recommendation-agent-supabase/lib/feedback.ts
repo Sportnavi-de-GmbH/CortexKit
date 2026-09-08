@@ -57,52 +57,10 @@ import {
 // agrees with them" — and it is why these codes are not free text.
 // ---------------------------------------------------------------------------
 
-export const REASONS = [
-  {
-    code: "too_slow",
-    de: "Zu langsam",
-    correlate: "timing.duration_ms · timing.first_token_ms",
-  },
-  {
-    code: "not_relevant",
-    de: "Nicht relevant",
-    correlate: "retrieval.city · retrieval.shown",
-  },
-  {
-    code: "incorrect",
-    de: "Inhaltlich falsch",
-    correlate: "knowledge.version_digest",
-  },
-  {
-    code: "unclear",
-    de: "Unklar formuliert",
-    correlate: "model · tokens.output",
-  },
-  {
-    code: "unanswered",
-    de: "Frage nicht beantwortet",
-    correlate: "tools.called = none",
-  },
-  {
-    code: "tool_failed",
-    de: "Hat technisch nicht geklappt",
-    correlate: "tools.errors · retrieval.searched",
-  },
-  {
-    code: "misunderstood",
-    de: "Falsch verstanden",
-    correlate: "retrieval.city · tools.called",
-  },
-  { code: "other", de: "Sonstiges", correlate: "—" },
-] as const;
-
-export type ReasonCode = (typeof REASONS)[number]["code"];
-
-const REASON_CODES = new Set<string>(REASONS.map((r) => r.code));
-
-export function isReasonCode(value: unknown): value is ReasonCode {
-  return typeof value === "string" && REASON_CODES.has(value);
-}
+// The taxonomy lives in lib/feedback-taxonomy.ts (client-safe, shared with
+// the widget build) and is re-exported here so existing imports keep working.
+export { REASONS, isReasonCode, type ReasonCode } from "./feedback-taxonomy";
+import { isReasonCode as isReason, type ReasonCode } from "./feedback-taxonomy";
 
 // ---------------------------------------------------------------------------
 // Score names
@@ -152,6 +110,13 @@ export function reasonScoreConfigId(env: NodeJS.ProcessEnv = process.env): strin
 
 export function annotationQueueId(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return env.LANGFUSE_FEEDBACK_QUEUE_ID?.trim() || undefined;
+}
+
+/** The "Feedback — Positive Examples" queue. Unset => positives are counted
+ *  in the stats but never queued — same silent-no-op contract as everything
+ *  else here. */
+export function positiveAnnotationQueueId(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID?.trim() || undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +214,10 @@ export function buildScorePayload(
   target: FeedbackTarget,
   env: NodeJS.ProcessEnv = process.env,
 ): ScorePayload {
-  const comment = input.thumb === "down" ? sanitizeComment(input.comment, env) : "";
+  // BOTH thumbs keep their comment now: a 👍 with a comment is the entry
+  // ticket to the "Feedback — Positive Examples" review queue, so dropping
+  // it here would silently kill the golden-answers pipeline.
+  const comment = sanitizeComment(input.comment, env);
   return {
     id: feedbackScoreId(input.sessionId, input.turnId),
     name: FEEDBACK_SCORE,
@@ -310,15 +278,15 @@ export function buildReasonPayload(
  *  as the rest of this module) or when this target was already queued. */
 async function pushToAnnotationQueue(
   target: FeedbackTarget,
+  queueId: string | undefined,
   deps: { fetchImpl: FetchLike; env: NodeJS.ProcessEnv; headers: Record<string, string> },
 ): Promise<void> {
   try {
-    const queueId = annotationQueueId(deps.env);
     if (!queueId) return;
 
     const objectType = target.kind === "trace" ? "TRACE" : "SESSION";
     const objectId = target.kind === "trace" ? target.traceId : target.sessionId;
-    const key = `${objectType}:${objectId}`;
+    const key = `${queueId}:${objectType}:${objectId}`;
     if (queuedMarkers.has(key)) return;
 
     const res = await deps.fetchImpl(
@@ -379,7 +347,16 @@ export async function submitFeedback(
     // A 👎 with or without a reason still deserves review, so this runs
     // before the reason branch below rather than depending on it.
     if (input.thumb === "down") {
-      await pushToAnnotationQueue(target, { fetchImpl: doFetch, env, headers });
+      await pushToAnnotationQueue(target, annotationQueueId(env), { fetchImpl: doFetch, env, headers });
+    } else if (score.comment !== "") {
+      // A 👍 whose visitor took the time to write something is a candidate
+      // golden example — route it to the positive review queue. Plain 👍 stays
+      // statistics-only (the weekly report samples those).
+      await pushToAnnotationQueue(target, positiveAnnotationQueueId(env), {
+        fetchImpl: doFetch,
+        env,
+        headers,
+      });
     }
 
     const reason = buildReasonPayload(input, target, env);
