@@ -69,6 +69,26 @@ Master Agent is the entry point and routes every message. No agent-selection men
      step, triple-intent turn 23.5s total.
   verify-e2e tracks model-side R2 compliance as WARNINGS (the UI covers the visitor);
   the speak-without-call stall stays a FAILURE.
+- **No status text, ever** (owner decision, later on 2026-09-08 — REVERSES the UI
+  announcement fallback above): the widget shows ONLY the loading dots until real answer
+  content exists — the master's "Einen Moment…"/"Alles klar, ich suche…" filler messages
+  are suppressed entirely (live AND in history: per turn, only the last message with real
+  content renders), the UI-side announcement is removed, and errors render as a friendly
+  German bubble instead of the raw technical message. Phase detection is event-based:
+  `currentTurnHasResult` (lib/specialist-preview.ts) separates the hidden announcement
+  phase from the shown answer phase. The master still GENERATES the announcements (prompt
+  untouched — they cost ~1s of pass-1 output but changing R2 again wasn't worth the eval
+  churn); they are simply never rendered. Measured after the change: dots at 0.3s, FAQ
+  turn ~11s total (reference kb widget: ~8.7s — the residual gap is the routing pass),
+  partner answer visible ~6s before the relay finishes via the preview.
+
+- **Page-help ⓘ** (follow-up 2026-09-08, evening): the reference widget's new PageHelp
+  system is ported — the chat header's ⓘ now toggles a per-page manual overlay
+  (`PageHelp.tsx` verbatim + `pageHelpContent.ts` adapted: ONE `chat` entry describing
+  everything the single conversation does — questions, city-based partner search, the
+  contact/booking buttons, any language). The old direct jump to the "Über Navio Plus"
+  screen lives on as the "Mehr über Navio Plus" link inside the panel. Copy contract
+  pinned by `tests/page-help.test.ts` (DE/EN mirrored line for line).
 
 ## Deliberately unchanged
 

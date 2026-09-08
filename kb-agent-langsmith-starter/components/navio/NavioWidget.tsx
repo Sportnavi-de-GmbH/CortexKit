@@ -29,6 +29,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
+import { PageHelpOverlay, type HelpScreen } from "./PageHelp";
 // Action markers → the button row under a finished answer (prompt §7).
 import { parseMessageActions, resolveActions } from "../../lib/navio-actions";
 import { MessageActions } from "./MessageActions";
@@ -140,6 +141,11 @@ export function NavioWidget({
   const [screen, setScreen] = useState<Screen>("greeting");
   const [declined, setDeclined] = useState(false);
   const [draft, setDraft] = useState("");
+  // Page-specific help overlay (the header ⓘ). Owned here so it can be closed
+  // whenever the screen changes — stale help about the previous page is worse
+  // than none.
+  const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => setHelpOpen(false), [screen]);
 
   // The two chat screens ("chat" = FAQ, "partner" = finder) each drive their own eve
   // agent; every message/status/reset below targets whichever screen is active.
@@ -161,7 +167,7 @@ export function NavioWidget({
     void activeAgent.send({ message: trimmed });
   }
 
-  const root = `${theme === "dark" ? "theme-dark " : ""}flex h-screen flex-col bg-(--surface) text-(--fg)`;
+  const root = `${theme === "dark" ? "theme-dark " : ""}relative flex h-screen flex-col bg-(--surface) text-(--fg)`;
 
   if (screen === "greeting") {
     return (
@@ -212,8 +218,15 @@ export function NavioWidget({
           <HeaderBtn label={theme === "dark" ? "Helles Design" : "Dunkles Design"} onClick={toggle}>
             {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
           </HeaderBtn>
-          {screen === "menu" && (
-            <HeaderBtn label="Über Navio Plus" onClick={() => setScreen("info")}>
+          {(screen === "menu" || isChatScreen) && (
+            // Page-specific help: the SAME ⓘ on menu, FAQ and Partner, opening
+            // a manual for the current screen only (components/navio/PageHelp).
+            // The menu's old direct jump to "Über Navio Plus" lives on as a
+            // link inside the menu's help panel.
+            <HeaderBtn
+              label="Info zu dieser Seite · About this page"
+              onClick={() => setHelpOpen((v) => !v)}
+            >
               <Info size={16} strokeWidth={1.75} />
             </HeaderBtn>
           )}
@@ -260,6 +273,22 @@ export function NavioWidget({
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
       {screen === "info" && <InfoPanel onBack={() => setScreen("menu")} />}
+
+      {/* Page-specific help overlay — only over screens that have a manual. */}
+      {helpOpen && (screen === "menu" || isChatScreen) && (
+        <PageHelpOverlay
+          screen={screen as HelpScreen}
+          onClose={() => setHelpOpen(false)}
+          onOpenAbout={
+            screen === "menu"
+              ? () => {
+                  setHelpOpen(false);
+                  setScreen("info");
+                }
+              : undefined
+          }
+        />
+      )}
 
       {/* Input bar — FAQ chat only */}
       {isChatScreen && (

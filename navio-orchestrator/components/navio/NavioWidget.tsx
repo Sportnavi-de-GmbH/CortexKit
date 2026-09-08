@@ -46,13 +46,14 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { EveMessageData, UseEveAgentHelpers } from "eve/react";
 import { useNavioTheme } from "./useNavioTheme";
+import { PageHelpOverlay } from "./PageHelp";
 import { KontaktForm } from "./KontaktForm";
 import { ApprovalPrompt, pendingInputRequest } from "./ApprovalPrompt";
 import { FeedbackControls } from "./FeedbackControls";
 import { MessageActions } from "./MessageActions";
 import { DataNotice } from "./DataNotice";
 import { parseMessageActions, resolveActions } from "../../lib/navio-actions";
-import { currentTurnDelegationFrom } from "../../lib/specialist-preview";
+import { currentTurnDelegationFrom, currentTurnHasResult } from "../../lib/specialist-preview";
 import { useSpecialistPreview } from "./useSpecialistPreview";
 // The SAME cap the API enforces (agent/channels/eve.ts), so the counter never
 // promises what the server would reject.
@@ -164,6 +165,11 @@ export function NavioWidget({ agent }: { agent: Agent }) {
   const [screen, setScreen] = useState<Screen>("greeting");
   const [declined, setDeclined] = useState(false);
   const [draft, setDraft] = useState("");
+  // Page-specific help overlay (the header ⓘ, same mechanism as the reference
+  // widget). Owned here so it can be closed whenever the screen changes —
+  // stale help about the previous page is worse than none.
+  const [helpOpen, setHelpOpen] = useState(false);
+  useEffect(() => setHelpOpen(false), [screen]);
   // Which contact-form-open signal we already acted on, so returning to the chat
   // doesn't immediately bounce the user back into the form.
   const [handledContactAt, setHandledContactAt] = useState(-1);
@@ -242,7 +248,14 @@ export function NavioWidget({ agent }: { agent: Agent }) {
           </HeaderBtn>
           {screen === "chat" && (
             <>
-              <HeaderBtn label="Über Navio Plus" onClick={() => setScreen("info")}>
+              {/* Page-specific help: the SAME ⓘ as the reference widget, opening
+                  a manual for this page (components/navio/PageHelp). The old
+                  direct jump to "Über Navio Plus" lives on as a link inside
+                  the help panel. */}
+              <HeaderBtn
+                label="Info zu dieser Seite · About this page"
+                onClick={() => setHelpOpen((v) => !v)}
+              >
                 <Info size={16} strokeWidth={1.75} />
               </HeaderBtn>
               <HeaderBtn label="Chat zurücksetzen" onClick={() => agent.reset()}>
@@ -273,6 +286,18 @@ export function NavioWidget({ agent }: { agent: Agent }) {
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("chat")} />}
       {screen === "info" && <InfoPanel onBack={() => setScreen("chat")} />}
+
+      {/* Page-specific help overlay — only over the chat (the one page with a manual). */}
+      {helpOpen && screen === "chat" && (
+        <PageHelpOverlay
+          screen="chat"
+          onClose={() => setHelpOpen(false)}
+          onOpenAbout={() => {
+            setHelpOpen(false);
+            setScreen("info");
+          }}
+        />
+      )}
 
       {/* Input bar — chat only */}
       {screen === "chat" && (
@@ -515,63 +540,93 @@ function ChatBody({
 
   const showQuickReplies = messages.length === 0;
 
-  // Typing dots show while SUBMITTED *and* while streaming-with-no-VISIBLE-text.
-  // Computed on the PARSED text: a stream whose first chunk is a half-written
-  // marker (`[[`) renders an empty bubble, and the dots must not vanish then.
-  const lastMessage = messages.at(-1);
-  const streamingWithoutText =
-    agent.status === "streaming" &&
-    (lastMessage?.role !== "assistant" ||
-      parseMessageActions(messageText(lastMessage)).text.trim().length === 0);
-  const waiting = agent.status === "submitted" || streamingWithoutText;
-
-  // When to show the preview: from its first content until the RELAY's text
-  // appears. `waiting` is the wrong gate — it closes as soon as the master's
-  // announcement text exists, which is exactly the window the preview fills.
-  // The baseline is the number of VISIBLE assistant answers at first preview
-  // content; one more after that is the relay's text arriving, and the preview
-  // yields to the real bubble.
-  const visibleAnswers = useMemo(
-    () =>
-      messages.filter(
-        (m) =>
-          m.role === "assistant" &&
-          parseMessageActions(messageText(m)).text.trim().length > 0,
-      ).length,
-    [messages],
-  );
-  const previewBaseline = useRef<number | null>(null);
-  useEffect(() => {
-    if (!isBusy) {
-      previewBaseline.current = null;
-      return;
-    }
-    if (preview && previewBaseline.current === null) previewBaseline.current = visibleAnswers;
-  }, [preview, isBusy, visibleAnswers]);
-  const showPreview =
-    isBusy &&
-    preview.length > 0 &&
-    previewBaseline.current !== null &&
-    visibleAnswers <= previewBaseline.current;
-
-  // The UI-side R2 fallback: when the master delegated SILENTLY (measured on
-  // ~half of gpt-4o's delegating turns), render the announcement ourselves the
-  // moment the delegation appears on the wire (~2-4s) — a prompt rule cannot
-  // deliver "always", the UI can. Skipped whenever the master did speak this
-  // turn (its own announcement is then the visible last message).
-  const masterSpokeThisTurn =
-    lastMessage?.role === "assistant" &&
-    parseMessageActions(messageText(lastMessage)).text.trim().length > 0;
+  // ── What is visible during a running turn (owner decision 2026-09-08) ──────
+  // NO status text, ever: not the master's "Einen Moment…" filler, not a UI
+  // fallback, not raw errors. The visitor sees the loading dots until ACTUAL
+  // answer content exists, then only that — the same rhythm as the reference
+  // (kb-agent) widget. Concretely:
+  //   - announcement phase (delegation requested, no result yet): dots only —
+  //     the master's filler messages are suppressed entirely, live and in
+  //     history;
+  //   - answer phase: the specialist preview (arrives earliest) or the relay's
+  //     own streaming text;
+  //   - turns with no delegation (direct answers, clarifying questions,
+  //     escalation reasons): stream normally — that text IS the response.
   const delegation = useMemo(
     () => (isBusy ? currentTurnDelegationFrom(agent.events) : null),
     [agent.events.length, isBusy],
   );
-  const announcement =
-    waiting && !masterSpokeThisTurn && delegation
-      ? delegation === "partner"
-        ? "Alles klar, ich suche passende Partner für dich – das dauert einen kleinen Moment. ⏳"
-        : "Einen Moment, ich schaue kurz nach."
-      : null;
+  const hasResult = useMemo(
+    () => (isBusy ? currentTurnHasResult(agent.events) : false),
+    [agent.events.length, isBusy],
+  );
+  // The preview persists for the whole active turn — the relay's (identical)
+  // text is suppressed while it shows, and the final message takes over at the
+  // turn boundary, so the content never re-types itself.
+  const showPreview = isBusy && preview.length > 0;
+
+  // Assemble the visible thread: per turn (a run of assistant messages between
+  // two user messages) only the LAST message with real content renders — that
+  // is the actual response; announcement fillers and interim steps never show.
+  const thread: React.ReactNode[] = [];
+  let activeAnswerVisible = false;
+  {
+    let run: EveMessageData["messages"][number][] = [];
+    const flushRun = (trailingActive: boolean) => {
+      if (run.length === 0) return;
+      const finalMsg = [...run]
+        .reverse()
+        .find((m) => {
+          const parsed = parseMessageActions(messageText(m));
+          return parsed.text.trim().length > 0 || parsed.actions.length > 0;
+        });
+      run = [];
+      if (!finalMsg) return;
+      if (trailingActive) {
+        if (showPreview) return; // the preview is already showing this content
+        if (delegation) {
+          if (!hasResult) return; // announcement phase — dots only
+          // Answer phase: only LIVE relay text; a just-completed relay renders
+          // at the turn boundary a moment later (avoids the announcement
+          // popping in between result and relay start).
+          if (finalMsg.metadata?.status !== "streaming") return;
+          if (parseMessageActions(messageText(finalMsg)).text.trim().length === 0) return;
+        }
+        activeAnswerVisible = true;
+      }
+      thread.push(
+        <BotMessage
+          key={finalMsg.id}
+          message={finalMsg}
+          sessionId={agent.session?.sessionId}
+          onScreen={onScreen}
+          bookingUrl={bookingUrl}
+          chipsDisabled={isBusy || inputRequest !== null}
+          partnerTurn={
+            typeof finalMsg.metadata?.turnId === "string" &&
+            partnerTurns.has(finalMsg.metadata.turnId)
+          }
+        />,
+      );
+    };
+    for (const m of messages) {
+      if (m.role === "user") {
+        flushRun(false);
+        thread.push(
+          <div
+            key={m.id}
+            className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm px-4 py-2.5 text-[15px] leading-[1.5]"
+            style={{ background: "var(--user-bubble)", color: "var(--user-bubble-fg)" }}
+          >
+            <p className="whitespace-pre-wrap wrap-break-word">{messageText(m)}</p>
+          </div>,
+        );
+      } else {
+        run.push(m);
+      }
+    }
+    flushRun(isBusy);
+  }
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
@@ -614,62 +669,33 @@ function ChatBody({
           </div>
         )}
 
-        {messages.map((m) =>
-          m.role === "user" ? (
-            <div
-              key={m.id}
-              className="ml-auto max-w-[80%] rounded-2xl rounded-tr-sm px-4 py-2.5 text-[15px] leading-[1.5]"
-              style={{ background: "var(--user-bubble)", color: "var(--user-bubble-fg)" }}
-            >
-              <p className="whitespace-pre-wrap wrap-break-word">{messageText(m)}</p>
-            </div>
-          ) : messageText(m).trim().length === 0 ? null : (
-            // Assistant messages whose RAW text is empty carry only tool calls —
-            // the delegation itself must stay invisible to the user.
-            <BotMessage
-              key={m.id}
-              message={m}
-              sessionId={agent.session?.sessionId}
-              onScreen={onScreen}
-              bookingUrl={bookingUrl}
-              chipsDisabled={isBusy || inputRequest !== null}
-              partnerTurn={
-                typeof m.metadata?.turnId === "string" && partnerTurns.has(m.metadata.turnId)
-              }
-            />
-          ),
-        )}
+        {thread}
 
-        {/* In order of information value during a running turn: the
-            specialist's answer as it arrives (until the relay message takes
-            over) → the (UI-guaranteed) announcement of what is being done →
-            the dots. */}
+        {/* The specialist's answer as it arrives — the earliest real content
+            of the turn. Everything before it is just the dots. */}
         {showPreview && (
           <BotBubble>
             <Markdown text={preview} />
             <Cursor />
           </BotBubble>
         )}
-        {!showPreview &&
-          waiting &&
-          (announcement ? (
-            <BotBubble>
-              <p className="whitespace-pre-wrap">{announcement}</p>
-              <Cursor />
-            </BotBubble>
-          ) : (
-            <TypingIndicator />
-          ))}
+
+        {/* The loading bubble — the ONLY thing shown while nothing real has
+            arrived yet (reference-widget behavior; no status text, ever). */}
+        {isBusy && !inputRequest && !showPreview && !activeAnswerVisible && <TypingIndicator />}
 
         {/* The parked turn. Rendered LAST so it sits directly above the composer. */}
         {inputRequest && <ApprovalPrompt request={inputRequest} agent={agent} disabled={isBusy} />}
 
-        {agent.status === "error" && agent.error && (
-          <div
-            role="alert"
-            className="max-w-[88%] rounded-2xl rounded-tl-sm border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700 wrap-break-word"
-          >
-            {agent.error.message}
+        {/* Failures read as a normal, friendly bubble — never a technical
+            error message (owner decision 2026-09-08). */}
+        {agent.status === "error" && (
+          <div role="alert">
+            <BotBubble>
+              <p>
+                Das hat gerade leider nicht geklappt. Versuch es bitte einfach noch einmal. 🙏
+              </p>
+            </BotBubble>
           </div>
         )}
       </div>

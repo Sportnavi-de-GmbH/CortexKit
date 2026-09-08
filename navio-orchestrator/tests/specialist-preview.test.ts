@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   childTextDeltaFrom,
   currentTurnDelegationFrom,
+  currentTurnHasResult,
   faqChildSessionFrom,
   isChildBoundary,
   previewFragmentFrom,
@@ -141,5 +142,23 @@ describe("currentTurnDelegationFrom — the UI-side R2 fallback", () => {
   it("reports nothing before any delegation happened", () => {
     expect(currentTurnDelegationFrom([userMsg])).toBeNull();
     expect(currentTurnDelegationFrom([])).toBeNull();
+  });
+});
+
+describe("currentTurnHasResult — the announcement/answer phase line", () => {
+  const userMsg = { type: "message.received", data: { message: "…" } };
+  const result = { type: "action.result", data: { result: { kind: "tool-result" } } };
+
+  it("is false during the announcement phase and true once a result lands", () => {
+    expect(currentTurnHasResult([userMsg])).toBe(false);
+    expect(currentTurnHasResult([userMsg, result])).toBe(true);
+  });
+
+  it("ignores results from previous turns", () => {
+    expect(currentTurnHasResult([userMsg, result, userMsg])).toBe(false);
+  });
+
+  it("is false on an empty stream", () => {
+    expect(currentTurnHasResult([])).toBe(false);
   });
 });

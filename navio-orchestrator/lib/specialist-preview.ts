@@ -128,6 +128,23 @@ export function isChildBoundary(event: WireEvent): boolean {
  * message that started the running turn). Partner beats faq for the copy choice
  * because its wait is the long one.
  */
+/**
+ * True once the CURRENT turn's delegation has produced at least one result.
+ *
+ * The widget uses this as the line between the turn's ANNOUNCEMENT phase (the
+ * master's "Einen Moment…" filler, which is never rendered — owner decision
+ * 2026-09-08: status text is hidden, only the loading bubble shows) and the
+ * ANSWER phase (the relay carrying real content, which streams normally).
+ */
+export function currentTurnHasResult(events: readonly WireEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.type === "message.received") return false;
+    if (event.type === "action.result") return true;
+  }
+  return false;
+}
+
 export function currentTurnDelegationFrom(events: readonly WireEvent[]): "partner" | "faq" | null {
   let start = 0;
   for (let i = events.length - 1; i >= 0; i--) {
