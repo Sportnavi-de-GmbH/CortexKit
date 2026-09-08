@@ -329,7 +329,10 @@ describe("annotation queue", () => {
       { fetchImpl, env: withQueue },
     );
 
-    const queueCall = calls.find((c) => c.url.includes("/annotation-queues/queue-1/items"));
+    // The dedupe GET hits the same path first; the push is the call WITH a body.
+    const queueCall = calls.find(
+      (c) => c.url.includes("/annotation-queues/queue-1/items") && c.body !== undefined,
+    );
     expect(queueCall?.body).toEqual({ objectId: "trace-queue-1", objectType: "TRACE" });
   });
 
@@ -346,7 +349,10 @@ describe("annotation queue", () => {
       { fetchImpl, env: withQueue },
     );
 
-    const queueCall = calls.find((c) => c.url.includes("/annotation-queues/queue-1/items"));
+    // The dedupe GET hits the same path first; the push is the call WITH a body.
+    const queueCall = calls.find(
+      (c) => c.url.includes("/annotation-queues/queue-1/items") && c.body !== undefined,
+    );
     expect(queueCall?.body).toEqual({ objectId: "sess-queue-2", objectType: "SESSION" });
   });
 
@@ -375,9 +381,11 @@ describe("annotation queue", () => {
       { kind: "trace", traceId: "trace-pos-1" },
       { fetchImpl, env: both },
     );
-    const queueCalls = mockFn.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/annotation-queues/"));
-    expect(queueCalls).toHaveLength(1);
-    expect(queueCalls[0]).toContain("/annotation-queues/queue-pos/");
+    const queuePosts = mockFn.mock.calls
+      .filter((c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method === "POST")
+      .map((c) => String(c[0]));
+    expect(queuePosts).toHaveLength(1);
+    expect(queuePosts[0]).toContain("/annotation-queues/queue-pos/");
   });
 
   it("👍-with-comment is a silent no-op when the positive queue is unconfigured", async () => {
@@ -405,8 +413,10 @@ describe("annotation queue", () => {
     const target = { kind: "trace" as const, traceId: "trace-pos-3" };
     await submitFeedback(input, target, { fetchImpl, env: both });
     await submitFeedback(input, target, { fetchImpl, env: both });
-    const queueCalls = mockFn.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/annotation-queues/"));
-    expect(queueCalls).toHaveLength(1);
+    const queuePosts = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method === "POST",
+    );
+    expect(queuePosts).toHaveLength(1);
   });
 
   it("is a silent no-op when the queue id is unset — never blocks the score write", async () => {
@@ -433,10 +443,38 @@ describe("annotation queue", () => {
       );
     await vote();
     await vote(); // simulated retry / double-click of the same vote
-    const queuePushes = mockFn.mock.calls.filter((c) =>
-      String(c[0]).includes("/annotation-queues/queue-1/items"),
+    const queuePushes = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/queue-1/items") && c[1]?.method === "POST",
     );
     expect(queuePushes).toHaveLength(1);
+  });
+
+  it("asks the queue itself before pushing — per-instance markers are not enough on Vercel", async () => {
+    // Measured 2026-09-08: five identical production POSTs produced two queue
+    // items, because each invocation had a fresh marker store. A fresh process
+    // (empty markers) must therefore still not duplicate what Langfuse has.
+    const mockFn = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/annotation-queues/queue-1/items") && (init?.method ?? "GET") === "GET") {
+        return new Response(
+          JSON.stringify({
+            data: [{ objectId: "trace-queue-8", objectType: "TRACE", status: "PENDING" }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const fetchImpl = mockFn as unknown as typeof fetch;
+    await submitFeedback(
+      { sessionId: "s", turnId: "t", thumb: "down" },
+      { kind: "trace", traceId: "trace-queue-8" },
+      { fetchImpl, env: withQueue },
+    );
+    const posts = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method === "POST",
+    );
+    expect(posts).toHaveLength(0);
   });
 
   it("leaves an existing queue item untouched on a 👎→👍 flip", async () => {
@@ -454,8 +492,11 @@ describe("annotation queue", () => {
     );
     // Exactly the one push from the 👎 — the flip to 👍 neither deletes nor
     // re-pushes it. Deliberate: see pushToAnnotationQueue's header comment.
-    const queueCalls = mockFn.mock.calls.filter((c) => String(c[0]).includes("/annotation-queues/"));
-    expect(queueCalls).toHaveLength(1);
+    const queueWrites = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== "GET" && c[1]?.method !== undefined,
+    );
+    expect(queueWrites).toHaveLength(1);
+    expect(queueWrites[0][1]?.method).toBe("POST");
   });
 
   it("never throws even when the queue push itself fails", async () => {
@@ -476,6 +517,47 @@ describe("annotation queue", () => {
       ),
     ).resolves.toMatchObject({ ok: true }); // the SCORE write still succeeded
     expect(call).toBeGreaterThan(1); // proves the queue push was actually attempted
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trace resolution WITHOUT local state.
+//
+// On Vercel the invocation serving /api/feedback is almost never the one that
+// ran the turn (measured 2026-09-08: 0 of 5 votes found the local map), so the
+// route asks Langfuse which trace answered the turn — the session's traces in
+// start order ARE the turn order.
+// ---------------------------------------------------------------------------
+describe("resolveTraceViaLangfuse", () => {
+  it("names the trace by the turn ordinal of the session's observations", async () => {
+    const { resolveTraceViaLangfuse } = await import("../lib/feedback");
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(String(url)).toContain("/api/public/v2/observations?");
+      expect(String(url)).toContain("sessionId=sess-1");
+      return new Response(
+        JSON.stringify({
+          data: [
+            { traceId: "tr-b", startTime: "2026-09-08T10:05:00Z" },
+            { traceId: "tr-a", startTime: "2026-09-08T10:00:00Z" },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    const creds = env(CREDS);
+    await expect(resolveTraceViaLangfuse("sess-1", "turn_0", { fetchImpl, env: creds })).resolves.toBe("tr-a");
+    await expect(resolveTraceViaLangfuse("sess-1", "turn_1", { fetchImpl, env: creds })).resolves.toBe("tr-b");
+    // Not ingested yet → undefined, so the caller degrades to session precision.
+    await expect(resolveTraceViaLangfuse("sess-1", "turn_2", { fetchImpl, env: creds })).resolves.toBeUndefined();
+  });
+
+  it("is undefined — never a throw — when Langfuse is unconfigured or down", async () => {
+    const { resolveTraceViaLangfuse } = await import("../lib/feedback");
+    const boom = vi.fn(async () => {
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    await expect(resolveTraceViaLangfuse("s", "turn_0", { fetchImpl: boom, env: env(CREDS) })).resolves.toBeUndefined();
+    await expect(resolveTraceViaLangfuse("s", "turn_0", { fetchImpl: boom, env: env({}) })).resolves.toBeUndefined();
   });
 });
 

@@ -15,6 +15,7 @@
 import {
   FeedbackRequestSchema,
   isReasonCode,
+  resolveTraceViaLangfuse,
   submitFeedback,
   type FeedbackRequest,
   type FeedbackTarget,
@@ -47,11 +48,15 @@ function authorized(req: Request): boolean {
   return isLoopback(req);
 }
 
-function resolveTarget(sessionId: string, turnId: string): FeedbackTarget {
+async function resolveTarget(sessionId: string, turnId: string): Promise<FeedbackTarget> {
   const ref = feedbackRefs.get(sessionId, turnId);
-  // Session-level rather than nothing when the map has expired — see the note
-  // on feedbackRefs in lib/langfuse.ts.
-  return ref ? { kind: "trace", traceId: ref.traceId } : { kind: "session", sessionId };
+  if (ref) return { kind: "trace", traceId: ref.traceId };
+  // The map is per-instance; on Vercel the invocation serving this route is
+  // almost never the one that ran the turn (measured 2026-09-08 on the widget:
+  // 0 of 5). Ask Langfuse which trace answered this turn; session-level rather
+  // than nothing when it is not ingested yet — feedback:reconcile upgrades it.
+  const traceId = await resolveTraceViaLangfuse(sessionId, turnId);
+  return traceId ? { kind: "trace", traceId } : { kind: "session", sessionId };
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -66,7 +71,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ detail: "Invalid feedback payload." }, { status: 400 });
   }
 
-  const target = resolveTarget(parsed.sessionId, parsed.turnId);
+  const target = await resolveTarget(parsed.sessionId, parsed.turnId);
   const result = await submitFeedback(
     {
       sessionId: parsed.sessionId,

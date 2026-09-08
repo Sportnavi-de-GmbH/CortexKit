@@ -13,6 +13,7 @@ import {
   rateByDigest,
   REGRESSION_DATASET,
   samplePlainUps,
+  traceForTurn,
   verdictByTrace,
   windowStats,
   type ScoreRow,
@@ -64,6 +65,17 @@ describe("fromV3Row (the live v3 wire shape — measured, do not simplify)", () 
     });
   });
 
+  it("prefers metadata.originalTimestamp (a reconciled score is not a new vote)", () => {
+    const row = fromV3Row({
+      id: "a",
+      name: "user-feedback",
+      value: 0,
+      timestamp: "2026-09-15T00:00:00Z",
+      metadata: { originalTimestamp: "2026-09-01T00:00:00Z" },
+    });
+    expect(row.timestamp).toBe("2026-09-01T00:00:00Z");
+  });
+
   it("reads the trace/session linkage from subject, not traceId", () => {
     expect(fromV3Row({ id: "a", name: "x", subject: { kind: "trace", id: "t1" } }).traceId).toBe("t1");
     expect(fromV3Row({ id: "b", name: "x", subject: { kind: "session", id: "s1" } })).toMatchObject({
@@ -72,6 +84,32 @@ describe("fromV3Row (the live v3 wire shape — measured, do not simplify)", () 
     });
     // fields=subject omitted server-side → no linkage, never a crash
     expect(fromV3Row({ id: "c", name: "x" }).traceId).toBeUndefined();
+  });
+});
+
+describe("traceForTurn (trace precision without local state)", () => {
+  const obs = [
+    { traceId: "t-second", startTime: "2026-09-08T10:05:00Z" },
+    { traceId: "t-first", startTime: "2026-09-08T10:00:30Z" }, // a later span of the first trace
+    { traceId: "t-first", startTime: "2026-09-08T10:00:00Z" },
+    { traceId: "t-third", startTime: "2026-09-08T10:09:00Z" },
+    { startTime: "2026-09-08T09:00:00Z" }, // no traceId — ignored
+  ];
+
+  it("orders traces by their EARLIEST observation and indexes by turn number", () => {
+    expect(traceForTurn(obs, "turn_0")).toBe("t-first");
+    expect(traceForTurn(obs, "turn_1")).toBe("t-second");
+    expect(traceForTurn(obs, "turn_2")).toBe("t-third");
+  });
+
+  it("returns undefined rather than guessing when the ordinal is not there yet", () => {
+    expect(traceForTurn(obs, "turn_3")).toBeUndefined();
+    expect(traceForTurn([], "turn_0")).toBeUndefined();
+  });
+
+  it("refuses turn ids that are not eve's turn_N shape", () => {
+    expect(traceForTurn(obs, "0")).toBeUndefined();
+    expect(traceForTurn(obs, "turn_x")).toBeUndefined();
   });
 });
 

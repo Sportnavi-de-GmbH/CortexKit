@@ -28,6 +28,11 @@ export interface ScoreRow {
  */
 export function fromV3Row(raw: Record<string, unknown>): ScoreRow {
   const subject = raw.subject as { kind?: string; id?: string } | null | undefined;
+  const metadata = (raw.metadata ?? {}) as Record<string, unknown>;
+  // A score upgraded by feedback:reconcile is re-created (the API cannot move
+  // a subject in place, nor accept a timestamp), so it carries the vote's real
+  // time in metadata — statistics must not count it as a fresh vote.
+  const original = metadata.originalTimestamp;
   return {
     id: String(raw.id ?? ""),
     name: String(raw.name ?? ""),
@@ -37,9 +42,43 @@ export function fromV3Row(raw: Record<string, unknown>): ScoreRow {
     sessionId: subject?.kind === "session" ? subject.id : undefined,
     comment: (raw.comment as string | null | undefined) ?? null,
     environment: typeof raw.environment === "string" ? raw.environment : undefined,
-    timestamp: typeof raw.timestamp === "string" ? raw.timestamp : undefined,
+    timestamp:
+      typeof original === "string"
+        ? original
+        : typeof raw.timestamp === "string"
+          ? raw.timestamp
+          : undefined,
     source: typeof raw.source === "string" ? raw.source : undefined,
   };
+}
+
+/**
+ * Which trace answered `turn_N` of a session, from ANY of that session's
+ * observations: traces ordered by their earliest observation ARE the turn
+ * order (eve numbers turns per session from 0, failed turns included, and
+ * every turn leaves at least one span). No local state involved — this is
+ * what makes trace precision reachable on a serverless instance that never
+ * saw the turn. Returns undefined when the ordinal is not (yet) present: a
+ * trace whose spans have not been ingested is invisible, and the caller
+ * degrades to session precision rather than guessing.
+ */
+export function traceForTurn(
+  observations: Array<{ traceId?: string; startTime?: string }>,
+  turnId: string,
+): string | undefined {
+  const m = /^turn_(\d+)$/.exec(turnId);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  const earliest = new Map<string, string>();
+  for (const o of observations) {
+    if (!o.traceId || !o.startTime) continue;
+    const prev = earliest.get(o.traceId);
+    if (!prev || o.startTime < prev) earliest.set(o.traceId, o.startTime);
+  }
+  const ordered = [...earliest.entries()].sort(
+    (a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]),
+  );
+  return ordered[n]?.[0];
 }
 
 export interface WindowStats {

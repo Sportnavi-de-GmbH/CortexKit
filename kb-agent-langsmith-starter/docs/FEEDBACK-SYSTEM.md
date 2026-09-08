@@ -50,9 +50,10 @@ the row and a retry is idempotent.
 | 👍 **with a comment** | queue **"Feedback — Positive Examples"** (`LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID`) |
 | plain 👍 | statistics only; `feedback:report` samples ~5/week for spot review |
 
-Both pushes dedupe via a file-backed marker keyed `queueId:objectType:objectId`,
-so a retry never double-queues. Unset queue env ⇒ silent no-op, scores still
-written. A 👎→👍 flip deliberately leaves the queue item alone — "flagged, then
+Both pushes dedupe by **asking the queue** (Langfuse does not dedupe items
+itself, and the file-backed marker is per-instance — measured: five identical
+production POSTs made two items before this), with the marker as a fast path.
+Unset queue env ⇒ silent no-op, scores still written. A 👎→👍 flip deliberately leaves the queue item alone — "flagged, then
 reconsidered" is signal a reviewer should see.
 
 ## The rituals
@@ -64,6 +65,9 @@ set **one `review-verdict`**, optionally leave a Comment, mark **COMPLETED**.
 Do the same for **Feedback — Positive Examples** (usually much shorter).
 
 **Weekly:**
+0. `npm run feedback:reconcile` — upgrades any session-precision votes to
+   their trace now that ingestion has caught up (see "How feedback finds the
+   right trace").
 1. `npm run feedback:report` — totals, positive rate + trend, reason and
    verdict histograms, environment split, positive rate per
    `knowledge.version_digest`, pending counts, the plain-👍 sample.
@@ -105,6 +109,7 @@ now archived along with the other duplicates, 2026-09-08).
 |---|---|
 | `npm run feedback:setup` | idempotent: ensures 3 configs + 2 queues, migrates legacy queue items, prints env ids |
 | `npm run feedback:check` | reads recent scores back (sanity) |
+| `npm run feedback:reconcile [-- --dry-run]` | session-precision votes → trace precision, once ingested |
 | `npm run feedback:report [-- --days 14]` | the weekly statistics (see rituals) |
 | `npm run feedback:promote [-- --dry-run]` | COMPLETED + verdict → datasets, idempotent per trace |
 
@@ -113,15 +118,30 @@ Pure computation lives in `lib/feedback-insights.ts` (tested offline in
 
 ## How feedback finds the right trace
 
-The browser knows only `sessionId` + `turnId`; the server maps
-`(session, turn) → traceId` via `feedbackRefs`, written by the Langfuse hook at
-turn end. On Vercel these stores live under **`/tmp/navio-langfuse`**
-(`STORE_ROOT` in `lib/langfuse.ts`) — `.data/` is read-only there, and writing
-to it silently degraded every production vote to session precision until
-2026-09-08. `/tmp` is per-instance, so a vote landing on a different instance
-still degrades to a **session-level** score rather than dropping; the response
-reports `precision: "trace" | "session"`. Full trace precision in production =
-move that one map to a shared KV.
+The browser knows only `sessionId` + `turnId`. The server resolves the trace in
+three steps (`resolveTarget` in `app/api/feedback/route.ts`):
+
+1. **Local map** `feedbackRefs`, written by the Langfuse hook at turn end —
+   dev, or the lucky warm instance. On Vercel it lives under
+   `/tmp/navio-langfuse` (`STORE_ROOT`; `.data/` is read-only there).
+   **Measured 2026-09-08: 0 of 5 production votes found it** — the invocation
+   serving `/api/feedback` is almost never the one that finished the turn.
+2. **Ask Langfuse** (`resolveTraceViaLangfuse`): one read of the session's
+   observations; the session's traces ordered by start time ARE the turn
+   order, so `turn_N` → the N-th trace (`traceForTurn`). No local state, so it
+   works on any instance — as soon as at least one span of that turn has been
+   ingested.
+3. **Session precision** as the last resort, never nothing: a vote cast within
+   seconds of the answer can beat ingestion. The response reports
+   `precision: "trace" | "session"`.
+
+**`npm run feedback:reconcile`** upgrades step-3 votes later: it resolves the
+trace the same way, then **deletes and re-creates** each score with the same
+id (the API cannot move a score's subject — a merge POST keeps the old
+subject, measured), keeping the vote's real time in
+`metadata.originalTimestamp` (honoured by the statistics), and replaces the
+PENDING `SESSION` queue item with a `TRACE` one. Run it before the weekly
+report. Idempotent.
 
 Partner votes are forwarded (service 1 cannot resolve a partner trace):
 `FAQ screen → /api/feedback → Navio — FAQ` ·
@@ -130,11 +150,17 @@ Partner votes are forwarded (service 1 cannot resolve a partner trace):
 
 ## ⚠ Live-instance behaviour (measured — do not re-learn)
 
-1. **Score reads only work on `/api/public/v3/scores`** (`/scores`, `/v2` 404),
-   and only with `fields=details` do `comment`/`metadata` come back non-null.
+1. **Score reads only work on `/api/public/v3/scores`** (`/scores`, `/v2` 404).
+   `fields=details` for `comment`/`metadata`, **`fields=subject`** for the
+   trace/session linkage — v3 rows have NO `traceId`; it is
+   `subject: {kind, id}`, and a categorical score's label is in `value`
+   (`lib/feedback-insights.ts` `fromV3Row` normalizes). Pagination is by
+   `meta.cursor`; a `page` param is a 400.
 2. **Re-POSTing the same score `id` updates in place, but as a PARTIAL MERGE.**
    Always send every field; `comment: ""` clears. A categorical score has no
-   "none" — retract with DELETE (202).
+   "none" — retract with DELETE (202). **The subject cannot be moved by a
+   merge** (session stays session); DELETE + re-create with the same id does
+   move it — that is what `feedback:reconcile` does.
 3. **Langfuse silently creates duplicate configs/queues on create** — all setup
    is list-then-create. Score configs **can** be updated/archived via
    `PATCH /api/public/score-configs/{id}` (verified 2026-09-08; the MCP tool's

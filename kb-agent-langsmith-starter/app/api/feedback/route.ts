@@ -16,6 +16,7 @@ import { checkPartnerRequest } from "@/lib/partner-proxy";
 import {
   FeedbackRequestSchema,
   isReasonCode,
+  resolveTraceViaLangfuse,
   submitFeedback,
   type FeedbackRequest,
   type FeedbackTarget,
@@ -50,16 +51,22 @@ function rateLimited(key: string): boolean {
 /**
  * Resolve which Langfuse object the score should hang on.
  *
- * Trace precision when we still hold the map; SESSION precision otherwise.
- * The fallback is deliberate and is NOT a silent downgrade to nothing: on a
- * cold serverless instance the process that answered the turn is gone along
- * with its `.data/`, and losing the vote entirely would be a far worse outcome
- * than recording it one level up. The turn id travels in the score metadata
- * either way, so nothing is unrecoverable.
+ * 1. The process-local map, when this instance answered the turn (dev, or a
+ *    lucky warm instance).
+ * 2. Otherwise ask Langfuse which trace answered this turn — on Vercel the
+ *    invocation serving this route is almost never the one that ran the turn
+ *    (measured 2026-09-08: 0 of 5), so this is the production path.
+ * 3. SESSION precision as the last resort — deliberate, and NOT a silent
+ *    downgrade to nothing: a vote cast seconds after the answer can beat
+ *    ingestion, and losing it would be far worse than recording it one level
+ *    up. The turn id travels in the score metadata, so feedback:reconcile can
+ *    upgrade it later.
  */
-function resolveTarget(sessionId: string, turnId: string): FeedbackTarget {
+async function resolveTarget(sessionId: string, turnId: string): Promise<FeedbackTarget> {
   const ref = feedbackRefs.get(sessionId, turnId);
-  return ref ? { kind: "trace", traceId: ref.traceId } : { kind: "session", sessionId };
+  if (ref) return { kind: "trace", traceId: ref.traceId };
+  const traceId = await resolveTraceViaLangfuse(sessionId, turnId);
+  return traceId ? { kind: "trace", traceId } : { kind: "session", sessionId };
 }
 
 /**
@@ -128,7 +135,7 @@ export async function POST(req: Request): Promise<Response> {
     return forwardToPartner(parsed);
   }
 
-  const target = resolveTarget(parsed.sessionId, parsed.turnId);
+  const target = await resolveTarget(parsed.sessionId, parsed.turnId);
   const result = await submitFeedback(
     {
       sessionId: parsed.sessionId,

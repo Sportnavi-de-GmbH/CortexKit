@@ -61,6 +61,7 @@ import {
 // the widget build) and is re-exported here so existing imports keep working.
 export { REASONS, isReasonCode, type ReasonCode } from "./feedback-taxonomy";
 import { isReasonCode as isReason, type ReasonCode } from "./feedback-taxonomy";
+import { traceForTurn } from "./feedback-insights";
 
 // ---------------------------------------------------------------------------
 // Score names
@@ -274,6 +275,32 @@ export function buildReasonPayload(
 // itself a useful signal a reviewer should see, not noise to erase.
 // ---------------------------------------------------------------------------
 
+/** Does the queue already hold this object? Langfuse itself does not dedupe
+ *  queue items, and the local marker is per-instance — measured on Vercel
+ *  2026-09-08: five identical POSTs produced two items. So the queue is asked
+ *  directly; one small read per queued vote. Any failure reads as "not
+ *  queued", which errs on the side of a reviewable duplicate over a lost vote. */
+async function alreadyQueued(
+  queueId: string,
+  objectType: string,
+  objectId: string,
+  deps: { fetchImpl: FetchLike; env: NodeJS.ProcessEnv; headers: Record<string, string> },
+): Promise<boolean> {
+  try {
+    const res = await deps.fetchImpl(
+      `${langfuseBaseUrl(deps.env)}/api/public/annotation-queues/${queueId}/items?limit=100`,
+      { headers: deps.headers },
+    );
+    if (!res.ok) return false;
+    const items =
+      ((await res.json()) as { data?: Array<{ objectId?: string; objectType?: string }> }).data ??
+      [];
+    return items.some((i) => i.objectId === objectId && i.objectType === objectType);
+  } catch {
+    return false;
+  }
+}
+
 /** Never throws. Silent no-op when the queue isn't configured (same posture
  *  as the rest of this module) or when this target was already queued. */
 async function pushToAnnotationQueue(
@@ -287,7 +314,13 @@ async function pushToAnnotationQueue(
     const objectType = target.kind === "trace" ? "TRACE" : "SESSION";
     const objectId = target.kind === "trace" ? target.traceId : target.sessionId;
     const key = `${queueId}:${objectType}:${objectId}`;
+    // Fast path only — the marker is per-instance, so the queue itself is the
+    // authority on what is already there.
     if (queuedMarkers.has(key)) return;
+    if (await alreadyQueued(queueId, objectType, objectId, deps)) {
+      queuedMarkers.set(key);
+      return;
+    }
 
     const res = await deps.fetchImpl(
       `${langfuseBaseUrl(deps.env)}/api/public/annotation-queues/${queueId}/items`,
@@ -311,6 +344,39 @@ export interface SubmitResult {
 }
 
 type FetchLike = typeof fetch;
+
+/**
+ * Resolve the trace that answered (session, turn) by asking LANGFUSE, for when
+ * the process-local `feedbackRefs` map has nothing — which on Vercel is the
+ * normal case, not the exception (measured 2026-09-08 on the widget: 0 of 5
+ * votes found the map, because the invocation serving /api/feedback is rarely
+ * the one that finished the turn). One read of the session's observations; the
+ * turn ordinal picks the trace (see traceForTurn). Never throws; undefined
+ * means "not resolvable yet" — a vote cast seconds after the answer can beat
+ * ingestion, and feedback:reconcile upgrades those later.
+ */
+export async function resolveTraceViaLangfuse(
+  sessionId: string,
+  turnId: string,
+  deps: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
+): Promise<string | undefined> {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
+  if (!langfuseEnabled(env)) return undefined;
+  try {
+    const qs = new URLSearchParams({ sessionId, fields: "core,basic,time", limit: "100" });
+    const res = await doFetch(`${langfuseBaseUrl(env)}/api/public/v2/observations?${qs}`, {
+      headers: langfuseHeaders(env),
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return undefined;
+    const data =
+      ((await res.json()) as { data?: Array<{ traceId?: string; startTime?: string }> }).data ?? [];
+    return traceForTurn(data, turnId);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Write one visitor's feedback to Langfuse. NEVER throws: a failed score must

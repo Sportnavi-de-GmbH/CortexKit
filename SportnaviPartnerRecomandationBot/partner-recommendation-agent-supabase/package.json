@@ -18,6 +18,7 @@
     "feedback:check": "tsx scripts/check-feedback.ts",
     "feedback:setup": "tsx scripts/setup-feedback-workflow.ts",
     "feedback:report": "tsx scripts/feedback-report.ts",
+    "feedback:reconcile": "tsx scripts/feedback-reconcile.ts",
     "feedback:promote": "tsx scripts/feedback-promote.ts"
   },
   "dependencies": {

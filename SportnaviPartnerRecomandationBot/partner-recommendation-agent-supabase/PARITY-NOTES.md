@@ -110,8 +110,9 @@ this prompt drifts off them.
 This build carries the full feedback→improvement workflow, byte-mirrored from the widget
 (`kb-agent-langsmith-starter`): `lib/feedback-taxonomy.ts` (shared reason + review-verdict
 vocabulary), `lib/feedback-insights.ts` (pure stats/promote routing), positive-queue routing in
-`lib/feedback.ts` (👍-with-comment → "Feedback — Positive Examples"), and the
-`feedback:setup` / `feedback:report` / `feedback:promote` scripts (script copies here import
+`lib/feedback.ts` (👍-with-comment → "Feedback — Positive Examples"; trace resolution via
+Langfuse when the per-instance map misses; Langfuse-side queue dedupe), and the
+`feedback:setup` / `feedback:reconcile` / `feedback:report` / `feedback:promote` scripts (script copies here import
 `../lib/...` without the `.ts` extension — this tsconfig forbids it; that is the only diff).
 Operating manual: `../../kb-agent-langsmith-starter/docs/FEEDBACK-SYSTEM.md` (rituals, env-id
 table for BOTH projects, live-instance traps). The **Convex reference does not have this yet** —
