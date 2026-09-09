@@ -76,12 +76,16 @@ export async function POST(req: Request): Promise<Response> {
   const result =
     parsed.thumb === null
       ? // Retraction: delete the scores and the pending queue item — see retractFeedback.
-        await retractFeedback({ sessionId: parsed.sessionId, turnId: parsed.turnId }, target)
+        await retractFeedback(
+          { sessionId: parsed.sessionId, turnId: parsed.turnId, epoch: parsed.epoch },
+          target,
+        )
       : await submitFeedback(
           {
             sessionId: parsed.sessionId,
             turnId: parsed.turnId,
             thumb: parsed.thumb,
+            epoch: parsed.epoch,
             // Off-taxonomy codes are dropped, never stored: a CATEGORICAL score with
             // an invented value pollutes the breakdown it exists to produce.
             reason: isReasonCode(parsed.reason) ? parsed.reason : undefined,
@@ -101,6 +105,14 @@ export async function POST(req: Request): Promise<Response> {
     });
     return Response.json({ detail: "Feedback could not be recorded." }, { status: 502 });
   }
+  // One shape-only line per vote, so the Vercel log tells the whole story of a
+  // turn's feedback (vote → flip → retraction) without any visitor text.
+  console.info("PARTNER FEEDBACK ok:", {
+    thumb: parsed.thumb,
+    epoch: parsed.epoch ?? 0,
+    precision: result.target ?? "none",
+    commentChars: parsed.comment?.length ?? 0,
+  });
 
   return Response.json({ ok: true, precision: result.target ?? "none" }, { status: 200 });
 }

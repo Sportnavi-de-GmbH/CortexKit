@@ -95,6 +95,39 @@ describe("score identity", () => {
     expect(feedbackScoreId("a/../b", "t 0")).not.toContain("/");
     expect(feedbackScoreId("a/../b", "t 0")).not.toContain(" ");
   });
+
+  it("a re-vote after a retraction gets a FRESH id (epoch), so a pending async delete cannot wipe it", () => {
+    // Measured 2026-09-09: Langfuse applied a score DELETE ~2 minutes after
+    // the 202, and a 👍 re-cast under the same id in that window was lost.
+    expect(feedbackScoreId("s1", "turn_0", "", 0)).toBe(feedbackScoreId("s1", "turn_0"));
+    expect(feedbackScoreId("s1", "turn_0", "", 1)).not.toBe(feedbackScoreId("s1", "turn_0", "", 0));
+    expect(feedbackScoreId("s1", "turn_0", "-reason", 2)).toMatch(/-e2-reason$/);
+    // The payload builders and the retraction agree on the id for a given epoch.
+    const target: FeedbackTarget = { kind: "trace", traceId: "t" };
+    expect(buildScorePayload({ sessionId: "s1", turnId: "turn_0", thumb: "up", epoch: 3 }, target, env(CREDS)).id).toBe(
+      feedbackScoreId("s1", "turn_0", "", 3),
+    );
+  });
+});
+
+describe("retraction race — retract, then re-vote within the async-delete window", () => {
+  const bothQueues = env({ ...CREDS, LANGFUSE_FEEDBACK_QUEUE_ID: "queue-neg", LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos" });
+
+  it("the retraction deletes epoch N's ids and the re-vote writes epoch N+1's — different rows", async () => {
+    const lf = fakeLangfuse();
+    const target: FeedbackTarget = { kind: "trace", traceId: "trace-race-1" };
+    await submitFeedback({ sessionId: "s-race", turnId: "t", thumb: "down", epoch: 0 }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    await retractFeedback({ sessionId: "s-race", turnId: "t", epoch: 0 }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    await submitFeedback({ sessionId: "s-race", turnId: "t", thumb: "up", epoch: 1 }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    const ids = [...lf.scores.keys()];
+    expect(ids).toEqual([feedbackScoreId("s-race", "t", "", 1)]);
+    // Whatever a late-landing delete of epoch 0 does, epoch 1's row is untouched.
+    const deletes = (lf.fetchImpl as unknown as { mock: { calls: Array<[string, RequestInit?]> } }).mock.calls
+      .filter((c) => c[1]?.method === "DELETE" && String(c[0]).includes("/api/public/scores/"))
+      .map((c) => String(c[0]).split("/").pop());
+    expect(deletes).toContain(feedbackScoreId("s-race", "t", "", 0));
+    expect(deletes).not.toContain(feedbackScoreId("s-race", "t", "", 1));
+  });
 });
 
 describe("the merge trap", () => {

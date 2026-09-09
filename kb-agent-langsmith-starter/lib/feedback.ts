@@ -117,9 +117,19 @@ export function positiveAnnotationQueueId(env: NodeJS.ProcessEnv = process.env):
 /** Deterministic score id — THE mechanism for "update instead of duplicate".
  *  Derived from the turn, so the same answer can only ever hold one verdict,
  *  and a double-click or a retry is a no-op rather than a second row. */
-export function feedbackScoreId(sessionId: string, turnId: string, suffix = ""): string {
+export function feedbackScoreId(
+  sessionId: string,
+  turnId: string,
+  suffix = "",
+  epoch = 0,
+): string {
   const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
-  return `fb-${safe(sessionId)}-${safe(turnId)}${suffix}`;
+  // `epoch` counts RETRACTIONS on this turn. Langfuse applies a score DELETE
+  // asynchronously — measured 2026-09-09: ~2 minutes — and a later POST with
+  // the SAME id is wiped when that delete finally lands. So a re-vote after a
+  // retraction must use a fresh id; the widget bumps the epoch on every
+  // retraction. Epoch 0 keeps the historical id shape.
+  return `fb-${safe(sessionId)}-${safe(turnId)}${epoch > 0 ? `-e${epoch}` : ""}${suffix}`;
 }
 
 /**
@@ -142,6 +152,8 @@ export const FeedbackRequestSchema = z.object({
    *  thumb). It is a real event that must reach Langfuse, not a local undo:
    *  the scores are deleted and the review-queue item removed. */
   thumb: z.enum(["up", "down"]).nullable(),
+  /** Retraction counter for this turn (see feedbackScoreId). Missing = 0. */
+  epoch: z.number().int().min(0).max(10_000).optional(),
   reason: z.string().max(64).nullish(),
   comment: z.string().max(MAX_COMMENT_CHARS * 4).nullish(),
   surface: z.enum(["faq", "partner"]).nullish(),
@@ -157,6 +169,8 @@ export interface FeedbackInput {
   thumb: Thumb;
   reason?: ReasonCode;
   comment?: string;
+  /** Retraction counter for this turn — selects the score id (see feedbackScoreId). */
+  epoch?: number;
   /** Which Navio surface produced the answer — "faq" | "partner" | … */
   surface?: string;
 }
@@ -213,7 +227,7 @@ export function buildScorePayload(
   // it here would silently kill the golden-answers pipeline.
   const comment = sanitizeComment(input.comment, env);
   return {
-    id: feedbackScoreId(input.sessionId, input.turnId),
+    id: feedbackScoreId(input.sessionId, input.turnId, "", input.epoch),
     name: FEEDBACK_SCORE,
     value: input.thumb === "up" ? 1 : 0,
     dataType: "NUMERIC",
@@ -241,7 +255,7 @@ export function buildReasonPayload(
 ): ScorePayload | undefined {
   if (input.thumb !== "down" || !input.reason) return undefined;
   return {
-    id: feedbackScoreId(input.sessionId, input.turnId, "-reason"),
+    id: feedbackScoreId(input.sessionId, input.turnId, "-reason", input.epoch),
     name: REASON_SCORE,
     value: input.reason,
     dataType: "CATEGORICAL",
@@ -340,15 +354,17 @@ async function removeFromQueue(
         (i) => i.status === "PENDING",
       );
       for (const item of pending) {
-        await deps.fetchImpl(
+        const res = await deps.fetchImpl(
           `${langfuseBaseUrl(deps.env)}/api/public/annotation-queues/${queueId}/items/${item.id}`,
           { method: "DELETE", headers: deps.headers },
         );
+        if (!res.ok) console.warn("FEEDBACK queue item delete failed:", { queueId, objectType, status: res.status });
       }
       queuedMarkers.delete(`${queueId}:${objectType}:${objectId}`);
     }
-  } catch {
+  } catch (err) {
     // Observability must never break feedback submission.
+    console.warn("FEEDBACK queue removal threw:", { queueId, detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -380,8 +396,12 @@ async function pushToAnnotationQueue(
       { method: "POST", headers: deps.headers, body: JSON.stringify({ objectId, objectType }) },
     );
     if (res.ok) queuedMarkers.set(key);
-  } catch {
+    // Shape only, never visitor text — but VISIBLE: a silently swallowed
+    // queue failure is indistinguishable from "nobody voted" in the logs.
+    else console.warn("FEEDBACK queue push failed:", { queueId, objectType, status: res.status });
+  } catch (err) {
     // Observability must never break feedback submission.
+    console.warn("FEEDBACK queue push threw:", { queueId, detail: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -492,7 +512,7 @@ export async function submitFeedback(
       // RETRACTION. A visitor who flips 👎→👍 must not leave a dangling
       // "too_slow" behind — a categorical score has no "none" value, so the row
       // has to go. 404 here is success: there was nothing to retract.
-      await doFetch(`${base}/${feedbackScoreId(input.sessionId, input.turnId, "-reason")}`, {
+      await doFetch(`${base}/${feedbackScoreId(input.sessionId, input.turnId, "-reason", input.epoch)}`, {
         method: "DELETE",
         headers,
       }).catch(() => undefined);
@@ -513,7 +533,7 @@ export async function submitFeedback(
  * is success: there was nothing to forget. NEVER throws.
  */
 export async function retractFeedback(
-  input: { sessionId: string; turnId: string },
+  input: { sessionId: string; turnId: string; epoch?: number },
   target: FeedbackTarget,
   deps: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
 ): Promise<SubmitResult> {
@@ -525,7 +545,7 @@ export async function retractFeedback(
   const headers = { ...langfuseHeaders(env), "Content-Type": "application/json" };
   try {
     for (const suffix of ["", "-reason"]) {
-      const res = await doFetch(`${base}/${feedbackScoreId(input.sessionId, input.turnId, suffix)}`, {
+      const res = await doFetch(`${base}/${feedbackScoreId(input.sessionId, input.turnId, suffix, input.epoch)}`, {
         method: "DELETE",
         headers,
       });

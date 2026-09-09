@@ -207,6 +207,18 @@ own `/api/feedback` (it owns those traces), loopback/shared-secret gated.
   that was queued at session precision is still found once the retraction
   resolves to the trace. **COMPLETED items are never touched** — a review that
   happened is a fact.
+- **A score DELETE is asynchronous — measured ~2 minutes on this instance
+  (202 on enqueue, row gone later).** A re-vote that reused the same id inside
+  that window was wiped when the delete finally landed (seen live: a 👍 cast
+  a few minutes after a retraction vanished). So the widget keeps a per-answer
+  **epoch** that increments on every retraction, and the score id becomes
+  `fb-{session}-{turn}-e{epoch}` for epoch ≥ 1 — a pending delete of epoch N
+  can never touch epoch N+1. Flips are updates of the same id and need no
+  epoch bump.
+- Every queue push/removal failure is now logged (shape only: queue id,
+  object type, status) and every accepted vote logs one `FEEDBACK ok:` line
+  (thumb, epoch, precision, comment length) — so the Vercel log tells a turn's
+  whole feedback story without visitor text.
 
 ### What "in sync" means here (eventual consistency, measured)
 

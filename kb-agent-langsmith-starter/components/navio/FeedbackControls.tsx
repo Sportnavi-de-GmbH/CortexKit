@@ -39,6 +39,11 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
   const [reason, setReason] = useState<string | null>(null);
   const [comment, setComment] = useState("");
   const [sent, setSent] = useState(false);
+  // Counts RETRACTIONS on this answer. Every vote after a retraction gets a
+  // fresh score id server-side, because Langfuse applies the retraction's
+  // DELETE asynchronously (~2 min measured) and would otherwise wipe a
+  // re-vote that reused the old id.
+  const [epoch, setEpoch] = useState(0);
 
   const post = useCallback(
     (body: Record<string, unknown>) => {
@@ -48,11 +53,11 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
       void fetch("/api/feedback", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId, turnId, surface, ...body }),
+        body: JSON.stringify({ sessionId, turnId, surface, epoch, ...body }),
         keepalive: true,
       }).catch(() => undefined);
     },
-    [sessionId, turnId, surface],
+    [sessionId, turnId, surface, epoch],
   );
 
   // Without a turn id there is nothing to attach feedback to, so show nothing
@@ -72,7 +77,8 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
       // A retraction is a real event, not a local undo. Until 2026-09-09 this
       // branch only reset the UI, so Langfuse kept a vote the visitor had
       // withdrawn — the dashboard counted it and the review queue showed it.
-      post({ thumb: null, reason: null, comment: "" });
+      post({ thumb: null, reason: null, comment: "" }); // retracts the CURRENT epoch
+      setEpoch((e) => e + 1); // …and any later vote gets a fresh id
       return;
     }
     // Recorded IMMEDIATELY — the panel is optional enrichment. It now opens

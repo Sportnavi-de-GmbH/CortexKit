@@ -140,12 +140,16 @@ export async function POST(req: Request): Promise<Response> {
   const result =
     parsed.thumb === null
       ? // Retraction: delete the scores and the pending queue item — see retractFeedback.
-        await retractFeedback({ sessionId: parsed.sessionId, turnId: parsed.turnId }, target)
+        await retractFeedback(
+          { sessionId: parsed.sessionId, turnId: parsed.turnId, epoch: parsed.epoch },
+          target,
+        )
       : await submitFeedback(
           {
             sessionId: parsed.sessionId,
             turnId: parsed.turnId,
             thumb: parsed.thumb,
+            epoch: parsed.epoch,
             // An unknown reason code is dropped rather than stored: a CATEGORICAL
             // score with an off-taxonomy value would quietly pollute the very
             // breakdown this exists to produce.
@@ -166,6 +170,15 @@ export async function POST(req: Request): Promise<Response> {
     });
     return Response.json({ detail: "Feedback could not be recorded." }, { status: 502 });
   }
+  // One shape-only line per vote, so the Vercel log tells the whole story of a
+  // turn's feedback (vote → flip → retraction) without any visitor text.
+  console.info("FEEDBACK ok:", {
+    thumb: parsed.thumb,
+    epoch: parsed.epoch ?? 0,
+    precision: result.target ?? "none",
+    commentChars: parsed.comment?.length ?? 0,
+    surface: parsed.surface ?? "faq",
+  });
 
   // `precision` lets the widget (and tests) tell trace-level from session-level
   // without exposing any id.
