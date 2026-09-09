@@ -178,15 +178,16 @@ if (queues.length === 0) {
   console.log("  none configured — set LANGFUSE_FEEDBACK_QUEUE_ID / _POSITIVE_QUEUE_ID (npm run feedback:setup prints them)");
 }
 
-// --- weekly plain-👍 spot sample -------------------------------------------
+// --- newest plain 👍, as a quick way in ------------------------------------
+// Since 2026-09-09 EVERY 👍 is queued, so this is no longer a "spot sample of
+// the ones nobody sees" — it is just the newest comment-less positives, handy
+// when you want to start reviewing from the terminal.
 const sample = samplePlainUps(scores, windowFrom, nowIso);
-console.log(`\nPlain-👍 spot-review sample (${sample.length}):`);
-for (const s of sample) {
-  console.log(`  ${(s.timestamp ?? "").slice(0, 16)}  trace ${s.traceId}`);
-}
 if (sample.length > 0) {
-  console.log("  → open each in Langfuse (Traces → paste the id); a model answer deserves");
-  console.log("    a queue item in 'Review: positive examples' + verdict good-example.");
+  console.log(`\nNewest 👍 without a comment (${sample.length}) — all are already in the positive queue:`);
+  for (const s of sample) {
+    console.log(`  ${(s.timestamp ?? "").slice(0, 16)}  trace ${s.traceId}`);
+  }
 }
 
 // --- manual monitor checklist (no monitor-update API) ----------------------

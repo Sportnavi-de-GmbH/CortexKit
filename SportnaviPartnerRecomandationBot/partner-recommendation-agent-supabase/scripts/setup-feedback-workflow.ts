@@ -5,6 +5,9 @@
 //             · review-verdict (4 reviewer verdicts, ONE per item)
 //   queues  : "Review: negative feedback"   (review-verdict attached — nothing else)
 //             "Review: positive examples"   (review-verdict attached)
+//             EVERY vote is routed to one of them the moment it is cast — 👎
+//             to the first, 👍 to the second — so the two can be reviewed
+//             independently. A flip moves the item between them.
 //   migrate : PENDING TRACE items from retired queues move into the current
 //             ones — skipping duplicates and traces whose CURRENT thumb is 👍
 //             (a 👎→👍 flip deliberately left its item behind; a fresh queue
@@ -186,9 +189,10 @@ const negativeQueueId = await ensureQueue(
 
 const positiveQueueId = await ensureQueue(
   POSITIVE_QUEUE,
-  "👍 votes that came with a visitor comment. If the answer is genuinely a model " +
-    "response, set review-verdict = good-example (feeds the golden dataset); " +
-    "otherwise not-a-defect. Mark Complete.",
+  "Every 👍 lands here. Open the item, read the answer (the visitor's comment, " +
+    "if any, is on the user-feedback score), pick ONE review-verdict, mark " +
+    "Complete. good-example feeds the 'Feedback — Golden Answers' dataset; " +
+    "not-a-defect means nothing to do.",
   [verdictConfigId].filter(Boolean),
 );
 

@@ -439,20 +439,16 @@ describe("annotation queue", () => {
     expect(queueCall?.body).toEqual({ objectId: "sess-queue-2", objectType: "SESSION" });
   });
 
-  it("never pushes a plain 👍 (no comment) anywhere", async () => {
-    const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
-    const fetchImpl = mockFn as unknown as typeof fetch;
+  it("queues a PLAIN 👍 (no comment) in the positive queue — every click is reviewable", async () => {
+    // Until 2026-09-09 a comment-less 👍 was statistics-only and reached no
+    // queue. The owner asked for every feedback click to land in its queue.
+    const lf = fakeLangfuse();
     await submitFeedback(
-      { sessionId: "s", turnId: "t", thumb: "up" },
+      { sessionId: "s-plain-up", turnId: "t", thumb: "up" },
       { kind: "trace", traceId: "trace-queue-3" },
-      { fetchImpl, env: withQueue },
+      { fetchImpl: lf.fetchImpl, env: env({ ...CREDS, LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos" }) },
     );
-    // No queue WRITES. (A read is allowed: since the queues mirror the current
-    // vote, a 👍 checks the negative queue for a pending 👎 item to remove.)
-    const queueWrites = mockFn.mock.calls.filter(
-      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== undefined && c[1].method !== "GET",
-    );
-    expect(queueWrites).toHaveLength(0);
+    expect(lf.pending("queue-pos").map((i) => i.objectId)).toEqual(["trace-queue-3"]);
   });
 
   it("routes 👍-with-comment into the POSITIVE queue, not the negative one", async () => {
@@ -475,7 +471,7 @@ describe("annotation queue", () => {
     expect(queuePosts[0]).toContain("/annotation-queues/queue-pos/");
   });
 
-  it("👍-with-comment is a silent no-op when the positive queue is unconfigured", async () => {
+  it("a 👍 is a silent no-op when the positive queue is unconfigured", async () => {
     const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
     const fetchImpl = mockFn as unknown as typeof fetch;
     const res = await submitFeedback(
@@ -584,21 +580,27 @@ describe("annotation queue", () => {
     LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos",
   });
 
-  it("a 👎→👍 flip MOVES the item: negative queue emptied, positive only with a comment", async () => {
+  it("a flip MOVES the item between the two queues, with no duplicate and nothing stale", async () => {
     const lf = fakeLangfuse();
     const target = { kind: "trace" as const, traceId: "trace-flip-1" };
-    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "down" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    const vote = (thumb: "up" | "down", comment?: string) =>
+      submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb, comment }, target, {
+        fetchImpl: lf.fetchImpl,
+        env: bothQueues,
+      });
+
+    await vote("down");
     expect(lf.pending("queue-neg").map((i) => i.objectId)).toEqual(["trace-flip-1"]);
+    expect(lf.pending("queue-pos")).toHaveLength(0);
 
-    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "up" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    await vote("up"); // plain 👍 — moves, no comment needed
     expect(lf.pending("queue-neg")).toHaveLength(0);
-    expect(lf.pending("queue-pos")).toHaveLength(0); // plain 👍 is statistics-only
-
-    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "up", comment: "super" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
     expect(lf.pending("queue-pos").map((i) => i.objectId)).toEqual(["trace-flip-1"]);
 
-    // …and back: 👍→👎 moves it again, with no duplicate in the negative queue.
-    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "down" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    await vote("up", "super"); // adding a comment must not duplicate the item
+    expect(lf.pending("queue-pos")).toHaveLength(1);
+
+    await vote("down"); // …and back
     expect(lf.pending("queue-pos")).toHaveLength(0);
     expect(lf.pending("queue-neg")).toHaveLength(1);
   });

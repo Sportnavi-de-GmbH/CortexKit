@@ -483,27 +483,21 @@ export async function submitFeedback(
       return { ok: false, detail: `score ${res.status}` };
     }
 
-    // THE QUEUES MIRROR THE CURRENT VOTE. A 👎 is a pending item in the
-    // negative queue and nothing in the positive one; a 👍 with a comment the
-    // reverse; a plain 👍 is in neither. So a flip MOVES the item — the
-    // earlier "leave the item on a flip" rule left reviewers opening 👎 items
-    // whose visitor had since said 👍, which is exactly the stale state the
-    // owner asked to eliminate. COMPLETED items are never touched.
+    // EVERY vote is routed to a review queue — 👎 to the negative one, 👍 to
+    // the positive one — the moment it is cast. There is no comment gate: a
+    // plain 👍 was statistics-only until 2026-09-09, and the owner asked for
+    // every click to be reviewable in its own queue.
+    //
+    // THE QUEUES MIRROR THE CURRENT VOTE, so a flip MOVES the item rather than
+    // leaving a stale one behind: the queue a vote is not in is always cleaned.
+    // COMPLETED items are never touched — a review that happened is a fact.
     const qdeps: QueueDeps = { fetchImpl: doFetch, env, headers };
-    if (input.thumb === "down") {
-      await pushToAnnotationQueue(target, annotationQueueId(env), qdeps);
-      await removeFromQueue(target, input.sessionId, positiveAnnotationQueueId(env), qdeps);
-    } else {
-      await removeFromQueue(target, input.sessionId, annotationQueueId(env), qdeps);
-      if (score.comment !== "") {
-        // A 👍 whose visitor took the time to write something is a candidate
-        // golden example. Plain 👍 stays statistics-only (the weekly report
-        // samples those).
-        await pushToAnnotationQueue(target, positiveAnnotationQueueId(env), qdeps);
-      } else {
-        await removeFromQueue(target, input.sessionId, positiveAnnotationQueueId(env), qdeps);
-      }
-    }
+    const [into, outOf] =
+      input.thumb === "down"
+        ? [annotationQueueId(env), positiveAnnotationQueueId(env)]
+        : [positiveAnnotationQueueId(env), annotationQueueId(env)];
+    await pushToAnnotationQueue(target, into, qdeps);
+    await removeFromQueue(target, input.sessionId, outOf, qdeps);
 
     const reason = buildReasonPayload(input, target, env);
     if (reason) {

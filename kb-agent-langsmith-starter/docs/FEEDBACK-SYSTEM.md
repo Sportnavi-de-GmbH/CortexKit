@@ -1,21 +1,29 @@
 # Navio feedback — dashboard and review workflow
 
 👍/👎 on every assistant answer, written as Langfuse **scores** onto the exact
-trace that produced the answer, feeding one dashboard and one review queue:
+trace that produced the answer, feeding one dashboard and two review queues:
 
 ```
-visitor 👍/👎 (+ reason, comment)
+visitor clicks 👍 or 👎 (+ reason, comment)
       │
       ├──▶ scores on the trace ──▶ "Navio Health" dashboard (counts, rates, cost, speed)
       │
-      └──▶ Review queue ──▶ human picks ONE verdict ──▶ feedback:promote ──▶ datasets
-               👎 always            good-example → Golden Answers      (eval / regression
-               👍 with comment      wrong-answer → Regressions          runs before a
-                                    data-gap / not-a-defect → no dataset  prompt change)
+      └──▶ EVERY click is queued, immediately, by its thumb:
+               👎 ──▶ "Review: negative feedback"  ┐
+               👍 ──▶ "Review: positive examples"  ├─▶ human picks ONE verdict
+                      (a flip moves the item;      │      good-example → Golden Answers
+                       a retraction removes it)    ┘      wrong-answer → Regressions
+                                                          data-gap / not-a-defect → no dataset
+                                                                    │
+                                              feedback:promote ─────┘──▶ eval datasets
 ```
 
+The queue item points at the **trace**, so the reviewer opens the item and sees
+the visitor's question, the full answer, the thumb, the reason code and the
+visitor's comment together — everything needed to judge it later.
+
 Collection built 2026-08-18; loop redesign 2026-09-08; dashboard + 4-verdict
-review workflow 2026-09-09.
+review workflow and all-clicks routing 2026-09-09.
 
 ---
 
@@ -91,10 +99,16 @@ scoring anything else, writing a summary.
 
 ### Positive examples
 
-Only 👍 votes **with a visitor comment** enter **Review: positive examples**
-(plain 👍 stays statistics-only; `feedback:report` samples ~5/week for a spot
-check). Verdict is `good-example` (→ golden dataset) or `not-a-defect`
-(nothing special). Complete.
+**Every 👍 enters Review: positive examples**, comment or not, the moment it is
+clicked — the same treatment 👎 gets in its own queue, so the two can be
+reviewed independently. Same 60-second loop: open the item, read the answer
+(the visitor's words, if they wrote any, are the `user-feedback` score's
+comment), set `good-example` (→ golden dataset) or `not-a-defect`, Complete.
+
+Until 2026-09-09 only commented 👍 were queued and plain ones were
+statistics-only. That gate is gone: **no feedback click goes unqueued.**
+Expect the positive queue to carry most of the volume — a healthy agent gets
+mostly 👍 — so review it in batches rather than one by one.
 
 ### From reviewed items to datasets
 
@@ -199,10 +213,11 @@ own `/api/feedback` (it owns those traces), loopback/shared-secret gated.
   vote's PENDING queue item(s). Until 2026-09-09 the widget only reset its own
   UI, so Langfuse kept a vote the visitor had withdrawn — the dashboard counted
   it and the review queue showed it.
-- **Flips move the item.** 👎 → pending in the negative queue, nothing in the
-  positive one; 👍 with comment → the reverse; plain 👍 → in neither. The
-  earlier "a flip leaves the item" rule is gone: it left reviewers opening 👎
-  items whose visitor had since said 👍.
+- **Flips move the item.** A vote is pending in exactly one queue — 👎 in the
+  negative, 👍 in the positive — and the other queue is cleaned on every
+  write, so a flip moves the item rather than leaving a stale one. The earlier
+  "a flip leaves the item" rule is gone: it left reviewers opening 👎 items
+  whose visitor had since said 👍.
 - Removal looks for the item under the trace **and** the session, so a vote
   that was queued at session precision is still found once the retraction
   resolves to the trace. **COMPLETED items are never touched** — a review that
