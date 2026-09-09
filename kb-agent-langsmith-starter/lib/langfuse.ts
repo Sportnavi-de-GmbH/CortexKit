@@ -294,13 +294,27 @@ export function isMeaningfulSpanName(name: string): boolean {
   return false;
 }
 
-/** Whether an ended span is exported at all. */
+/** Whether an ended span is exported at all.
+ *
+ *  `traceHasSession` decides the fate of the trace ROOT. eve opens a
+ *  `workflow.route.flow` span for EVERY HTTP request it serves — on Vercel one
+ *  visitor turn is ~20 such requests (workflow step invocations, hydration,
+ *  polling), and only the one that actually runs the turn gets an
+ *  `ai.eve.turn` child and therefore a session. The rest are 0.1–1 s
+ *  single-span traces with no session, no children and no meaning. Exported,
+ *  they outnumbered real turns 22:1 in the Tracing list (measured 2026-09-09:
+ *  132 roots for 6 turns) while every dashboard tile, which counts
+ *  `answer-delivered`, said 6 — "the dashboard is stale" when in fact the
+ *  trace list was polluted. The root ends AFTER its children, so by then the
+ *  session is known whenever there is one. */
 export function shouldExportSpan(
   name: string,
   attributeKeys: readonly string[],
   complete = false,
+  traceHasSession = true,
 ): boolean {
   if (complete) return true;
+  if (name === "workflow.route.flow") return traceHasSession;
   if (isMeaningfulSpanName(name)) return true;
   // Safety net: anything we deliberately annotated is worth keeping.
   return attributeKeys.some((k) => k.startsWith("app.") || k.startsWith("langfuse."));
@@ -516,6 +530,11 @@ export const queuedMarkers = {
   },
   set(key: string): void {
     queuedMarkerStore.set(key, { queuedAt: new Date().toISOString() });
+  },
+  /** A retracted or flipped vote removes its queue item; the marker must go
+   *  too, or a later re-vote would be "already queued" against nothing. */
+  delete(key: string): void {
+    queuedMarkerStore.delete(key);
   },
 };
 

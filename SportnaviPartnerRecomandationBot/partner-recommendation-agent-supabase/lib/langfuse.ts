@@ -712,6 +712,11 @@ export const queuedMarkers = {
   set(key: string): void {
     queuedMarkerStore.set(key, { queuedAt: new Date().toISOString() });
   },
+  /** A retracted or flipped vote removes its queue item; the marker must go
+   *  too, or a later re-vote would be "already queued" against nothing. */
+  delete(key: string): void {
+    queuedMarkerStore.delete(key);
+  },
 };
 
 /** Attribute values big enough to make an observation unreadable. The AI SDK

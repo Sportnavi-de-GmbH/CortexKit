@@ -281,9 +281,18 @@ class AgentSpanFilter implements SpanProcessor {
   }
 
   onEnd(span: ReadableSpan): void {
+    // The trace root is only worth exporting when the trace carries a visitor
+    // turn (i.e. an `ai.eve.turn` child registered a session). eve's other
+    // per-invocation HTTP requests produce session-less single-span traces —
+    // ~20 per turn on Vercel — that only pollute the Tracing list.
     const keep =
       process.env.LANGFUSE_EXPORT_ALL === "true" ||
-      shouldExportSpan(span.name, Object.keys(span.attributes), TRACE_COMPLETE);
+      shouldExportSpan(
+        span.name,
+        Object.keys(span.attributes),
+        TRACE_COMPLETE,
+        sessionForTrace(span.spanContext().traceId) !== undefined,
+      );
 
     // Local span-debug log: separates "the exporter never saw it" from "the
     // backend hasn't ingested it yet" — two failure modes that look identical

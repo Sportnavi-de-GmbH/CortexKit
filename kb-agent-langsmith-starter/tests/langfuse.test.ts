@@ -171,9 +171,22 @@ describe("span filter", () => {
     expect(shouldExportSpan("ai.streamText", [])).toBe(true);
     expect(shouldExportSpan("chat gpt-4.1", ["gen_ai.request.model"])).toBe(true);
     expect(shouldExportSpan("ai.eve.turn", ["eve.session.id"])).toBe(true);
-    expect(shouldExportSpan("workflow.route.flow", [])).toBe(true); // the trace root
+    expect(shouldExportSpan("workflow.route.flow", [], false, true)).toBe(true); // the trace root
     expect(shouldExportSpan(SPAN.summary, ["langfuse.trace.input"])).toBe(true);
     expect(shouldExportSpan("failure:agent-turn", [])).toBe(true);
+  });
+
+  it("drops a trace root that never carried a visitor turn (no session)", () => {
+    // eve opens `workflow.route.flow` for EVERY HTTP request it serves — on
+    // Vercel ~20 per visitor turn. Only the one that ran the turn has an
+    // `ai.eve.turn` child and therefore a session; the rest are session-less
+    // single-span traces. Measured 2026-09-09: 132 roots for 6 turns, which
+    // made the Tracing list disagree with every dashboard tile.
+    expect(shouldExportSpan("workflow.route.flow", [], false, false)).toBe(false);
+    // Complete mode keeps everything, junk included — it is a debugging mode.
+    expect(shouldExportSpan("workflow.route.flow", [], true, false)).toBe(true);
+    // Only the root is subject to this rule; a turn span always has a session.
+    expect(shouldExportSpan("ai.eve.turn", ["eve.session.id"], false, false)).toBe(true);
   });
 
   it("drops eve runtime plumbing", () => {

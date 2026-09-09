@@ -21,10 +21,55 @@ import {
   feedbackScoreId,
   isReasonCode,
   reasonScoreConfigId,
+  retractFeedback,
   sanitizeComment,
   submitFeedback,
   type FeedbackTarget,
 } from "../lib/feedback.ts";
+
+/** Minimal in-memory Langfuse — scores + annotation-queue items — so a test
+ *  can assert what the queue LOOKS LIKE after a sequence of votes, not just
+ *  which URLs were called. */
+function fakeLangfuse() {
+  const scores = new Map<string, Record<string, unknown>>();
+  const items = new Map<string, Array<{ id: string; objectId: string; objectType: string; status: string }>>();
+  let seq = 0;
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    const method = init?.method ?? "GET";
+    const qm = u.match(/\/annotation-queues\/([^/]+)\/items(?:\/([^/?]+))?/);
+    if (qm) {
+      const [, queueId, itemId] = qm;
+      const list = items.get(queueId) ?? [];
+      if (method === "GET") return new Response(JSON.stringify({ data: list }), { status: 200 });
+      if (method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { objectId: string; objectType: string };
+        list.push({ id: `item-${++seq}`, objectId: body.objectId, objectType: body.objectType, status: "PENDING" });
+        items.set(queueId, list);
+        return new Response("{}", { status: 200 });
+      }
+      if (method === "DELETE") {
+        items.set(queueId, list.filter((i) => i.id !== itemId));
+        return new Response("{}", { status: 200 });
+      }
+    }
+    const sm = u.match(/\/api\/public\/scores(?:\/([^/?]+))?$/);
+    if (sm) {
+      if (method === "POST") {
+        const body = JSON.parse(String(init?.body)) as { id: string };
+        scores.set(body.id, body);
+        return new Response("{}", { status: 200 });
+      }
+      if (method === "DELETE") {
+        const had = scores.delete(sm[1]);
+        return new Response("{}", { status: had ? 202 : 404 });
+      }
+    }
+    return new Response("{}", { status: 200 });
+  }) as unknown as typeof fetch;
+  const pending = (queueId: string) => (items.get(queueId) ?? []).filter((i) => i.status === "PENDING");
+  return { fetchImpl, scores, items, pending };
+}
 
 function env(overrides: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   return { NODE_ENV: "test", ...overrides } as NodeJS.ProcessEnv;
@@ -364,8 +409,12 @@ describe("annotation queue", () => {
       { kind: "trace", traceId: "trace-queue-3" },
       { fetchImpl, env: withQueue },
     );
-    const calls = mockFn.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((u) => u.includes("/annotation-queues/"))).toBe(false);
+    // No queue WRITES. (A read is allowed: since the queues mirror the current
+    // vote, a 👍 checks the negative queue for a pending 👎 item to remove.)
+    const queueWrites = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== undefined && c[1].method !== "GET",
+    );
+    expect(queueWrites).toHaveLength(0);
   });
 
   it("routes 👍-with-comment into the POSITIVE queue, not the negative one", async () => {
@@ -397,8 +446,12 @@ describe("annotation queue", () => {
       { fetchImpl, env: withQueue }, // negative queue only
     );
     expect(res.ok).toBe(true);
-    const calls = mockFn.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((u) => u.includes("/annotation-queues/"))).toBe(false);
+    // No queue WRITES. (A read is allowed: since the queues mirror the current
+    // vote, a 👍 checks the negative queue for a pending 👎 item to remove.)
+    const queueWrites = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== undefined && c[1].method !== "GET",
+    );
+    expect(queueWrites).toHaveLength(0);
   });
 
   it("retrying a 👍-with-comment queues exactly once (dedupe key includes the queue)", async () => {
@@ -428,8 +481,12 @@ describe("annotation queue", () => {
       { fetchImpl, env: env(CREDS) }, // no LANGFUSE_FEEDBACK_QUEUE_ID
     );
     expect(res.ok).toBe(true);
-    const calls = mockFn.mock.calls.map((c) => String(c[0]));
-    expect(calls.some((u) => u.includes("/annotation-queues/"))).toBe(false);
+    // No queue WRITES. (A read is allowed: since the queues mirror the current
+    // vote, a 👍 checks the negative queue for a pending 👎 item to remove.)
+    const queueWrites = mockFn.mock.calls.filter(
+      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== undefined && c[1].method !== "GET",
+    );
+    expect(queueWrites).toHaveLength(0);
   });
 
   it("dedupes a retry/double-click — the SAME trace is pushed only once", async () => {
@@ -477,26 +534,102 @@ describe("annotation queue", () => {
     expect(posts).toHaveLength(0);
   });
 
-  it("leaves an existing queue item untouched on a 👎→👍 flip", async () => {
-    const mockFn = vi.fn(async (_url: string, _init?: RequestInit) => new Response("{}", { status: 200 }));
-    const fetchImpl = mockFn as unknown as typeof fetch;
+  // -------------------------------------------------------------------------
+  // The queues MIRROR the current vote (2026-09-09). Before this, a 👎→👍 flip
+  // left the 👎 item in the review queue and a retraction never reached
+  // Langfuse at all — reviewers opened items whose visitor had withdrawn or
+  // reversed the vote, and the dashboard kept counting it.
+  // -------------------------------------------------------------------------
+  const bothQueues = env({
+    ...CREDS,
+    LANGFUSE_FEEDBACK_QUEUE_ID: "queue-neg",
+    LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID: "queue-pos",
+  });
+
+  it("a 👎→👍 flip MOVES the item: negative queue emptied, positive only with a comment", async () => {
+    const lf = fakeLangfuse();
+    const target = { kind: "trace" as const, traceId: "trace-flip-1" };
+    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "down" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    expect(lf.pending("queue-neg").map((i) => i.objectId)).toEqual(["trace-flip-1"]);
+
+    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "up" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    expect(lf.pending("queue-neg")).toHaveLength(0);
+    expect(lf.pending("queue-pos")).toHaveLength(0); // plain 👍 is statistics-only
+
+    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "up", comment: "super" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    expect(lf.pending("queue-pos").map((i) => i.objectId)).toEqual(["trace-flip-1"]);
+
+    // …and back: 👍→👎 moves it again, with no duplicate in the negative queue.
+    await submitFeedback({ sessionId: "s-flip-1", turnId: "t", thumb: "down" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    expect(lf.pending("queue-pos")).toHaveLength(0);
+    expect(lf.pending("queue-neg")).toHaveLength(1);
+  });
+
+  it("a retraction deletes BOTH scores and the pending queue item", async () => {
+    const lf = fakeLangfuse();
+    const target = { kind: "trace" as const, traceId: "trace-retract-1" };
     await submitFeedback(
-      { sessionId: "s", turnId: "t", thumb: "down" },
-      { kind: "trace", traceId: "trace-queue-6" },
-      { fetchImpl, env: withQueue },
+      { sessionId: "s-retract-1", turnId: "t", thumb: "down", reason: "too_slow" },
+      target,
+      { fetchImpl: lf.fetchImpl, env: bothQueues },
     );
+    expect(lf.scores.has(feedbackScoreId("s-retract-1", "t"))).toBe(true);
+    expect(lf.scores.has(feedbackScoreId("s-retract-1", "t", "-reason"))).toBe(true);
+    expect(lf.pending("queue-neg")).toHaveLength(1);
+
+    const res = await retractFeedback({ sessionId: "s-retract-1", turnId: "t" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues });
+    expect(res).toMatchObject({ ok: true, target: "trace" });
+    expect(lf.scores.size).toBe(0);
+    expect(lf.pending("queue-neg")).toHaveLength(0);
+
+    // A retraction with nothing to retract is still a success (404 = already gone).
+    await expect(
+      retractFeedback({ sessionId: "s-retract-1", turnId: "t" }, target, { fetchImpl: lf.fetchImpl, env: bothQueues }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+
+  it("a retraction finds a SESSION-precision item even when the vote now resolves to the trace", async () => {
+    // The vote landed before ingestion caught up → queued as a SESSION item.
+    // Seconds later the retraction resolves to the TRACE — it must still find it.
+    const lf = fakeLangfuse();
     await submitFeedback(
-      { sessionId: "s", turnId: "t", thumb: "up" },
-      { kind: "trace", traceId: "trace-queue-6" },
-      { fetchImpl, env: withQueue },
+      { sessionId: "s-retract-2", turnId: "t", thumb: "down" },
+      { kind: "session", sessionId: "s-retract-2" },
+      { fetchImpl: lf.fetchImpl, env: bothQueues },
     );
-    // Exactly the one push from the 👎 — the flip to 👍 neither deletes nor
-    // re-pushes it. Deliberate: see pushToAnnotationQueue's header comment.
-    const queueWrites = mockFn.mock.calls.filter(
-      (c) => String(c[0]).includes("/annotation-queues/") && c[1]?.method !== "GET" && c[1]?.method !== undefined,
+    expect(lf.pending("queue-neg").map((i) => i.objectType)).toEqual(["SESSION"]);
+    await retractFeedback(
+      { sessionId: "s-retract-2", turnId: "t" },
+      { kind: "trace", traceId: "trace-retract-2" },
+      { fetchImpl: lf.fetchImpl, env: bothQueues },
     );
-    expect(queueWrites).toHaveLength(1);
-    expect(queueWrites[0][1]?.method).toBe("POST");
+    expect(lf.pending("queue-neg")).toHaveLength(0);
+  });
+
+  it("never removes a COMPLETED item — a review that happened is a fact", async () => {
+    const lf = fakeLangfuse();
+    lf.items.set("queue-neg", [
+      { id: "done-1", objectId: "trace-retract-3", objectType: "TRACE", status: "COMPLETED" },
+    ]);
+    await retractFeedback(
+      { sessionId: "s-retract-3", turnId: "t" },
+      { kind: "trace", traceId: "trace-retract-3" },
+      { fetchImpl: lf.fetchImpl, env: bothQueues },
+    );
+    expect(lf.items.get("queue-neg")).toHaveLength(1);
+  });
+
+  it("a retraction never throws and reports a non-404 delete failure", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 500 })) as unknown as typeof fetch;
+    await expect(
+      retractFeedback({ sessionId: "s", turnId: "t" }, TRACE, { fetchImpl, env: bothQueues }),
+    ).resolves.toMatchObject({ ok: false });
+    const boom = vi.fn(async () => {
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    await expect(
+      retractFeedback({ sessionId: "s", turnId: "t" }, TRACE, { fetchImpl: boom, env: bothQueues }),
+    ).resolves.toMatchObject({ ok: false });
   });
 
   it("never throws even when the queue push itself fails", async () => {
@@ -597,6 +730,9 @@ describe("wire contract", () => {
 
   it("accepts omitted optional fields too", () => {
     expect(FeedbackRequestSchema.safeParse({ ...base, thumb: "up" }).success).toBe(true);
+    // `thumb: null` is a RETRACTION (second click on the same thumb) — a real
+    // event that must reach Langfuse, so the schema must let it through.
+    expect(FeedbackRequestSchema.safeParse({ ...base, thumb: null }).success).toBe(true);
   });
 
   it("still rejects what is genuinely malformed", () => {

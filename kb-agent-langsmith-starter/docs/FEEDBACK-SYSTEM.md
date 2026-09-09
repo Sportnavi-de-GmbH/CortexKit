@@ -36,7 +36,11 @@ top-left to bottom-right; every tile answers one question.
 - **Negative rate = 1 − Positive rate**, and both are on the pie as percentages.
 - **Requests** counts the per-turn `answer-delivered` span (one per visitor
   turn). Never the trace root — it also fires on eve's internal HTTP calls and
-  over-counts ~17× (measured: 532 roots for 30 turns).
+  over-counted ~20× (measured: 532 roots for 30 turns; 132 for 6).
+  **Since 2026-09-09 those session-less roots are no longer exported** (the
+  root only ships when its trace carried a visitor turn), so the Tracing list
+  and the dashboard agree: one trace per request. Roots from before that date
+  remain in the Tracing list as empty `visitor-request` rows.
 - **Failed turns** is the one extra health tile: `answer-delivered` with
   `outcome = failed`. It is the only number that should always be 0.
 - **Cost is a small table, not a big number, on purpose.** Langfuse's number
@@ -187,6 +191,33 @@ The browser knows only `sessionId` + `turnId`. `resolveTarget` in
 Queue pushes dedupe by **asking the queue** (Langfuse does not; per-instance
 markers made 2 items from 5 POSTs). Partner votes are forwarded to service 2's
 own `/api/feedback` (it owns those traces), loopback/shared-secret gated.
+
+### Retraction and flips — Langfuse mirrors the current vote (2026-09-09)
+
+- **Retraction** (second click on the same thumb) posts `thumb: null`. The
+  server DELETEs both scores by their deterministic ids and removes the
+  vote's PENDING queue item(s). Until 2026-09-09 the widget only reset its own
+  UI, so Langfuse kept a vote the visitor had withdrawn — the dashboard counted
+  it and the review queue showed it.
+- **Flips move the item.** 👎 → pending in the negative queue, nothing in the
+  positive one; 👍 with comment → the reverse; plain 👍 → in neither. The
+  earlier "a flip leaves the item" rule is gone: it left reviewers opening 👎
+  items whose visitor had since said 👍.
+- Removal looks for the item under the trace **and** the session, so a vote
+  that was queued at session precision is still found once the retraction
+  resolves to the trace. **COMPLETED items are never touched** — a review that
+  happened is a fact.
+
+### What "in sync" means here (eventual consistency, measured)
+
+Langfuse is not a transactional database. Scores POST/DELETE are acknowledged
+on enqueue and become readable within seconds; spans arrive via OTLP batches
+and the last invocation's spans of a turn can take ~1–2 minutes to become
+queryable; **deleting a trace in the UI** removes its observations, scores and
+queue items asynchronously. So immediately after any write, a dashboard tile
+can lag by a minute — that is ingestion, not staleness or caching. There is
+no application-side cache: every tile is a live ClickHouse query and every
+script reads the API fresh.
 
 ---
 

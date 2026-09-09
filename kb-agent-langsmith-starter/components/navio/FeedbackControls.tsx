@@ -69,6 +69,10 @@ export function FeedbackControls({ sessionId, turnId, surface }: Props) {
       setPanelOpen(false);
       setReason(null);
       setComment("");
+      // A retraction is a real event, not a local undo. Until 2026-09-09 this
+      // branch only reset the UI, so Langfuse kept a vote the visitor had
+      // withdrawn — the dashboard counted it and the review queue showed it.
+      post({ thumb: null, reason: null, comment: "" });
       return;
     }
     // Recorded IMMEDIATELY — the panel is optional enrichment. It now opens

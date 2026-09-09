@@ -17,6 +17,7 @@ import {
   FeedbackRequestSchema,
   isReasonCode,
   resolveTraceViaLangfuse,
+  retractFeedback,
   submitFeedback,
   type FeedbackRequest,
   type FeedbackTarget,
@@ -136,20 +137,24 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const target = await resolveTarget(parsed.sessionId, parsed.turnId);
-  const result = await submitFeedback(
-    {
-      sessionId: parsed.sessionId,
-      turnId: parsed.turnId,
-      thumb: parsed.thumb,
-      // An unknown reason code is dropped rather than stored: a CATEGORICAL
-      // score with an off-taxonomy value would quietly pollute the very
-      // breakdown this exists to produce.
-      reason: isReasonCode(parsed.reason) ? parsed.reason : undefined,
-      comment: parsed.comment ?? undefined,
-      surface: parsed.surface ?? undefined,
-    },
-    target,
-  );
+  const result =
+    parsed.thumb === null
+      ? // Retraction: delete the scores and the pending queue item — see retractFeedback.
+        await retractFeedback({ sessionId: parsed.sessionId, turnId: parsed.turnId }, target)
+      : await submitFeedback(
+          {
+            sessionId: parsed.sessionId,
+            turnId: parsed.turnId,
+            thumb: parsed.thumb,
+            // An unknown reason code is dropped rather than stored: a CATEGORICAL
+            // score with an off-taxonomy value would quietly pollute the very
+            // breakdown this exists to produce.
+            reason: isReasonCode(parsed.reason) ? parsed.reason : undefined,
+            comment: parsed.comment ?? undefined,
+            surface: parsed.surface ?? undefined,
+          },
+          target,
+        );
 
   if (!result.ok) {
     // Shape only — never the visitor's words.

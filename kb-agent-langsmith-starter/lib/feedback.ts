@@ -138,7 +138,10 @@ export function feedbackScoreId(sessionId: string, turnId: string, suffix = ""):
 export const FeedbackRequestSchema = z.object({
   sessionId: z.string().min(1).max(200),
   turnId: z.string().min(1).max(200),
-  thumb: z.enum(["up", "down"]),
+  /** `null` = the visitor RETRACTED their vote (second click on the same
+   *  thumb). It is a real event that must reach Langfuse, not a local undo:
+   *  the scores are deleted and the review-queue item removed. */
+  thumb: z.enum(["up", "down"]).nullable(),
   reason: z.string().max(64).nullish(),
   comment: z.string().max(MAX_COMMENT_CHARS * 4).nullish(),
   surface: z.enum(["faq", "partner"]).nullish(),
@@ -265,29 +268,87 @@ export function buildReasonPayload(
 // itself a useful signal a reviewer should see, not noise to erase.
 // ---------------------------------------------------------------------------
 
-/** Does the queue already hold this object? Langfuse itself does not dedupe
- *  queue items, and the local marker is per-instance — measured on Vercel
+type QueueDeps = { fetchImpl: FetchLike; env: NodeJS.ProcessEnv; headers: Record<string, string> };
+
+interface QueueItemLite {
+  id: string;
+  objectId?: string;
+  objectType?: string;
+  status?: string;
+}
+
+/** The queue's items for one object. Langfuse itself does not dedupe queue
+ *  items, and the local marker is per-instance — measured on Vercel
  *  2026-09-08: five identical POSTs produced two items. So the queue is asked
- *  directly; one small read per queued vote. Any failure reads as "not
- *  queued", which errs on the side of a reviewable duplicate over a lost vote. */
-async function alreadyQueued(
+ *  directly; one small read per queued vote. Any failure reads as "nothing
+ *  there", which errs on the side of a reviewable duplicate over a lost vote. */
+async function queueItemsFor(
   queueId: string,
   objectType: string,
   objectId: string,
-  deps: { fetchImpl: FetchLike; env: NodeJS.ProcessEnv; headers: Record<string, string> },
-): Promise<boolean> {
+  deps: QueueDeps,
+): Promise<QueueItemLite[]> {
   try {
     const res = await deps.fetchImpl(
       `${langfuseBaseUrl(deps.env)}/api/public/annotation-queues/${queueId}/items?limit=100`,
       { headers: deps.headers },
     );
-    if (!res.ok) return false;
-    const items =
-      ((await res.json()) as { data?: Array<{ objectId?: string; objectType?: string }> }).data ??
-      [];
-    return items.some((i) => i.objectId === objectId && i.objectType === objectType);
+    if (!res.ok) return [];
+    const items = ((await res.json()) as { data?: QueueItemLite[] }).data ?? [];
+    return items.filter((i) => i.objectId === objectId && i.objectType === objectType);
   } catch {
-    return false;
+    return [];
+  }
+}
+
+async function alreadyQueued(
+  queueId: string,
+  objectType: string,
+  objectId: string,
+  deps: QueueDeps,
+): Promise<boolean> {
+  return (await queueItemsFor(queueId, objectType, objectId, deps)).length > 0;
+}
+
+/** The queue objects a vote may be filed under: its trace when known, and
+ *  ALWAYS its session — a vote that landed at session precision (ingestion
+ *  not caught up) was queued as a SESSION item, and a later retraction or
+ *  flip resolving to the trace must still find it. */
+function queueObjectsFor(
+  target: FeedbackTarget,
+  sessionId: string,
+): Array<{ objectType: "TRACE" | "SESSION"; objectId: string }> {
+  const objects: Array<{ objectType: "TRACE" | "SESSION"; objectId: string }> = [];
+  if (target.kind === "trace") objects.push({ objectType: "TRACE", objectId: target.traceId });
+  objects.push({ objectType: "SESSION", objectId: sessionId });
+  return objects;
+}
+
+/** Remove this vote's PENDING item(s) from a queue. COMPLETED items stay —
+ *  a review that already happened is a fact, not something a visitor's later
+ *  click can un-happen. Never throws. */
+async function removeFromQueue(
+  target: FeedbackTarget,
+  sessionId: string,
+  queueId: string | undefined,
+  deps: QueueDeps,
+): Promise<void> {
+  if (!queueId) return;
+  try {
+    for (const { objectType, objectId } of queueObjectsFor(target, sessionId)) {
+      const pending = (await queueItemsFor(queueId, objectType, objectId, deps)).filter(
+        (i) => i.status === "PENDING",
+      );
+      for (const item of pending) {
+        await deps.fetchImpl(
+          `${langfuseBaseUrl(deps.env)}/api/public/annotation-queues/${queueId}/items/${item.id}`,
+          { method: "DELETE", headers: deps.headers },
+        );
+      }
+      queuedMarkers.delete(`${queueId}:${objectType}:${objectId}`);
+    }
+  } catch {
+    // Observability must never break feedback submission.
   }
 }
 
@@ -402,19 +463,26 @@ export async function submitFeedback(
       return { ok: false, detail: `score ${res.status}` };
     }
 
-    // A 👎 with or without a reason still deserves review, so this runs
-    // before the reason branch below rather than depending on it.
+    // THE QUEUES MIRROR THE CURRENT VOTE. A 👎 is a pending item in the
+    // negative queue and nothing in the positive one; a 👍 with a comment the
+    // reverse; a plain 👍 is in neither. So a flip MOVES the item — the
+    // earlier "leave the item on a flip" rule left reviewers opening 👎 items
+    // whose visitor had since said 👍, which is exactly the stale state the
+    // owner asked to eliminate. COMPLETED items are never touched.
+    const qdeps: QueueDeps = { fetchImpl: doFetch, env, headers };
     if (input.thumb === "down") {
-      await pushToAnnotationQueue(target, annotationQueueId(env), { fetchImpl: doFetch, env, headers });
-    } else if (score.comment !== "") {
-      // A 👍 whose visitor took the time to write something is a candidate
-      // golden example — route it to the positive review queue. Plain 👍 stays
-      // statistics-only (the weekly report samples those).
-      await pushToAnnotationQueue(target, positiveAnnotationQueueId(env), {
-        fetchImpl: doFetch,
-        env,
-        headers,
-      });
+      await pushToAnnotationQueue(target, annotationQueueId(env), qdeps);
+      await removeFromQueue(target, input.sessionId, positiveAnnotationQueueId(env), qdeps);
+    } else {
+      await removeFromQueue(target, input.sessionId, annotationQueueId(env), qdeps);
+      if (score.comment !== "") {
+        // A 👍 whose visitor took the time to write something is a candidate
+        // golden example. Plain 👍 stays statistics-only (the weekly report
+        // samples those).
+        await pushToAnnotationQueue(target, positiveAnnotationQueueId(env), qdeps);
+      } else {
+        await removeFromQueue(target, input.sessionId, positiveAnnotationQueueId(env), qdeps);
+      }
     }
 
     const reason = buildReasonPayload(input, target, env);
@@ -430,6 +498,42 @@ export async function submitFeedback(
       }).catch(() => undefined);
     }
 
+    return { ok: true, target: target.kind };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * The visitor withdrew their vote (second click on the same thumb). Langfuse
+ * must forget it completely: both scores are DELETED (the ids are
+ * deterministic, so this needs no lookup and no local state — a vote that was
+ * later reconciled from session to trace precision still has the same id),
+ * and the vote's PENDING review-queue items are removed. A 404 on either score
+ * is success: there was nothing to forget. NEVER throws.
+ */
+export async function retractFeedback(
+  input: { sessionId: string; turnId: string },
+  target: FeedbackTarget,
+  deps: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
+): Promise<SubmitResult> {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
+  if (!langfuseEnabled(env)) return { ok: true, detail: "langfuse-not-configured" };
+
+  const base = `${langfuseBaseUrl(env)}/api/public/scores`;
+  const headers = { ...langfuseHeaders(env), "Content-Type": "application/json" };
+  try {
+    for (const suffix of ["", "-reason"]) {
+      const res = await doFetch(`${base}/${feedbackScoreId(input.sessionId, input.turnId, suffix)}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!res.ok && res.status !== 404) return { ok: false, detail: `delete ${res.status}` };
+    }
+    const qdeps: QueueDeps = { fetchImpl: doFetch, env, headers };
+    await removeFromQueue(target, input.sessionId, annotationQueueId(env), qdeps);
+    await removeFromQueue(target, input.sessionId, positiveAnnotationQueueId(env), qdeps);
     return { ok: true, target: target.kind };
   } catch (err) {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
