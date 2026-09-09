@@ -75,42 +75,33 @@ export function isReasonCode(value: unknown): value is ReasonCode {
 /**
  * The human reviewer's classification, set from inside the Langfuse annotation
  * queues as the `review-verdict` CATEGORICAL score. Exactly ONE verdict per
- * reviewed item. `promote` says what `feedback:promote` does with it.
+ * reviewed item, and each verdict maps to exactly one action (`promote` says
+ * what `feedback:promote` does with it; the rest is a human to-do).
+ *
+ * Reduced from seven values to four on 2026-09-09: a reviewer should decide
+ * "is the answer good, wrong, data-limited, or not the agent's fault?" and
+ * move on — finer distinctions (partially-correct vs incorrect, unclear
+ * question vs UX complaint) never changed the follow-up action.
  */
 export const REVIEW_VERDICTS = [
   {
     value: "good-example",
-    en: "Answer is a model response — promote to the golden-answers dataset",
+    en: "A model answer — promote to the golden-answers dataset",
     promote: "golden" as const,
   },
   {
-    value: "incorrect",
-    en: "Answer states something factually wrong",
+    value: "wrong-answer",
+    en: "Wrong or misleading in any part — promote to the regression dataset",
     promote: "regression" as const,
-  },
-  {
-    value: "partially-correct",
-    en: "Answer is right in part but misses or muddles something",
-    promote: "regression" as const,
-  },
-  {
-    value: "unclear-question",
-    en: "The visitor's question was too vague to answer well — not an agent defect",
-    promote: "none" as const,
-  },
-  {
-    value: "ux-issue",
-    en: "Answer content fine; presentation, speed or widget flow caused the complaint",
-    promote: "none" as const,
   },
   {
     value: "data-gap",
-    en: "Our directory/KB lacks the information — fix the data, not the prompt",
+    en: "The answer is fine but our directory/KB lacks the information — fix the data, not the prompt",
     promote: "none" as const,
   },
   {
-    value: "other",
-    en: "Does not fit any category — leave a comment explaining",
+    value: "not-a-defect",
+    en: "Vague question, UX/speed complaint, or nothing to change",
     promote: "none" as const,
   },
 ] as const;

@@ -31,11 +31,21 @@ const inside = "2026-09-04T12:00:00Z";
 const before = "2026-08-20T12:00:00Z";
 
 describe("taxonomy contract", () => {
-  it("has 8 reasons and 7 verdicts with unique codes", () => {
+  it("has 8 reasons and 4 verdicts with unique codes", () => {
     expect(REASONS).toHaveLength(8);
     expect(new Set(REASONS.map((r) => r.code)).size).toBe(8);
-    expect(REVIEW_VERDICTS).toHaveLength(7);
-    expect(new Set(REVIEW_VERDICTS.map((v) => v.value)).size).toBe(7);
+    expect(REVIEW_VERDICTS).toHaveLength(4);
+    expect(new Set(REVIEW_VERDICTS.map((v) => v.value)).size).toBe(4);
+  });
+
+  it("every verdict maps to exactly one action", () => {
+    const byPromote = new Map<string, string[]>();
+    for (const v of REVIEW_VERDICTS) {
+      byPromote.set(v.promote, [...(byPromote.get(v.promote) ?? []), v.value]);
+    }
+    expect(byPromote.get("golden")).toEqual(["good-example"]);
+    expect(byPromote.get("regression")).toEqual(["wrong-answer"]);
+    expect(byPromote.get("none")).toEqual(["data-gap", "not-a-defect"]);
   });
 
   it("every reason carries bilingual copy and a correlate hint", () => {
@@ -185,23 +195,26 @@ describe("rateByDigest", () => {
 describe("promote routing", () => {
   it("routes each verdict per its declared promote target", () => {
     expect(datasetForVerdict("good-example")).toBe(GOLDEN_DATASET);
-    expect(datasetForVerdict("incorrect")).toBe(REGRESSION_DATASET);
-    expect(datasetForVerdict("partially-correct")).toBe(REGRESSION_DATASET);
-    for (const v of ["unclear-question", "ux-issue", "data-gap", "other"]) {
+    expect(datasetForVerdict("wrong-answer")).toBe(REGRESSION_DATASET);
+    for (const v of ["data-gap", "not-a-defect"]) {
       expect(datasetForVerdict(v)).toBeNull();
     }
     expect(datasetForVerdict(undefined)).toBeNull();
     expect(datasetForVerdict("not-a-verdict")).toBeNull();
+    // Retired 7-value labels must not silently route anywhere.
+    for (const v of ["incorrect", "partially-correct", "unclear-question", "ux-issue", "other"]) {
+      expect(datasetForVerdict(v)).toBeNull();
+    }
   });
 
   it("verdictByTrace keeps the LATEST verdict when a reviewer re-classifies", () => {
     const verdicts = verdictByTrace([
-      row({ id: "v1", name: "review-verdict", traceId: "t1", stringValue: "incorrect", timestamp: "2026-09-01T00:00:00Z" }),
-      row({ id: "v2", name: "review-verdict", traceId: "t1", stringValue: "ux-issue", timestamp: "2026-09-05T00:00:00Z" }),
+      row({ id: "v1", name: "review-verdict", traceId: "t1", stringValue: "wrong-answer", timestamp: "2026-09-01T00:00:00Z" }),
+      row({ id: "v2", name: "review-verdict", traceId: "t1", stringValue: "not-a-defect", timestamp: "2026-09-05T00:00:00Z" }),
       row({ id: "v3", name: "review-verdict", traceId: "t2", stringValue: "good-example", timestamp: inside }),
       row({ id: "x", name: "user-feedback", traceId: "t3", value: 0, timestamp: inside }),
     ]);
-    expect(verdicts.get("t1")).toBe("ux-issue");
+    expect(verdicts.get("t1")).toBe("not-a-defect");
     expect(verdicts.get("t2")).toBe("good-example");
     expect(verdicts.has("t3")).toBe(false);
   });

@@ -20,7 +20,12 @@ import {
   windowStats,
   type ScoreRow,
 } from "../lib/feedback-insights";
-import { FEEDBACK_SCORE, REASON_SCORE } from "../lib/feedback";
+import {
+  annotationQueueId,
+  FEEDBACK_SCORE,
+  positiveAnnotationQueueId,
+  REASON_SCORE,
+} from "../lib/feedback";
 import { REVIEW_VERDICT_SCORE } from "../lib/feedback-taxonomy";
 import { langfuseBaseUrl, langfuseEnabled, langfuseHeaders } from "../lib/langfuse";
 
@@ -155,10 +160,13 @@ if (byDigest.length > 0) {
 }
 
 // --- queues ----------------------------------------------------------------
+// The review queues are the ones this build WRITES to (env ids), not whatever
+// happens to share a name prefix — retired queues stay listed in Langfuse.
+const reviewQueueIds = new Set([annotationQueueId(), positiveAnnotationQueueId()].filter(Boolean));
 const qres = await fetch(`${base}/api/public/annotation-queues?limit=100`, { headers });
 const queues = qres.ok
   ? ((((await qres.json()) as { data?: QueueRow[] }).data ?? []).filter((q) =>
-      q.name.startsWith("Feedback — "),
+      reviewQueueIds.has(q.id),
     ) as QueueRow[])
   : [];
 console.log("\nReview queues:");
@@ -166,7 +174,9 @@ for (const q of queues) {
   const n = await pendingCount(q);
   console.log(`  ${q.name}: ${n < 0 ? "?" : n} PENDING`);
 }
-if (queues.length === 0) console.log("  none found — run npm run feedback:setup first");
+if (queues.length === 0) {
+  console.log("  none configured — set LANGFUSE_FEEDBACK_QUEUE_ID / _POSITIVE_QUEUE_ID (npm run feedback:setup prints them)");
+}
 
 // --- weekly plain-👍 spot sample -------------------------------------------
 const sample = samplePlainUps(scores, windowFrom, nowIso);
@@ -176,7 +186,7 @@ for (const s of sample) {
 }
 if (sample.length > 0) {
   console.log("  → open each in Langfuse (Traces → paste the id); a model answer deserves");
-  console.log("    a queue item in 'Feedback — Positive Examples' + verdict good-example.");
+  console.log("    a queue item in 'Review: positive examples' + verdict good-example.");
 }
 
 // --- manual monitor checklist (no monitor-update API) ----------------------

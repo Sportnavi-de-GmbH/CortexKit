@@ -2,13 +2,14 @@
 // setup-feedback-scores.ts, which stays for history):
 //
 //   configs : user-feedback (numeric 0..1) · feedback-reason (8 visitor codes)
-//             · review-verdict (7 reviewer classifications)
-//   queues  : "Feedback — Negative Review"    (reason + verdict attached)
-//             "Feedback — Positive Examples"  (verdict attached)
-//   migrate : PENDING TRACE items from the legacy "Negative Feedback Review"
-//             queue move into the new negative queue — skipping duplicates and
-//             traces whose CURRENT thumb is 👍 (a 👎→👍 flip deliberately left
-//             its item behind; a fresh queue should not inherit that noise).
+//             · review-verdict (4 reviewer verdicts, ONE per item)
+//   queues  : "Review: negative feedback"   (review-verdict attached — nothing else)
+//             "Review: positive examples"   (review-verdict attached)
+//   migrate : PENDING TRACE items from retired queues move into the current
+//             ones — skipping duplicates and traces whose CURRENT thumb is 👍
+//             (a 👎→👍 flip deliberately left its item behind; a fresh queue
+//             should not inherit that noise) — and are deleted from the
+//             retired queue so it reads empty.
 //
 // Idempotency is list-then-create everywhere: Langfuse silently creates
 // duplicate names (it did — the FAQ project carries permanent duplicate
@@ -37,9 +38,14 @@ const base = langfuseBaseUrl();
 const configsBase = `${base}/api/public/score-configs`;
 const queuesBase = `${base}/api/public/annotation-queues`;
 
-const NEGATIVE_QUEUE = "Feedback — Negative Review";
-const POSITIVE_QUEUE = "Feedback — Positive Examples";
-const LEGACY_QUEUE = "Negative Feedback Review";
+const NEGATIVE_QUEUE = "Review: negative feedback";
+const POSITIVE_QUEUE = "Review: positive examples";
+/** Earlier generations of the queues; PENDING items are carried forward. The
+ *  2026-09-08 pair attached the visitor's feedback-reason config too, which
+ *  showed reviewers a second, pointless input — the current queues attach
+ *  review-verdict ONLY (queues cannot be edited, hence the new pair). */
+const LEGACY_NEGATIVE_QUEUES = ["Negative Feedback Review", "Feedback — Negative Review"];
+const LEGACY_POSITIVE_QUEUES = ["Feedback — Positive Examples"];
 
 interface ConfigRow {
   id: string;
@@ -166,21 +172,23 @@ async function ensureQueue(
   return json.id;
 }
 
+// ONE annotation field per queue: review-verdict. The visitor's reason and
+// comment are already visible in the trace's scores panel; attaching their
+// config here would only add an empty second dropdown for the reviewer.
 const negativeQueueId = await ensureQueue(
   NEGATIVE_QUEUE,
-  "Every 👎 lands here as PENDING. Review: open the item, read the trace next to " +
-    "the visitor's reason + comment, set ONE review-verdict, optionally leave a " +
-    "Comment, mark COMPLETED. feedback:promote turns completed verdicts into " +
-    "datasets (incorrect/partially-correct → Regressions).",
-  [reasonConfigId, verdictConfigId].filter(Boolean),
+  "Every 👎 lands here. Open the item, read the answer next to the visitor's " +
+    "reason + comment (scores panel), pick ONE review-verdict, mark Complete. " +
+    "wrong-answer feeds the regression dataset; data-gap and not-a-defect need " +
+    "no prompt change.",
+  [verdictConfigId].filter(Boolean),
 );
 
 const positiveQueueId = await ensureQueue(
   POSITIVE_QUEUE,
-  "Every 👍 that carries a visitor comment lands here as PENDING (plain 👍 stays " +
-    "statistics-only; the weekly report samples those). Review and set " +
-    "review-verdict=good-example to have feedback:promote add the answer to the " +
-    "'Feedback — Golden Answers' dataset.",
+  "👍 votes that came with a visitor comment. If the answer is genuinely a model " +
+    "response, set review-verdict = good-example (feeds the golden dataset); " +
+    "otherwise not-a-defect. Mark Complete.",
   [verdictConfigId].filter(Boolean),
 );
 
@@ -227,47 +235,52 @@ async function currentThumbByTrace(): Promise<Map<string, number>> {
   return new Map([...byTrace.entries()].map(([k, v]) => [k, v.value]));
 }
 
-const legacy = await findQueue(LEGACY_QUEUE);
-if (legacy && negativeQueueId) {
-  const [legacyItems, newItems, thumbs] = await Promise.all([
-    listItems(legacy.id),
-    listItems(negativeQueueId),
-    currentThumbByTrace(),
-  ]);
-  const already = new Set(newItems.map((i) => `${i.objectType}:${i.objectId}`));
-  const seen = new Set<string>();
-  let moved = 0;
-  let skipped = 0;
-  for (const item of legacyItems) {
-    const key = `${item.objectType}:${item.objectId}`;
-    const flippedUp = item.objectType === "TRACE" && thumbs.get(item.objectId) === 1;
-    if (
-      item.status !== "PENDING" ||
-      item.objectType === "OBSERVATION" || // bogus historical entry
-      already.has(key) ||
-      seen.has(key) || // duplicate rows in the legacy queue itself
-      flippedUp
-    ) {
-      skipped++;
-      continue;
+/** Carry PENDING items from retired queues into the current one, then delete
+ *  them there so the retired queue reads empty (queues have no delete API —
+ *  an empty one is the next best thing; remove it in the UI when convenient). */
+async function migrate(legacyNames: string[], targetQueueId: string, dropFlippedUp: boolean) {
+  if (!targetQueueId) return;
+  const thumbs = dropFlippedUp ? await currentThumbByTrace() : new Map<string, number>();
+  for (const name of legacyNames) {
+    const legacy = await findQueue(name);
+    if (!legacy || legacy.id === targetQueueId) continue;
+    const [legacyItems, newItems] = await Promise.all([listItems(legacy.id), listItems(targetQueueId)]);
+    const already = new Set(newItems.map((i) => `${i.objectType}:${i.objectId}`));
+    const seen = new Set<string>();
+    let moved = 0;
+    let skipped = 0;
+    for (const item of legacyItems) {
+      const key = `${item.objectType}:${item.objectId}`;
+      const flippedUp = item.objectType === "TRACE" && thumbs.get(item.objectId) === 1;
+      if (
+        item.status !== "PENDING" ||
+        item.objectType === "OBSERVATION" || // bogus historical entry
+        already.has(key) ||
+        seen.has(key) || // duplicate rows in the legacy queue itself
+        flippedUp
+      ) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
+      const res = await fetch(`${queuesBase}/${targetQueueId}/items`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ objectId: item.objectId, objectType: item.objectType }),
+      });
+      if (!res.ok) continue;
+      moved++;
+      already.add(key);
+      await fetch(`${queuesBase}/${legacy.id}/items/${item.id}`, { method: "DELETE", headers });
     }
-    seen.add(key);
-    const res = await fetch(`${queuesBase}/${negativeQueueId}/items`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ objectId: item.objectId, objectType: item.objectType }),
-    });
-    if (res.ok) moved++;
+    console.log(
+      `PASS  migrated ${moved} PENDING item(s) from "${name}" (${skipped} skipped: done/duplicate/flipped/bogus) — delete that empty queue in the UI`,
+    );
   }
-  console.log(
-    `PASS  migrated ${moved} PENDING item(s) from "${LEGACY_QUEUE}" (${skipped} skipped: done/duplicate/flipped/bogus)`,
-  );
-  console.log(
-    `      the legacy queue is left in place for history — review anything left there once, then ignore it`,
-  );
-} else if (!legacy) {
-  console.log(`PASS  no legacy "${LEGACY_QUEUE}" queue — nothing to migrate`);
 }
+
+await migrate(LEGACY_NEGATIVE_QUEUES, negativeQueueId, true);
+await migrate(LEGACY_POSITIVE_QUEUES, positiveQueueId, false);
 
 // ---------------------------------------------------------------------------
 

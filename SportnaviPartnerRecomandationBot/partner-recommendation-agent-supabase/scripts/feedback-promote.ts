@@ -19,6 +19,7 @@ import {
   fromV3Row,
   verdictByTrace,
 } from "../lib/feedback-insights";
+import { annotationQueueId, positiveAnnotationQueueId } from "../lib/feedback";
 import { langfuseBaseUrl, langfuseEnabled, langfuseHeaders } from "../lib/langfuse";
 
 if (!langfuseEnabled()) {
@@ -39,10 +40,14 @@ interface ItemRow {
 
 const qres = await fetch(`${base}/api/public/annotation-queues?limit=100`, { headers });
 if (!qres.ok) throw new Error(`annotation-queues list: ${qres.status}`);
+// Only the queues this build writes to (env ids) — retired queues stay listed.
+const reviewQueueIds = new Set([annotationQueueId(), positiveAnnotationQueueId()].filter(Boolean));
 const queues = (((await qres.json()) as { data?: Array<{ id: string; name: string }> }).data ?? [])
-  .filter((q) => q.name.startsWith("Feedback — "));
+  .filter((q) => reviewQueueIds.has(q.id));
 if (queues.length === 0) {
-  console.error('No "Feedback — …" queues found — run npm run feedback:setup first.');
+  console.error(
+    "No review queues configured — set LANGFUSE_FEEDBACK_QUEUE_ID / _POSITIVE_QUEUE_ID (npm run feedback:setup prints them).",
+  );
   process.exit(3);
 }
 

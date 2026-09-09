@@ -1,197 +1,214 @@
-# Navio feedback — the quality loop
+# Navio feedback — dashboard and review workflow
 
 👍/👎 on every assistant answer, written as Langfuse **scores** onto the exact
-trace that produced the answer — and, since **2026-09-08**, wired into a full
-improvement loop instead of stopping at collection:
+trace that produced the answer, feeding one dashboard and one review queue:
 
 ```
-COLLECT           REVIEW                     ANALYZE            IMPROVE                EVALUATE
-👍/👎 + reason  →  annotation queues       →  feedback:report →  prompt / KB / data  →  datasets via
-+ comment          + review-verdict score     (weekly)           change                feedback:promote
-     └────────────────────────────── positive rate by knowledge.version_digest closes the loop ─────────┘
+visitor 👍/👎 (+ reason, comment)
+      │
+      ├──▶ scores on the trace ──▶ "Navio Health" dashboard (counts, rates, cost, speed)
+      │
+      └──▶ Review queue ──▶ human picks ONE verdict ──▶ feedback:promote ──▶ datasets
+               👎 always            good-example → Golden Answers      (eval / regression
+               👍 with comment      wrong-answer → Regressions          runs before a
+                                    data-gap / not-a-defect → no dataset  prompt change)
 ```
 
-Collection built and verified live 2026-08-18; loop redesign (positive queue,
-review verdicts, report/promote scripts, config cleanup) 2026-09-08.
+Collection built 2026-08-18; loop redesign 2026-09-08; dashboard + 4-verdict
+review workflow 2026-09-09.
 
-## What a visitor sees
+---
 
-Thumbs appear under an answer once it is **complete**. Either thumb is recorded
-**immediately**; a panel then offers enrichment — 👎 gets eight reasons plus an
-optional comment, 👍 gets just the comment box ("Was war gut?"). The panel is
-never a gate: a form that only submits at the end loses every visitor who does
-not finish it.
+## 1. The dashboard — "Navio Health"
 
-## Data model
+One per Langfuse project (FAQ, Partner), identical layout. Reading order is
+top-left to bottom-right; every tile answers one question.
 
-One source of truth for the whole vocabulary: **`lib/feedback-taxonomy.ts`**
-(client-safe, imported by the widget component, the server, the scripts and the
-tests — the reason list used to exist twice and drift).
+| Row | Tiles (left → right) | Question answered |
+|---|---|---|
+| 1 | **Requests** · **Failed turns** · **Total cost (USD)** · **Avg turn latency (ms)** | Is it running, breaking, expensive, slow? |
+| 2 | **Answers rated** · **👍 Positive feedback** · **👎 Negative feedback** · **Positive rate (0–1)** | Are people voting, and how? |
+| 3 | **Requests per day** (bars) · **Feedback split** (pie, % of 👍 vs 👎) | Trend, and the rates as percentages |
+
+- **Requests with no feedback = Requests − Answers rated.** The two tiles sit
+  vertically adjacent for exactly this reason; Langfuse dashboards have no
+  computed tiles.
+- **Negative rate = 1 − Positive rate**, and both are on the pie as percentages.
+- **Requests** counts the per-turn `answer-delivered` span (one per visitor
+  turn). Never the trace root — it also fires on eve's internal HTTP calls and
+  over-counts ~17× (measured: 532 roots for 30 turns).
+- **Failed turns** is the one extra health tile: `answer-delivered` with
+  `outcome = failed`. It is the only number that should always be 0.
+- **Avg turn latency** is end-to-end (visitor message → delivered answer), in ms.
+- **Date range:** the dashboard has no stored default — the picker remembers
+  your last choice. Use **Last 7 days** for a health check, **30 days** for
+  trends.
+
+Definitions were validated against the metrics API before placement (FAQ, 14
+days: 30 requests = 30 billed calls, 0 failed, $0.06, 3.8 s avg; 9 votes 6👍/3👎).
+
+Not on the dashboard, on purpose: reason breakdowns, verdict breakdowns,
+digest comparisons, token splits. `npm run feedback:report` prints those when
+you are investigating rather than checking.
+
+---
+
+## 2. The review workflow
+
+### What a reviewer sees, and what they do (≈ 60 seconds per item)
+
+1. Langfuse → **Annotation Queues** → **Review: negative feedback** → filter
+   *Pending* → open the first item.
+2. The trace opens beside the annotation panel. Read **the question** (trace
+   name) and **the answer** (output). In the trace's **Scores** panel:
+   `user-feedback` = the visitor's thumb, its **comment** = their own words,
+   `feedback-reason` = the code they picked (why they were unhappy).
+3. Pick **one `review-verdict`** — the only field in the panel:
+
+   | Verdict | Choose when | What happens next |
+   |---|---|---|
+   | `good-example` | the answer is genuinely a model response | promoted to dataset **Feedback — Golden Answers** |
+   | `wrong-answer` | wrong or misleading in **any** part (facts, missing key info, wrong partner) | promoted to dataset **Feedback — Regressions** |
+   | `data-gap` | the answer is fine, but our directory / KB lacks the information | fix the **data**, not the prompt |
+   | `not-a-defect` | vague question, speed/UX complaint, visitor error, nothing to change | nothing |
+
+4. Optional: leave a **Comment** on the trace only when the verdict alone would
+   not tell the next person what you saw.
+5. Mark **Complete**. Next item.
+
+**Mandatory:** the verdict. **Not needed:** re-rating the visitor's reason,
+scoring anything else, writing a summary.
+
+### Positive examples
+
+Only 👍 votes **with a visitor comment** enter **Review: positive examples**
+(plain 👍 stays statistics-only; `feedback:report` samples ~5/week for a spot
+check). Verdict is `good-example` (→ golden dataset) or `not-a-defect`
+(nothing special). Complete.
+
+### From reviewed items to datasets
+
+`npm run feedback:promote` reads every **Completed** item, joins its
+`review-verdict`, and upserts `good-example` traces into **Feedback — Golden
+Answers** and `wrong-answer` traces into **Feedback — Regressions**
+(input = the question, expected output = the answer, metadata = verdict +
+`knowledge.version_digest`). Idempotent per trace; `-- --dry-run` previews.
+Run the Regressions dataset through the eval harness before shipping a prompt
+or KB change; compare the digest-grouped positive rate after.
+
+### Why the 2026-09-08 queues were replaced
+
+They attached the visitor's `feedback-reason` config as well, which showed
+reviewers a second, empty dropdown they were not supposed to fill. Queues
+cannot be edited, so the current pair attaches **only `review-verdict`**, and
+the verdict vocabulary shrank from 7 values to the 4 above (finer distinctions
+never changed the follow-up action). Retired queues cannot be deleted via API:
+they were emptied — remove them in the UI when convenient.
+
+---
+
+## 3. Weekly (10 minutes)
+
+0. `npm run feedback:reconcile` — upgrades any session-precision votes to
+   their trace now that ingestion caught up (§5).
+1. `npm run feedback:report` — totals, trend, reason histogram, verdicts,
+   positive rate per `knowledge.version_digest`, queue backlog, plain-👍 sample.
+2. Clear the two queues (§2).
+3. `npm run feedback:promote`.
+
+---
+
+## 4. Data model
+
+One source of truth for the vocabulary: **`lib/feedback-taxonomy.ts`**
+(client-safe; imported by the widget component, the server, the scripts, tests).
 
 | Score | Type | Values | Written by |
 |---|---|---|---|
-| `user-feedback` | NUMERIC 0–1 | `1` = 👍, `0` = 👎; visitor comment in the score's `comment` | the widget, both thumbs |
+| `user-feedback` | NUMERIC 0–1 | `1` = 👍, `0` = 👎; visitor comment in `comment` | the widget, both thumbs |
 | `feedback-reason` | CATEGORICAL | `too_slow · not_relevant · incorrect · unclear · unanswered · tool_failed · misunderstood · other` | the widget, 👎 only |
-| `review-verdict` | CATEGORICAL | `good-example · incorrect · partially-correct · unclear-question · ux-issue · data-gap · other` | **a human**, from inside the annotation queues |
+| `review-verdict` | CATEGORICAL | `good-example · wrong-answer · data-gap · not-a-defect` | a human, from the queue |
 
-NUMERIC for the thumb because its **average is the satisfaction rate**. Each
-reason code carries a `correlate` hint in the taxonomy — the objective trace
-metric that should agree with the subjective complaint (e.g. `too_slow` ↔
-`timing.duration_ms`). `feedback:report` prints these next to the histogram.
+Score ids are deterministic (`fb-{session}-{turn}`): a re-vote updates the row,
+a retry is idempotent. Each reason code carries a `correlate` hint (the trace
+metric that should agree with it); `feedback:report` prints it.
 
-Score ids are deterministic (`fb-{session}-{turn}`), so a re-vote **updates**
-the row and a retry is idempotent.
-
-## Routing into the queues
-
-| Event | Goes to |
-|---|---|
-| every 👎 | queue **"Feedback — Negative Review"** (`LANGFUSE_FEEDBACK_QUEUE_ID`) |
-| 👍 **with a comment** | queue **"Feedback — Positive Examples"** (`LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID`) |
-| plain 👍 | statistics only; `feedback:report` samples ~5/week for spot review |
-
-Both pushes dedupe by **asking the queue** (Langfuse does not dedupe items
-itself, and the file-backed marker is per-instance — measured: five identical
-production POSTs made two items before this), with the marker as a fast path.
-Unset queue env ⇒ silent no-op, scores still written. A 👎→👍 flip deliberately leaves the queue item alone — "flagged, then
-reconsidered" is signal a reviewer should see.
-
-## The rituals
-
-**Daily (~10 min):** Langfuse UI → Annotation Queues → **Feedback — Negative
-Review** → filter PENDING. Each item opens next to its trace; read the visitor's
-`feedback-reason` + comment, check the reason's correlate metric on the trace,
-set **one `review-verdict`**, optionally leave a Comment, mark **COMPLETED**.
-Do the same for **Feedback — Positive Examples** (usually much shorter).
-
-**Weekly:**
-0. `npm run feedback:reconcile` — upgrades any session-precision votes to
-   their trace now that ingestion has caught up (see "How feedback finds the
-   right trace").
-1. `npm run feedback:report` — totals, positive rate + trend, reason and
-   verdict histograms, environment split, positive rate per
-   `knowledge.version_digest`, pending counts, the plain-👍 sample.
-2. Spot-review the sampled plain 👍; a model answer deserves a queue item in
-   Positive Examples (create it in the UI from the trace) with verdict
-   `good-example`.
-3. `npm run feedback:promote` (`-- --dry-run` first if unsure) — COMPLETED
-   items become dataset entries:
-   `good-example` → **"Feedback — Golden Answers"**,
-   `incorrect`/`partially-correct` → **"Feedback — Regressions"**.
-   Other verdicts route to work, not datasets: `data-gap` → fix directory/KB,
-   `ux-issue` → widget backlog, `unclear-question` → no agent defect.
-
-**The improvement recipe:** pick the biggest verdict/reason cluster → change
-the prompt / KB / data accordingly → after deploying, compare the
-digest-grouped positive rate in `feedback:report` (a prompt change changes
-`knowledge.version_digest`, so before/after separate cleanly) → run the
-Regressions dataset through the eval harness before calling it fixed.
-
-## Environment ids (per project — the env pair selects the project)
+### Environment ids (the env pair selects the project)
 
 | Variable | FAQ (`navio-widget`) | Partner (`navio-partner`) |
 |---|---|---|
 | `LANGFUSE_FEEDBACK_SCORE_CONFIG_ID` | `ed137b20-ae08-408d-af70-a6816a91948f` | `5e7b44aa-68be-4480-bcbb-e4dd052d8c5e` |
 | `LANGFUSE_REASON_SCORE_CONFIG_ID` | `038c8214-eef0-4c18-9ea3-ce320b921c91` | `b48f093f-8f88-4a9b-9ca8-b53d050ba407` |
 | `LANGFUSE_REVIEW_VERDICT_CONFIG_ID` | `59585208-8f5a-40b3-81d7-5a620f58ef04` | `fcba756c-091b-49ea-88ab-cfbb2c49a227` |
-| `LANGFUSE_FEEDBACK_QUEUE_ID` | `cmtss8ozw00tkqe07hddgygpu` | `cmtssafjq00ulqe07v7daa29t` |
-| `LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID` | `cmtss8p7500tnqe07liw170ni` | `cmtssaflz00uoqe07wsz0646j` |
+| `LANGFUSE_FEEDBACK_QUEUE_ID` (Review: negative feedback) | `cmttxoqbg011iqe07zpff7onj` | `cmttxot7p011oqe07ff8ir9tg` |
+| `LANGFUSE_FEEDBACK_POSITIVE_QUEUE_ID` (Review: positive examples) | `cmttxorrv011lqe072vwu6xmr` | `cmttxoupr011rqe07fh2mz43b` |
 
 Set in `.env.local` **and** on the Vercel project (env change ⇒ redeploy).
-`npm run feedback:setup` regenerates/validates all of this idempotently and
-prints the lines — it picks the earliest **well-formed** config per name
-(the FAQ project's oldest `user-feedback` config is malformed, null min/max —
-now archived along with the other duplicates, 2026-09-08).
+`npm run feedback:setup` validates/creates all of it idempotently and prints
+the lines. Scripts identify the queues by these ids, never by name.
 
-## Scripts
+### Scripts
 
 | Command | Does |
 |---|---|
-| `npm run feedback:setup` | idempotent: ensures 3 configs + 2 queues, migrates legacy queue items, prints env ids |
+| `npm run feedback:setup` | idempotent: 3 configs + 2 queues, migrates retired queues, prints env ids |
 | `npm run feedback:check` | reads recent scores back (sanity) |
 | `npm run feedback:reconcile [-- --dry-run]` | session-precision votes → trace precision, once ingested |
-| `npm run feedback:report [-- --days 14]` | the weekly statistics (see rituals) |
-| `npm run feedback:promote [-- --dry-run]` | COMPLETED + verdict → datasets, idempotent per trace |
+| `npm run feedback:report [-- --days 14]` | the weekly statistics |
+| `npm run feedback:promote [-- --dry-run]` | Completed + verdict → datasets |
 
-Pure computation lives in `lib/feedback-insights.ts` (tested offline in
-`tests/feedback-insights.test.ts`); the scripts are thin I/O.
+Pure computation lives in `lib/feedback-insights.ts` (tested offline).
 
-## How feedback finds the right trace
+---
 
-The browser knows only `sessionId` + `turnId`. The server resolves the trace in
-three steps (`resolveTarget` in `app/api/feedback/route.ts`):
+## 5. How feedback finds the right trace
 
-1. **Local map** `feedbackRefs`, written by the Langfuse hook at turn end —
-   dev, or the lucky warm instance. On Vercel it lives under
-   `/tmp/navio-langfuse` (`STORE_ROOT`; `.data/` is read-only there).
-   **Measured 2026-09-08: 0 of 5 production votes found it** — the invocation
-   serving `/api/feedback` is almost never the one that finished the turn.
-2. **Ask Langfuse** (`resolveTraceViaLangfuse`): one read of the session's
-   observations; the session's traces ordered by start time ARE the turn
-   order, so `turn_N` → the N-th trace (`traceForTurn`). No local state, so it
-   works on any instance — as soon as at least one span of that turn has been
-   ingested.
-3. **Session precision** as the last resort, never nothing: a vote cast within
-   seconds of the answer can beat ingestion. The response reports
-   `precision: "trace" | "session"`.
+The browser knows only `sessionId` + `turnId`. `resolveTarget` in
+`app/api/feedback/route.ts`:
 
-**`npm run feedback:reconcile`** upgrades step-3 votes later: it resolves the
-trace the same way, then **deletes and re-creates** each score with the same
-id (the API cannot move a score's subject — a merge POST keeps the old
-subject, measured), keeping the vote's real time in
-`metadata.originalTimestamp` (honoured by the statistics), and replaces the
-PENDING `SESSION` queue item with a `TRACE` one. Run it before the weekly
-report. Idempotent.
+1. Local `feedbackRefs` map (dev / warm instance). **Measured: 0 of 5
+   production votes found it** — Vercel rarely serves `/api/feedback` from the
+   instance that ran the turn.
+2. **Ask Langfuse** (`resolveTraceViaLangfuse`): a session's traces ordered by
+   start time ARE the turn order, so `turn_N` → the N-th trace. Works on any
+   instance once one span of the turn is ingested. Verified in production:
+   5 of 5 votes at trace precision, one queue item for five identical POSTs.
+3. Session precision as last resort (a vote seconds after the answer can beat
+   ingestion). `feedback:reconcile` upgrades those later by DELETE + re-create
+   with the same id (a merge cannot move a score's subject), keeping the real
+   vote time in `metadata.originalTimestamp`.
 
-Partner votes are forwarded (service 1 cannot resolve a partner trace):
-`FAQ screen → /api/feedback → Navio — FAQ` ·
-`Partner screen → /api/feedback → service 2 /api/feedback → Navio — Partner`
-(loopback/shared-secret gated).
+Queue pushes dedupe by **asking the queue** (Langfuse does not; per-instance
+markers made 2 items from 5 POSTs). Partner votes are forwarded to service 2's
+own `/api/feedback` (it owns those traces), loopback/shared-secret gated.
 
-## ⚠ Live-instance behaviour (measured — do not re-learn)
+---
 
-1. **Score reads only work on `/api/public/v3/scores`** (`/scores`, `/v2` 404).
-   `fields=details` for `comment`/`metadata`, **`fields=subject`** for the
-   trace/session linkage — v3 rows have NO `traceId`; it is
-   `subject: {kind, id}`, and a categorical score's label is in `value`
-   (`lib/feedback-insights.ts` `fromV3Row` normalizes). Pagination is by
-   `meta.cursor`; a `page` param is a 400.
-2. **Re-POSTing the same score `id` updates in place, but as a PARTIAL MERGE.**
-   Always send every field; `comment: ""` clears. A categorical score has no
-   "none" — retract with DELETE (202). **The subject cannot be moved by a
-   merge** (session stays session); DELETE + re-create with the same id does
-   move it — that is what `feedback:reconcile` does.
-3. **Langfuse silently creates duplicate configs/queues on create** — all setup
-   is list-then-create. Score configs **can** be updated/archived via
-   `PATCH /api/public/score-configs/{id}` (verified 2026-09-08; the MCP tool's
-   update exposes description/categories but not `isArchived`). Annotation
-   queues have **no update or delete API** — a wrongly named queue is permanent
-   until removed in the UI.
-4. **REST config field names differ from the MCP tool's** (`categories`/
-   `minValue`/`maxValue` vs `categoricalCategories`/`numericMinValue`/…).
-5. Creating a queue with `scoreConfigIds: []` is rejected — the field must be
-   non-empty.
-6. **PowerShell 5.1 `Get-Content`/`Set-Content` without `-Encoding` mangles
-   UTF-8** (em-dashes → `â€”`). Two mojibake-named queues in the Partner project
-   (created 2026-09-08, emptied since) exist because of this; delete them in the
-   UI when convenient. Edit source files with byte-safe tools.
+## 6. Live-instance behaviour (measured — do not re-learn)
 
-## Legacy
+1. **Score reads: `/api/public/v3/scores` only**, cursor-paged (`meta.cursor`; a
+   `page` param is a 400). `fields=details` for `comment`/`metadata`,
+   **`fields=subject`** for the trace/session link — rows have no `traceId`; a
+   categorical label is in `value`. `fromV3Row` normalizes.
+2. **Same-id POST is a PARTIAL MERGE** — send every field; `comment: ""`
+   clears. Categorical has no "none": DELETE (202). **A merge cannot move the
+   subject**; DELETE + re-create does.
+3. **Configs**: list-then-create (Langfuse duplicates silently); `PATCH
+   /score-configs/{id}` accepts `isArchived`, `description`, `categories`
+   (the 7→4 verdict change and the FAQ duplicate archive used it).
+4. **Queues**: no update, no delete, no rename; items are not deduped;
+   `scoreConfigIds` must be non-empty. Item create/delete works.
+5. **Dashboards** (API): views are observations / scores-*; no traces view, no
+   computed tiles; filter column for score name is `name`; score `value` is
+   both a filter (`type: "number"`) and a pie dimension.
+6. **Deleting a trace deletes its scores and queue items** — test traces you
+   remove disappear from every count (this explains any "missing votes").
+7. PowerShell 5.1 `Get-Content`/`Set-Content` without `-Encoding` mangles UTF-8
+   (the two `Feedback â€” …` queues in the Partner project came from that;
+   delete them in the UI).
 
-The pre-2026-09-08 queue "Negative Feedback Review" (both projects) is retired
-in place: PENDING items were migrated to "Feedback — Negative Review" (skipping
-duplicates, flipped-👍 traces and one bogus OBSERVATION item), and it should be
-ignored going forward. `scripts/setup-feedback-scores.ts` is superseded by
-`setup-feedback-workflow.ts`.
-
-## Monitor checklist (manual — no monitor-update API)
-
-- [ ] Partner project · Quality monitor: aggregation **avg** of `user-feedback`, not count (was false-alarming for 10 days)
-- [ ] FAQ project · latency p95 monitor: filter to observation `answer-delivered`
-- [ ] FAQ project · heartbeat monitor: unpause
-
-## Privacy
+## 7. Privacy
 
 Sent: anonymous session id, turn id, thumb, reason code, optional comment.
-Not sent: IP, user agent, user id. Comments are volunteered, so they are **not**
+Not sent: IP, user agent, user id. Comments are volunteered, so they are not
 gated behind `LANGFUSE_RECORD_IO` — disable with `NAVIO_FEEDBACK_ALLOW_TEXT=false`.

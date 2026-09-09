@@ -16,7 +16,12 @@
 import "../lib/load-env";
 
 import { traceForTurn } from "../lib/feedback-insights";
-import { FEEDBACK_SCORE, REASON_SCORE } from "../lib/feedback";
+import {
+  annotationQueueId,
+  FEEDBACK_SCORE,
+  positiveAnnotationQueueId,
+  REASON_SCORE,
+} from "../lib/feedback";
 import { langfuseBaseUrl, langfuseEnabled, langfuseHeaders } from "../lib/langfuse";
 
 if (!langfuseEnabled()) {
@@ -161,8 +166,8 @@ const queues = qres.ok
   : [];
 let itemsMoved = 0;
 for (const q of queues) {
-  const bucket = q.name === "Feedback — Negative Review" ? negativeTraces
-    : q.name === "Feedback — Positive Examples" ? positiveTraces
+  const bucket = q.id === annotationQueueId() ? negativeTraces
+    : q.id === positiveAnnotationQueueId() ? positiveTraces
       : undefined;
   if (!bucket || bucket.size === 0) continue;
   const ires = await fetch(`${base}/api/public/annotation-queues/${q.id}/items?limit=100`, { headers });
