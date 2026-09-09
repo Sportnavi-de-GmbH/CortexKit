@@ -111,3 +111,46 @@ Read at build time (2026-08-13, all `development`, ~1 day of history, 11 turns):
   `agent/agent.ts`. Worth confirming which is intended before reading cost trends.
 - All 3 failures are one cause — `permission_denied`, from the deliberately invalid Azure key
   used in the failure-path regression test.
+
+## 6. Exporting the tracing table (the UI button does not work)
+
+**Symptom.** Langfuse → Tracing → Export → *as CSV* queues a job that turns up
+**Failed** under Settings → Exports, with no download link. Hovering the badge shows
+`An internal error occurred`; the ⓘ shows it ran and finished (the traces job took ~78 s
+before failing).
+
+**Diagnosis (2026-09-09).** Not table-specific and not a volume problem: a **scores** CSV
+export queued as a control failed the same way within seconds, while the traces job spent
+~78 s querying 8 k rows first and then failed at the same step. Both tables share one code
+path — write the finished file to blob storage and hand back a signed URL — so the failure
+is in that step, on the server.
+
+Self-hosted Langfuse ships **batch export disabled**: it needs, on the Langfuse
+**container** (not in this repo),
+
+```
+LANGFUSE_S3_BATCH_EXPORT_ENABLED=true
+LANGFUSE_S3_BATCH_EXPORT_BUCKET=<bucket>
+# plus, unless the pod already has them: _REGION, _ENDPOINT, _ACCESS_KEY_ID,
+# _SECRET_ACCESS_KEY, and _FORCE_PATH_STYLE=true for MinIO
+```
+
+The bucket that ingestion already uses (`LANGFUSE_S3_EVENT_UPLOAD_*`) can be reused with a
+different prefix. The **worker** container's log names the failing step exactly; check it
+before changing anything. Note that export completion is announced by email, so SMTP must
+also be set for the notification (not for the export itself). Instance version here is
+**v4.6.0**, so the old trace-export bug fixed in v3.121.0 is not the cause.
+
+**Meanwhile — export without the UI:**
+
+```bash
+npm run export:csv                    # last 30 days → traces-export.csv
+npm run export:csv -- out.csv 7       # last 7 days
+```
+
+`scripts/export-traces-csv.ts` pages `/api/public/v2/observations` with the project keys
+already in `.env.local` and writes a UTF-8-BOM CSV (Excel-safe) with one row per
+observation: timing, trace/session ids, level, model, input/output/cached tokens, cost, and
+the question/answer. It needs no blob storage. Measured run: 8,468 observations across
+8,065 traces, 7.6 MB, $0.151328 total cost for 30 days. The same script is mirrored in the
+partner build, where it exports that project instead (the key pair selects the project).
