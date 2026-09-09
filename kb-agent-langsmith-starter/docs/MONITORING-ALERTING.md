@@ -123,6 +123,38 @@ Exact filter-dropdown availability (whether `name`/`tags` appear directly vs. ne
 underlying Metrics-API-style filter) should be confirmed live when creating the first
 monitor — the docs describe the field set but don't exhaustively enumerate the UI dropdown.
 
+## Verified live 2026-09-09 — and what was broken
+
+First end-to-end audit after the build. The relay half was healthy; the
+**Langfuse → relay** half was not, and no alert had ever been delivered.
+
+| Finding | Fix applied |
+|---|---|
+| **Both Webhook Automations pointed at a dead ngrok tunnel** (`fidgeting-reps-dreamless.ngrok-free.dev`) — the local-dev URL from the build session. The host answers 404. | Repointed both to `https://navio-widget.vercel.app/api/monitoring/alerts/{faq,partner}` |
+| **The FAQ automation had been auto-disabled** ("Inactive") — exactly the documented 5-consecutive-failures behaviour, caused by the dead URL | Re-enabled |
+| FAQ — Latency had **no filter at all**: p95 across *every* span type, not turn latency (unfiltered 7,199 ms vs 6,041 ms filtered), with a warning threshold of 7,989 ms sitting inside that noise | Added `Observation Name any of answer-delivered`; warning → a round 8,000 ms |
+| FAQ — Volume/heartbeat was **PAUSED** since 2026-08-20 — the outage detector was off | Resumed |
+| FAQ — Quality had **renotify = every 1 minute**: a real breach would page Teams + email 60×/hour | Renotify → off (transitions only) |
+| Partner — Quality aggregated **`count`, not `avg`** — it fired when *nobody voted*, not when satisfaction dropped, and had been stuck ALERT for 11 days (so blind to a real drop) | Aggregation → `avg`; no-data → keep-previous (matching FAQ, per the table above) |
+
+Two things confirmed working and left alone: the `outcome:failed` **tag really is
+emitted and filterable** (`lib/langfuse.ts` sets `outcome:${outcome}`; observations
+from the 2026-08-13 failure test carry it), and all eight alert env vars are set on
+the `navio-widget` Vercel project. A signed synthetic alert to production returned
+`{"ok":true,"delivered":{"teams":"sent","email":"sent"}}`.
+
+Still open, deliberately: **both Cost monitors are uncalibrated** — alert at $5/day
+against real spend of ~$0.15 per 30 days, so they cannot fire. They need a real
+baseline (§ Manual one-time setup step 1). And the **Orchestrator project has no
+monitors and no webhook secret** (its relay route correctly answers
+`{"skipped":"not configured"}`).
+
+**The lesson worth keeping:** a monitor's `severity` field only proves it
+*evaluated*, never that anyone was *told*. The delivery path has its own state —
+automation enabled/disabled, and a URL that is just a string nobody validates.
+Check `GET /api/public/monitors` for the evaluation half and the project's
+**Automations** page for the delivery half; they fail independently.
+
 ## ⚠ Live-instance quirks measured, not assumed
 
 1. **Monitors and Alerts are the same feature.** The URL is `/monitors`; the docs and UI say
