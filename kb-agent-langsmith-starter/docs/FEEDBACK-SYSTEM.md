@@ -26,7 +26,7 @@ top-left to bottom-right; every tile answers one question.
 
 | Row | Tiles (left → right) | Question answered |
 |---|---|---|
-| 1 | **Requests** · **Failed turns** · **Total cost (USD)** · **Avg turn latency (ms)** | Is it running, breaking, expensive, slow? |
+| 1 | **Requests** · **Failed turns** · **Cost (USD)** (table: total + avg per call) · **Avg turn latency** | Is it running, breaking, expensive, slow? |
 | 2 | **Answers rated** · **👍 Positive feedback** · **👎 Negative feedback** · **Positive rate (0–1)** | Are people voting, and how? |
 | 3 | **Requests per day** (bars) · **Feedback split** (pie, % of 👍 vs 👎) | Trend, and the rates as percentages |
 
@@ -39,7 +39,13 @@ top-left to bottom-right; every tile answers one question.
   over-counts ~17× (measured: 532 roots for 30 turns).
 - **Failed turns** is the one extra health tile: `answer-delivered` with
   `outcome = failed`. It is the only number that should always be 0.
-- **Avg turn latency** is end-to-end (visitor message → delivered answer), in ms.
+- **Cost is a small table, not a big number, on purpose.** Langfuse's number
+  tile formats currency to whole dollars, so a day of Navio traffic
+  ($0.013 for 6 calls) renders as "$0"; time-series axes round to cents and
+  show "$0.00" too. The table shows full precision ($0.013052 total,
+  $0.002175 per call). Seen in a real browser 2026-09-09.
+- **Avg turn latency** is end-to-end (visitor message → delivered answer);
+  Langfuse formats it in seconds ("4 s").
 - **Date range:** the dashboard has no stored default — the picker remembers
   your last choice. Use **Last 7 days** for a health check, **30 days** for
   trends.
@@ -200,7 +206,9 @@ own `/api/feedback` (it owns those traces), loopback/shared-secret gated.
    `scoreConfigIds` must be non-empty. Item create/delete works.
 5. **Dashboards** (API): views are observations / scores-*; no traces view, no
    computed tiles; filter column for score name is `name`; score `value` is
-   both a filter (`type: "number"`) and a pie dimension.
+   both a filter (`type: "number"`) and a pie dimension. **NUMBER tiles round
+   currency to whole dollars and time-series axes to cents** — use a
+   PIVOT_TABLE for sub-dollar cost. Latency NUMBER tiles auto-format ms → s.
 6. **Deleting a trace deletes its scores and queue items** — test traces you
    remove disappear from every count (this explains any "missing votes").
 7. PowerShell 5.1 `Get-Content`/`Set-Content` without `-Encoding` mangles UTF-8
