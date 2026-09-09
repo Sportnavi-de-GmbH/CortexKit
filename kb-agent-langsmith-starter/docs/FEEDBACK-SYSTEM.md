@@ -110,6 +110,21 @@ statistics-only. That gate is gone: **no feedback click goes unqueued.**
 Expect the positive queue to carry most of the volume — a healthy agent gets
 mostly 👍 — so review it in batches rather than one by one.
 
+### Repairing the queues — `npm run feedback:backfill`
+
+Routing is live on every click, but history can still be out of step: votes
+cast before 2026-09-09 (plain 👍 were never queued), items removed by hand in
+the UI while the vote still stands, or a queue push that failed transiently
+(the score write is independent of it). The backfill closes that gap — for
+every `user-feedback` score in the window it ensures one item exists in the
+queue its thumb belongs to.
+
+It is deliberately conservative: it **never touches COMPLETED items** (a
+review that happened is a fact), **never duplicates** (it asks the queue
+first), and **never removes** anything. Idempotent — a second run creates 0.
+Run it after any manual queue cleanup, and once after deploying a routing
+change. First run, 2026-09-09: 18 items restored in FAQ, 6 in Partner.
+
 ### From reviewed items to datasets
 
 `npm run feedback:promote` reads every **Completed** item, joins its
@@ -176,6 +191,7 @@ the lines. Scripts identify the queues by these ids, never by name.
 | Command | Does |
 |---|---|
 | `npm run feedback:setup` | idempotent: 3 configs + 2 queues, migrates retired queues, prints env ids |
+| `npm run feedback:backfill [-- --dry-run] [-- --days 30]` | gives every existing vote an item in its queue (see below) |
 | `npm run feedback:check` | reads recent scores back (sanity) |
 | `npm run feedback:reconcile [-- --dry-run]` | session-precision votes → trace precision, once ingested |
 | `npm run feedback:report [-- --days 14]` | the weekly statistics |

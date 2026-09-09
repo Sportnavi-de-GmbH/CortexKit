@@ -20,7 +20,8 @@
     "feedback:report": "tsx scripts/feedback-report.ts",
     "feedback:reconcile": "tsx scripts/feedback-reconcile.ts",
     "feedback:promote": "tsx scripts/feedback-promote.ts",
-    "export:csv": "tsx scripts/export-traces-csv.ts"
+    "export:csv": "tsx scripts/export-traces-csv.ts",
+    "feedback:backfill": "tsx scripts/backfill-feedback-queues.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",
