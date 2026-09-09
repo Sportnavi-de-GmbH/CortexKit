@@ -78,9 +78,16 @@ function resolveHost(): string | null {
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { "content-type": "application/json" };
-  // Prepared for the day service 2 stops being openly reachable (§11.2).
-  if (process.env.PARTNER_PROXY_SECRET) {
-    h["x-navio-proxy-secret"] = process.env.PARTNER_PROXY_SECRET;
+  // Service 2 is NOT openly reachable in production (§11.2): its /eve/v1
+  // channel admits exactly one credential — HTTP Basic with the fixed username
+  // "navio-proxy" and PARTNER_PROXY_SECRET as the password, the same form
+  // service 1's proxy sends (kb-agent-langsmith-starter/lib/partner-proxy.ts).
+  // Its /api/feedback checks the bare header instead, so both are sent.
+  // Locally the secret is blank and service 2's localDev() admits loopback.
+  const secret = process.env.PARTNER_PROXY_SECRET?.trim();
+  if (secret) {
+    h["x-navio-proxy-secret"] = secret;
+    h.authorization = `Basic ${Buffer.from(`navio-proxy:${secret}`).toString("base64")}`;
   }
   return h;
 }
