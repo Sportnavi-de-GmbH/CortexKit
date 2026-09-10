@@ -39,21 +39,47 @@
   </main>
 
   <script>
-    // Which widget to host: ?host=local → your dev server, anything else → production.
-    // launcher.js reads its own origin from this script's src, so the same file works for both.
-    var params = new URLSearchParams(location.search);
-    var host = params.get("host") === "local" ? "http://localhost:3001" : "https://navio-widget.vercel.app";
-    var s = document.createElement("script");
-    s.src = host + "/launcher.js";
-    s.async = true;
-    s.onload = function () {
-      document.getElementById("status").innerHTML =
-        '<span class="pill">Widget loaded</span> from <code>' + host + '</code> — look for the green button bottom-right.';
-    };
-    s.onerror = function () {
-      document.getElementById("status").textContent = "Could not load " + host + "/launcher.js — is that server running?";
-    };
-    document.body.appendChild(s);
+    (function () {
+      // Which widget to host: ?host=local → your dev server, anything else → production.
+      // launcher.js reads its own origin from this script's src, so the same file works for both.
+      var params = new URLSearchParams(location.search);
+      var host = params.get("host") === "local" ? "http://localhost:3001" : "https://navio-widget.vercel.app";
+      var status = document.getElementById("status");
+      var warned = false;
+
+      // Opened by double-click? A file:// page has no web origin, so the widget's own
+      // frame-ancestors rule refuses to show it: the button appears, the panel stays blank.
+      if (location.protocol === "file:") {
+        status.innerHTML =
+          '<strong style="color:#b91c1c">Not served — this file was opened directly (file://).</strong> ' +
+          'A file:// page has no web origin, so the widget refuses to load inside it and the panel stays blank. ' +
+          'Run <code>node embed-test/serve.js</code> and open <code>http://localhost:8080/simple.html</code> instead.';
+        return; // nothing is injected — there is no point
+      }
+
+      // Production only allows localhost:8080 and :3001 as embedders (WIDGET_FRAME_ANCESTORS).
+      var prodPorts = ["8080", "3001"];
+      if (host.indexOf("vercel.app") !== -1 && prodPorts.indexOf(location.port) === -1) {
+        warned = true;
+        status.innerHTML =
+          '<strong style="color:#b45309">Heads-up:</strong> production lets only a page on localhost:8080 or :3001 embed the widget; ' +
+          'this page is on port ' + (location.port || "80") + ', so the panel will stay blank. ' +
+          'Serve it on 8080 (<code>node embed-test/serve.js</code>) or switch to <a href="?host=local">the local widget</a>.';
+      }
+
+      var s = document.createElement("script");
+      s.src = host + "/launcher.js";
+      s.async = true;
+      s.onload = function () {
+        if (warned) return;
+        status.innerHTML =
+          '<span class="pill">Widget loaded</span> from <code>' + host + '</code> — look for the green button bottom-right.';
+      };
+      s.onerror = function () {
+        status.textContent = "Could not load " + host + "/launcher.js — is that server running?";
+      };
+      document.body.appendChild(s);
+    })();
   </script>
 </body>
 </html>
