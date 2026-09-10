@@ -259,6 +259,116 @@ guide §8.
 
 ---
 
+## Put Navio on the Sportnavi websites — the guide for the website team
+
+This section is written for whoever edits sportnavi.de. You do not need to know how Navio
+works, only how to add one line to the website's template. Everything else, the chat itself,
+the answers, the security, runs on Navio's own server and updates on its own.
+
+### What you will get
+
+A small round **green-on-black chat button** in the bottom-right corner of every page. When a
+visitor clicks it, Navio opens as a floating window next to the button, about the size of a
+phone screen; on phones it fills the whole screen. The visitor sees a greeting, then a short
+**privacy notice with "Zustimmen" and "Ablehnen"**. Only after agreeing do they reach the three
+options: ask a question (**FAQ-Agent**), find a studio or course nearby (**Partner finden**), or
+write to the team (**Kontaktformular**, which creates a case in Salesforce). Navio answers in the
+language the visitor writes in. The website itself is not changed in any other way.
+
+### The one line
+
+Paste this into the website so that it appears on **every page**:
+
+```html
+<script src="https://chat.sportnavi.de/launcher.js" async></script>
+```
+
+Two things to know about the address inside it:
+
+- **`chat.sportnavi.de` is Navio's final home.** Until the tech team has switched that address
+  on, use the current one instead: `https://navio-widget.vercel.app/launcher.js`. Ask the tech
+  team which of the two is live today. Everything else in the line stays the same.
+- The line never needs updating afterwards. Improvements to Navio appear on the site by
+  themselves, because the button only *fetches* Navio from its server.
+
+### Where to paste it
+
+The goal is one place that every page shares, so the button shows up site-wide:
+
+| Your website is built with | Put the line here |
+|---|---|
+| A CMS with a "header/footer scripts" field (WordPress themes and plugins, TYPO3 page templates, most site builders) | The **footer scripts** field, or just before the closing `</body>` tag of the main template |
+| Plain HTML pages | Just before `</body>` in the shared layout or footer include |
+| A tag manager, for example Google Tag Manager | A "Custom HTML" tag that fires on all pages. **Do not make it wait for cookie consent** (see the next point) |
+
+**About cookie banners.** Navio brings its **own** consent step: no message or personal detail
+is sent until the visitor presses "Zustimmen" inside the chat window. So the little launcher
+button itself does not need to be blocked by the website's cookie banner. If your consent tool
+is set to hold back all scripts until the visitor accepts cookies, the button will not appear
+for visitors who decline, which is usually not what you want. Add the Navio line to the
+category that is allowed to load right away.
+
+### Which websites may show Navio
+
+For security, Navio only opens inside pages that belong to Sportnavi. Right now that means
+**www.sportnavi.de** and **sportnavi.de**. Anywhere else, the button appears but the chat
+window stays empty, on purpose, and on a computer the browser's console shows a message about
+"frame-ancestors".
+
+If you want Navio on **another Sportnavi site** (a campaign page, a subdomain, a partner
+portal, a staging copy of the website), ask the tech team to add that site's address first.
+It is a small setting change and a quick re-publish on their side; no code is written. Do
+this *before* you paste the line there, otherwise the window will be blank.
+
+### Try it before it goes live
+
+You do not have to test on the real website. There is a ready-made test page in this
+repository, `embed-test/simple.html`, that shows the real, live Navio exactly as visitors will
+see it. Anyone with this repository and Node.js installed can run `node embed-test/serve.js`
+and open `http://localhost:8080/simple.html`. It is the fastest way to check the look and to
+try all three options without touching sportnavi.de.
+
+When the line is on the real site, walk through this once:
+
+1. Open any page: the green button is in the bottom-right corner and sits above the page
+   content, footer and cookie banner.
+2. Click it: the greeting appears, then the privacy notice. Press **Zustimmen**.
+3. Ask something like *"Was ist Firmenfitness?"* — an answer arrives within a few seconds.
+4. Try **Partner finden** with *"Yoga in Bochum"* — this one takes **30 to 60 seconds**, that
+   is normal; the dots keep moving while it searches.
+5. Open the **Kontaktformular**, but only submit it if you want a real test case in Salesforce.
+6. Check on a phone: the chat fills the screen and its own ✕ closes it.
+
+### Privacy, in plain words
+
+- Opening the chat window loads Navio from its server, like loading any web page. No message
+  and no personal detail is sent until the visitor presses **Zustimmen** in the chat.
+- The chat runs inside its own small window on Navio's address, not on sportnavi.de. The moment
+  that window opens it stores, on that address only, a random visitor number used to protect
+  against abuse; it also remembers the light/dark choice. It sets no cookies on sportnavi.de itself.
+- Conversations are anonymous; the visitor is never asked to log in. The contact form is the
+  only place personal details are entered, and those go to Salesforce as they do today.
+- The privacy notice inside the chat links to the Sportnavi Datenschutzerklärung.
+
+### If something does not look right
+
+| What you see | What it usually means | What to do |
+|---|---|---|
+| No button at all | The line is not on this page, the address inside it has a typo, or the consent tool is holding the script back | Check the page source for the line; check the address; allow the script in the consent tool |
+| Button appears, window is empty or white | This page's address is not on the allowed list yet | Ask the tech team to add the site (see above) |
+| Button hides behind another element, or overlaps a "back to top" button | The site has its own fixed element in the same corner | Move the site's own element; Navio's button always sits bottom-right |
+| Chat opens but a message shows "Origin not allowed" | Same cause as the empty window | Same fix |
+| Answers stop coming or the chat says it is unavailable | Navio's server side, not the website | Tell the tech team; the website needs no change |
+| Partner search seems stuck | It runs 30 to 60 seconds by design | Wait; if it passes a minute and a half, tell the tech team |
+
+### Taking Navio off a site
+
+Delete the line and it is gone with the next page load. Nothing else was added to the website,
+so nothing else needs cleaning up. To pause Navio everywhere at once, the tech team can do it
+on the server side without touching the website.
+
+---
+
 ## How Navio is kept secure
 
 Defense in depth — no single layer is enough:
@@ -287,6 +397,7 @@ Everything is documented. Start with the row that matches what you want to do.
 | ⭐ [VERCEL-DASHBOARD-GUIDE.md](kb-agent-langsmith-starter/docs/deployment/VERCEL-DASHBOARD-GUIDE.md) | **Canonical guide.** Full non-technical deploy + security walkthrough (§1 architecture → §8 launch checklist). **Start here to go live.** |
 | [VERCEL-RUNBOOK.md](kb-agent-langsmith-starter/docs/deployment/VERCEL-RUNBOOK.md) | The same steps as copy-paste **Vercel CLI** commands. |
 | [PUBLIC-WIDGET-DEPLOYMENT.md](kb-agent-langsmith-starter/docs/deployment/PUBLIC-WIDGET-DEPLOYMENT.md) | The deeper **"why"** behind the deployment + embedding workflow. |
+| [Put Navio on the Sportnavi websites](#put-navio-on-the-sportnavi-websites--the-guide-for-the-website-team) | **Non-technical**, for the website team: the one line, where to paste it, which sites are allowed, testing, privacy, troubleshooting. |
 | [09-website-security.md](docs/09-website-security.md) · [PRODUCTION-READINESS-REVIEW.md](kb-agent-langsmith-starter/docs/PRODUCTION-READINESS-REVIEW.md) | Security model, and the go-live readiness checklist. |
 
 **🧭 Understand the product & architecture**
