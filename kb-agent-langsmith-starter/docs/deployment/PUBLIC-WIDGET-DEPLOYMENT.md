@@ -134,7 +134,13 @@ review real traffic under Firewall → Traffic, then switch to enforcing.
 **AND** `Origin` is not one of `https://navio-widget.vercel.app`, `https://chat.sportnavi.de`,
 `https://www.sportnavi.de`, `https://sportnavi.de` **AND** environment is `production` → **Deny**.
 The widget's own host MUST be in that list — the iframe's requests carry the widget host as
-`Origin`, not `sportnavi.de` — and the environment clause keeps preview URLs working.
+`Origin`, not `sportnavi.de` — and the environment clause keeps preview URLs working. Since
+2026-09-10 the list also names a developer's own machine (`http://localhost` and
+`http://127.0.0.1` on 3000/3001/5173/8080) so a local test page can call the API directly;
+browsers cannot fake `Origin`, so this admits only pages really served on that machine, the
+same loopback allowance the app gate already grants. Whether a localhost page may *embed* the
+widget is a different control, `WIDGET_FRAME_ANCESTORS` (production: 3001 + 8080). A ready test
+page is `embed-test/simple.html` (`node embed-test/serve.js`, then localhost:8080).
 The *"Origin exists"* clause is deliberate: same-origin GET streams and health checks omit
 `Origin`, and denying those would break streaming.
 

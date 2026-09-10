@@ -300,7 +300,7 @@ calling your chatbot's API to run up your bill.* Build it as **four conditions j
 |---|---|---|---|---|
 | 1 | **Request Path** | — | **Starts with** | `/eve/v1/` |
 | 2 | **Request Header** | `Origin` | **Exists** | *(leave empty)* |
-| 3 | **Request Header** | `Origin` | **Is not any of** | `https://navio-widget.vercel.app`, `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de` |
+| 3 | **Request Header** | `Origin` | **Is not any of** | `https://navio-widget.vercel.app`, `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de`, plus the developer loopback origins `http://localhost:{3000,3001,5173,8080}` and `http://127.0.0.1:{same}` (added 2026-09-10 for local test pages) |
 | 4 | **Environment** | — | **Equals** | `production` |
 
 Action: **Log** (later → **Deny**).

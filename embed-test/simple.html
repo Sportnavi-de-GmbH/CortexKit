@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Navio widget — local test page</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; color: #1a1a1a; background: #fff; line-height: 1.6; }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 24px 160px; }
+    h1 { font-size: 28px; margin: 0 0 8px; }
+    .muted { color: #52525b; }
+    .box { border: 1px solid rgba(0, 0, 0, .08); border-radius: 12px; padding: 16px 18px; margin-top: 24px; font-size: 15px; }
+    code { background: #f5f5f4; padding: 2px 6px; border-radius: 5px; font-size: 13px; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; background: #95c11e; color: #1a1a1a; font-weight: 600; font-size: 13px; }
+    a { color: #1a1a1a; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Navio widget — local test page</h1>
+    <p class="muted">
+      A plain page served from your own machine that hosts the Navio widget exactly the way
+      sportnavi.de will: one script tag, a floating green button bottom-right, the chat opens in a panel.
+    </p>
+
+    <div class="box" id="status">Loading widget…</div>
+
+    <div class="box">
+      <strong>Switch the widget source</strong><br />
+      <a href="?host=prod">Production widget</a> (navio-widget.vercel.app, the default) &nbsp;·&nbsp;
+      <a href="?host=local">Local dev widget</a> (localhost:3001, needs <code>npm run dev:ui -- -p 3001</code>)
+    </div>
+
+    <div class="box muted">
+      Serve this folder on <strong>port 8080</strong> — production allows a page on localhost:8080 (or :3001) to embed the widget:<br />
+      <code>node embed-test/serve.js</code> &nbsp;then open&nbsp; <code>http://localhost:8080/simple.html</code><br />
+      Ports 3000 and 5173 work with the <em>local</em> widget only (allowed in <code>kb-agent-langsmith-starter/.env.local</code>).
+    </div>
+  </main>
+
+  <script>
+    // Which widget to host: ?host=local → your dev server, anything else → production.
+    // launcher.js reads its own origin from this script's src, so the same file works for both.
+    var params = new URLSearchParams(location.search);
+    var host = params.get("host") === "local" ? "http://localhost:3001" : "https://navio-widget.vercel.app";
+    var s = document.createElement("script");
+    s.src = host + "/launcher.js";
+    s.async = true;
+    s.onload = function () {
+      document.getElementById("status").innerHTML =
+        '<span class="pill">Widget loaded</span> from <code>' + host + '</code> — look for the green button bottom-right.';
+    };
+    s.onerror = function () {
+      document.getElementById("status").textContent = "Could not load " + host + "/launcher.js — is that server running?";
+    };
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>
