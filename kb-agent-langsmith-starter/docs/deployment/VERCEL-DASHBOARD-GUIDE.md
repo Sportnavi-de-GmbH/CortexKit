@@ -294,13 +294,14 @@ Add more conditions in the same group with **＋ And**. Pick the rule's **action
 > or **Does not equal** for a single value). Pick the closest match — the meaning is what counts.
 
 **Rule A — Allow only Sportnavi origins (the origin lock).** *Protects against: other websites
-calling your chatbot's API to run up your bill.* Build it as **three conditions joined by AND**:
+calling your chatbot's API to run up your bill.* Build it as **four conditions joined by AND**:
 
 | # | Parameter | Key | Operator | Value |
 |---|---|---|---|---|
 | 1 | **Request Path** | — | **Starts with** | `/eve/v1/` |
 | 2 | **Request Header** | `Origin` | **Exists** | *(leave empty)* |
-| 3 | **Request Header** | `Origin` | **Is not any of** | `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de` |
+| 3 | **Request Header** | `Origin` | **Is not any of** | `https://navio-widget.vercel.app`, `https://chat.sportnavi.de`, `https://www.sportnavi.de`, `https://sportnavi.de` |
+| 4 | **Environment** | — | **Equals** | `production` |
 
 Action: **Log** (later → **Deny**).
 
@@ -312,11 +313,11 @@ Action: **Log** (later → **Deny**).
 > checks legitimately send **no** Origin, and you must not block those. Without it, row 3 would also
 > match empty-Origin requests and break streaming.
 >
-> ⚠️ **While you are still testing on the temporary `*.vercel.app` address (before §8a):** your own
-> widget's Origin is `https://<project>.vercel.app`, which is *not* in the list — switching this
-> rule to **Deny** now would block **your own widget**. Keep it on **Log** until the real
-> `chat.sportnavi.de` address is live (or temporarily add the `*.vercel.app` origin to row 3's list
-> while testing, and remove it afterwards).
+> ⚠️ **The widget's own host must be in row 3.** The iframe's requests carry the widget host as
+> `Origin` (today `https://navio-widget.vercel.app`, later `https://chat.sportnavi.de`), never
+> `sportnavi.de` — without it, switching to **Deny** blocks **your own widget**. The
+> `navio-widget.vercel.app` entry was added 2026-09-10; drop it once `chat.sportnavi.de` is live.
+> Row 4 keeps preview URLs (their own `*.vercel.app` origins) out of the rule entirely.
 >
 > ℹ️ **The API routes `/api/partner/` and `/api/contact` are already origin-checked in the app's
 > own code**, and rate-limited by Rule E — so Rule A can stay simple and cover just `/eve/v1/`. If
@@ -333,13 +334,18 @@ AI credits.*
 - Then: **Rate Limit** → **60 per 60s** by **IP** → **Log** (later → **429**)
 
 **Rule D — Light limit on the live answer stream.** *Keep this generous — reconnects are normal.*
-- If **Method** `GET` **AND Path** *starts with* `/eve/v1/session/`
+- If **Method** `GET` **AND Path** *starts with* `/eve/v1/session/` — **OR** — **Method** `GET`
+  **AND Path** *starts with* `/api/partner/eve/v1/session/` (the partner stream)
 - Then: **Rate Limit** → **120 per 60s** by **IP** → **Log** (later → **429**)
 
-**Rule E — Protect the partner search and the contact form.**
-- If **Path** *starts with* `/api/partner/` → **Rate Limit 60 per 60s** by IP → **Log**
-- If **Method** `POST` **AND Path** *equals* `/api/contact` → **Rate Limit 15 per 60s** by IP →
-  **Log**
+**Rule E — Protect the partner search.**
+- If **Path** *starts with* `/api/partner/` → **Rate Limit 15 per 60s** by IP → **Log**
+  (live value 2026-09-10; this guide originally said 60 — decide before enforcing: one search is
+  several requests over 30–60 s)
+
+**Rule F — Protect the contact form and the feedback ratings** (added 2026-09-10).
+- If **Path** *starts with* `/api/contact` — **OR** — **Path** *starts with* `/api/feedback`
+- Then: **Rate Limit** → **15 per 60s** by **IP** → **Log** (later → **429**)
 
 > ⚠️ Do **not** set a tight limit on the partner **stream** — one search holds the connection for
 > 30–60 seconds and visitors may reconnect. The contact form has a small built-in limiter, but it
@@ -349,7 +355,7 @@ AI credits.*
 
 **Rolling out safely:** Publish all rules in **Log**. Let real traffic run for about a day. Open
 **Firewall → Traffic** and confirm **no genuine visitors** are being matched. Then edit each rule
-from **Log** to **Deny** (Rule A) or **429** (Rules B–E) and **Publish** again. Keep that Traffic
+from **Log** to **Deny** (Rule A) or **429** (Rules B–F) and **Publish** again. Keep that Traffic
 page handy for the first day in case you need to switch a rule back to **Log**.
 
 ✅ **Checkpoint:** all rules show **Active** in **Log**; the Traffic page shows matches when you
@@ -586,7 +592,7 @@ controlled by `WIDGET_FRAME_ANCESTORS` + Rule A (§3d).
 
 - [ ] Secrets configured (Azure, database, embedding, **shared secret matches in both projects**)
 - [ ] Old `.mcp.json` LangSmith/Stitch keys **rotated**
-- [ ] Firewall rules A–E created (start in **Log**, then **Deny/429**)
+- [ ] Firewall rules A–F created (start in **Log**, then **Deny/429**)
 - [ ] Bot protection (**BotID**) enabled, both env switches `= true`
 - [ ] Widget only works on the official domain (`WIDGET_FRAME_ANCESTORS` + Rule A)
 - [ ] Both agents protected (FAQ: origin + BotID + token limits; Partner: shared secret + console

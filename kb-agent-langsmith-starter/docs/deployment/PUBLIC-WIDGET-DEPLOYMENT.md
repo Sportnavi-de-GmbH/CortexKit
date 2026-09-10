@@ -131,8 +131,10 @@ On **service 1**. Vercel → **Firewall → Custom Rules**. **Stage every rule a
 review real traffic under Firewall → Traffic, then switch to enforcing.
 
 **Rule A — Origin allowlist.** Path starts with `/eve/v1/` **AND** header `Origin` *exists*
-**AND** `Origin` is not one of `https://chat.sportnavi.de`, `https://www.sportnavi.de`,
-`https://sportnavi.de` → **Deny**.
+**AND** `Origin` is not one of `https://navio-widget.vercel.app`, `https://chat.sportnavi.de`,
+`https://www.sportnavi.de`, `https://sportnavi.de` **AND** environment is `production` → **Deny**.
+The widget's own host MUST be in that list — the iframe's requests carry the widget host as
+`Origin`, not `sportnavi.de` — and the environment clause keeps preview URLs working.
 The *"Origin exists"* clause is deliberate: same-origin GET streams and health checks omit
 `Origin`, and denying those would break streaming.
 
@@ -141,12 +143,20 @@ Start generous (20/min) on **Log**, then ~5–10× real peak on **429**.
 
 **Rule C — Rate limit follow-up messages.** `POST /eve/v1/session/` — higher limit than B.
 
-**Rule D — Light limit on the stream.** `GET /eve/v1/session/*/stream` — generous
-(reconnects are normal).
+**Rule D — Light limit on the stream.** `GET` with path starting `/eve/v1/session/` OR
+`/api/partner/eve/v1/session/` — generous (reconnects are normal). It was first created as a
+bare `GET` rule that also counted every page file; narrowed 2026-09-10.
 
-**Rule E — the new API routes.** Also cover **`/api/partner/`** (every partner turn goes
-through it) and **`/api/contact`** (the in-code limiter is per-instance and therefore *not*
-authoritative on serverless — the Firewall rule is the real control).
+**Rule E — the partner proxy.** `/api/partner/` (every partner turn goes through it). Live at
+15/min per IP; the dashboard guide's original 60/min is the figure to reconsider before
+enforcing, since one search is several requests over 30–60 s.
+
+**Rule F — the forms (added 2026-09-10).** `/api/contact` and `/api/feedback`, 15/min per IP.
+The in-code limiters are per-instance and therefore *not* authoritative on serverless — this
+Firewall rule is the real control.
+
+**Live state 2026-09-10:** all six rules are published in **Log** mode (rate limits with
+"exceeded → log"), i.e. nothing is enforced yet. Flip to Deny / 429 only after the Traffic review.
 
 > DDoS mitigation is automatic on every deployment and blocked traffic isn't billed.
 > Rate-limit counters are **per region**, so treat them as shaping; the true cost ceiling is
