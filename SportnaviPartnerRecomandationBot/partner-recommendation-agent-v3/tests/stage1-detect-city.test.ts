@@ -66,7 +66,30 @@ describe("stage 1 — detect city", () => {
 
   it("records the config it used", async () => {
     const r = await detectCity({ query: Q }, ctx({}, { llm: fakeLlm({ cityMention: "Dortmund" }) }));
-    expect(r.config).toEqual({ cityConfidenceMin: 0.6, targetCity: undefined });
+    expect(r.config).toEqual({ cityConfidenceMin: 0.6, targetCity: undefined, cityMentionSource: "model" });
     expect(r.counts).toEqual({ attempts: 1 });
+  });
+
+  it("a cityMention hint from stage 0 skips the detect model call", async () => {
+    const llm = fakeLlm({ cityMention: "Bochum" });
+    const r = await detectCity({ query: Q, cityMention: "Dortmund" }, ctx({}, { llm }));
+    expect(llm.calls).toEqual([]);
+    expect(r.output.cityMention).toBe("Dortmund");
+    expect(r.output.target).toMatchObject({ canonical: "Dortmund", source: "explicit" });
+    expect(r.config.cityMentionSource).toBe("hint");
+  });
+
+  it("a null hint means 'no city in the text' and still falls back to the home city without a model call", async () => {
+    const llm = fakeLlm({ cityMention: "Dortmund" });
+    const r = await detectCity({ query: "Ich suche Yoga", cityMention: null, homeCity: "Bochum" }, ctx({}, { llm }));
+    expect(llm.calls).toEqual([]);
+    expect(r.output.target).toMatchObject({ canonical: "Bochum", source: "home" });
+  });
+
+  it("without a hint the model is still asked", async () => {
+    const llm = fakeLlm({ cityMention: "Dortmund" });
+    const r = await detectCity({ query: Q }, ctx({}, { llm }));
+    expect(llm.calls.map((c) => c.fn)).toEqual(["detectCity"]);
+    expect(r.config.cityMentionSource).toBe("model");
   });
 });

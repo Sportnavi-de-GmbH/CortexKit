@@ -1,6 +1,6 @@
 /**
  * Stage 1 — Detect the city.
- * Order: config.targetCity (override) → city mentioned in the question (model) →
+ * Order: config.targetCity (override) → stage 0's cityMention hint, or the city mentioned in the question (model) →
  * input.homeCity → input.sessionCities (most recent first). Every candidate is
  * resolved with the directory's fuzzy resolver; the first one at or above
  * cityConfidenceMin wins. No target ⇒ the runner asks the user — unless the
@@ -22,19 +22,27 @@ function anySignal(ctx: StageContext, ms: number): AbortSignal {
   return AbortSignal.any([ctx.signal, timeoutSignal(ms)]);
 }
 
-export async function detectCity(input: WorkflowInput, ctx: StageContext): Promise<StageResult<DetectCityOutput>> {
+export async function detectCity(input: WorkflowInput & { cityMention?: string | null }, ctx: StageContext): Promise<StageResult<DetectCityOutput>> {
   const warnings: string[] = [];
   const candidates: Array<{ source: CitySource; mention: string }> = [];
   let cityMention: string | null = null;
+  let cityMentionSource: "override" | "hint" | "model" = "model";
 
   if (ctx.config.targetCity) {
+    cityMentionSource = "override";
     candidates.push({ source: "override", mention: ctx.config.targetCity });
   } else {
-    try {
-      const signal = anySignal(ctx, ctx.config.modelTimeoutMs);
-      cityMention = (await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity")).cityMention;
-    } catch (e) {
-      warnings.push(`City detection model call failed (${(e as Error).message}); treating the question as having no city mention.`);
+    if (input.cityMention !== undefined) {
+      // Stage 0 already extracted the place for this task — no second model call.
+      cityMentionSource = "hint";
+      cityMention = input.cityMention?.trim() || null;
+    } else {
+      try {
+        const signal = anySignal(ctx, ctx.config.modelTimeoutMs);
+        cityMention = (await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity")).cityMention;
+      } catch (e) {
+        warnings.push(`City detection model call failed (${(e as Error).message}); treating the question as having no city mention.`);
+      }
     }
     if (cityMention && cityMention.trim()) candidates.push({ source: "explicit", mention: cityMention.trim() });
     if (input.homeCity?.trim()) candidates.push({ source: "home", mention: input.homeCity.trim() });
@@ -76,7 +84,7 @@ export async function detectCity(input: WorkflowInput, ctx: StageContext): Promi
 
   return {
     output: { cityMention, target, attempts },
-    config: { cityConfidenceMin: ctx.config.cityConfidenceMin, targetCity: ctx.config.targetCity },
+    config: { cityConfidenceMin: ctx.config.cityConfidenceMin, targetCity: ctx.config.targetCity, cityMentionSource },
     counts: { attempts: attempts.length },
     warnings,
   };
