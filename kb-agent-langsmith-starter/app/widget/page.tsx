@@ -11,7 +11,14 @@
 
 import { useEffect } from "react";
 import { useEveAgent } from "eve/react";
+import { useWorkflowAgent } from "@/lib/use-workflow-agent";
 import { NavioWidget } from "@/components/navio/NavioWidget";
+
+// Which partner agent the "Partner finden" card talks to. "v3" (default) is the
+// JSON workflow at PARTNER_AGENT_HOST/api/workflow (partner-recommendation-agent-v3)
+// via /api/partner/workflow; "eve" is the previous eve-protocol agents via the
+// /api/partner/eve/* proxy. Both hooks are lazy (no request until first send).
+const PARTNER_AGENT_KIND = process.env.NEXT_PUBLIC_PARTNER_AGENT === "eve" ? "eve" : "v3";
 
 /** Ensure a stable first-party visitor id cookie (analytics + soft rate-shaping). */
 function ensureVisitorId(): void {
@@ -59,7 +66,9 @@ export default function WidgetPage() {
   const faqAgent = useEveAgent();
   // The partner finder runs as a separate service; the KB app proxies /api/partner/*
   // to it (see app/api/partner/[...path]/route.ts). Lazy — no session until first send.
-  const partnerAgent = useEveAgent({ host: "/api/partner" });
+  const evePartnerAgent = useEveAgent({ host: "/api/partner" });
+  const workflowPartnerAgent = useWorkflowAgent();
+  const partnerAgent = PARTNER_AGENT_KIND === "eve" ? evePartnerAgent : workflowPartnerAgent;
   useBotId();
   useEffect(ensureVisitorId, []);
 
