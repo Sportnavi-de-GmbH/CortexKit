@@ -64,6 +64,42 @@ describe("parseV3Answer", () => {
     expect(s![0]!.items[1]).toMatchObject({ rank: 2, recommendation: null, reason: "why b\nKontakt: 0231" });
   });
 
+  // Observed live (2026-09-14): with two tasks the model wrote the second one as
+  // a markdown list — `1. **Name — Ort**` with indented continuation lines —
+  // and the whole section fell back to prose. Every numbering variant must map
+  // to the same items.
+  const L = (...lines: string[]) => lines.join(String.fromCharCode(10));
+  it.each([
+    ["list item, bold heading", L("1. **yogafürdich Studio Schöneberg — Berlin**  ", "   Dieses Studio bietet Yoga.", "2. **FITOMAT Adlershof — Berlin**  ", "   Vielseitig.")],
+    ["bold number, bold heading", L("**1.** **yogafürdich Studio Schöneberg — Berlin**", "Dieses Studio bietet Yoga.", "", "**2.** **FITOMAT Adlershof — Berlin**", "Vielseitig.")],
+    ["plain number, plain heading with dash", L("1. yogafürdich Studio Schöneberg — Berlin", "Dieses Studio bietet Yoga.", "", "2. FITOMAT Adlershof — Berlin", "Vielseitig.")],
+    ["parenthesis numbering", L("1) **yogafürdich Studio Schöneberg — Berlin**", "Dieses Studio bietet Yoga.", "2) **FITOMAT Adlershof — Berlin**", "Vielseitig.")],
+    ["prescribed form", L("**1. yogafürdich Studio Schöneberg — Berlin**  ", "Dieses Studio bietet Yoga.", "", "**2. FITOMAT Adlershof — Berlin**  ", "Vielseitig.")],
+  ])("recognises items written as: %s", (_name, body) => {
+    const text = L("**Yoga in Berlin**", "**Ich habe passende Angebote in Berlin gefunden.**", "", body);
+    const yoga = { label: "Yoga in Berlin", recommendations: [rec(1, "yogafürdich Studio Schöneberg", { city: "Berlin" }), rec(2, "FITOMAT Adlershof", { city: "Berlin" })] };
+    const s = parseV3Answer(text, [tasks[0]!, yoga])!;
+    const sec = s.find((x) => x.label === "Yoga in Berlin")!;
+    expect(sec.intro).toBe("**Ich habe passende Angebote in Berlin gefunden.**");
+    expect(sec.items.map((i) => [i.rank, i.heading, i.reason, i.recommendation?.name])).toEqual([
+      [1, "yogafürdich Studio Schöneberg — Berlin", "Dieses Studio bietet Yoga.", "yogafürdich Studio Schöneberg"],
+      [2, "FITOMAT Adlershof — Berlin", "Vielseitig.", "FITOMAT Adlershof"],
+    ]);
+  });
+
+  it.each(["### Yoga in Berlin", "**Yoga in Berlin:**", "## **Yoga in Berlin**", "YOGA IN BERLIN"])("recognises the task heading written as %s", (heading) => {
+    const text = L(heading, "**Intro Berlin**", "", "**1. FITOMAT Adlershof — Berlin**  ", "Gut.");
+    const yoga = { label: "Yoga in Berlin", recommendations: [rec(1, "FITOMAT Adlershof", { city: "Berlin" })] };
+    const s = parseV3Answer(text, [tasks[0]!, yoga])!;
+    expect(s.map((x) => x.label)).toEqual(["Yoga in Berlin"]);
+    expect(s[0]!.items[0]!.recommendation?.name).toBe("FITOMAT Adlershof");
+  });
+
+  it("a plain numbered line without a name — place dash is NOT an item (ordinary prose list)", () => {
+    const text = L("**Intro**", "", "1. Bring Sportkleidung mit.", "2. Komm 10 Minuten früher.");
+    expect(parseV3Answer(text, [{ label: "L", recommendations: [rec(1, "A")] }])).toBeNull();
+  });
+
   it("returns null when the text has no numbered headings at all (render as plain markdown)", () => {
     expect(parseV3Answer("Leider nichts gefunden – versuch es mit einer anderen Stadt.", [{ label: "L", recommendations: [] }])).toBeNull();
   });

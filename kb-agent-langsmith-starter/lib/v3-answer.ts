@@ -82,8 +82,47 @@ function isValidRecommendation(v: unknown): v is V3Recommendation {
   return isRec(v) && typeof v.rank === "number" && typeof v.name === "string" && isRec(v.card);
 }
 
-const ITEM_RE = /^\*\*(\d+)\.\s+(.+?)\*\*\s*(.*)$/;
-const BOLD_LINE_RE = /^\*\*(.+?)\*\*\s*$/;
+/**
+ * A task heading line, normalised for lookup: `**Yoga in Berlin**`,
+ * `### Yoga in Berlin`, `**Yoga in Berlin:**` or an all-caps `YOGA IN BERLIN`
+ * all resolve to the label "yoga in berlin". Null for anything else.
+ */
+function headingKey(line: string): string | null {
+  const m = /^(?:#{1,6}\s+)?\**\s*([^*]+?)\s*:?\s*\**\s*:?\s*$/.exec(line);
+  if (!m) return null;
+  const inner = m[1]!.trim();
+  return inner ? inner.toLowerCase() : null;
+}
+
+interface ItemLine { rank: number; heading: string; rest: string }
+
+/**
+ * The prescribed form is `**1. Name — Ort**`, but the model (temperature 0.3)
+ * also writes `1. **Name — Ort**`, `**1.** **Name — Ort**`, `1) …` and, rarely,
+ * the plain `1. Name — Ort`. Observed live: one task in the prescribed form and
+ * the next as a markdown list, which made a whole section fall back to prose.
+ * All variants map to the same (rank, heading, rest-of-line).
+ */
+const ITEM_PATTERNS: RegExp[] = [
+  /^\*\*(\d+)[.)]\s+(.+?)\*\*\s*(.*)$/, //  **1. Name — Ort** rest
+  /^(?:\*\*(\d+)[.)]\*\*|(\d+)[.)])\s+\*\*(.+?)\*\*\s*(.*)$/, //  1. **Name — Ort** rest  ·  **1.** **Name — Ort** rest
+];
+// Plain `1. Name — Ort` (no bold at all) is accepted only with the name — place
+// dash, so an ordinary numbered list in prose ("1. Bring Sportkleidung mit.")
+// is never mistaken for a partner.
+const PLAIN_ITEM_RE = /^(\d+)[.)]\s+(.+?\s[—–]\s.+?)\s*$/;
+
+function parseItemLine(line: string): ItemLine | null {
+  for (const re of ITEM_PATTERNS) {
+    const m = re.exec(line);
+    if (!m) continue;
+    const groups = m.slice(1).filter((g): g is string => g !== undefined);
+    // groups: [rank, heading, rest] — the alternation leaves one undefined rank slot
+    return { rank: Number(groups[0]), heading: groups[1]!.trim(), rest: (groups[2] ?? "").trim() };
+  }
+  const plain = PLAIN_ITEM_RE.exec(line);
+  return plain ? { rank: Number(plain[1]), heading: plain[2]!.trim(), rest: "" } : null;
+}
 const CONTACT_LINE_RE = /^\**_*\s*Kontakt\s*:/i;
 
 /** Paragraphs (blank-line separated), each as its trimmed lines. */
@@ -107,9 +146,9 @@ function paragraphs(text: string): string[][] {
  */
 export function parseV3Answer(text: string, tasks: V3Task[]): V3Section[] | null {
   const paras = paragraphs(text);
-  if (!paras.some((p) => p.some((l) => ITEM_RE.test(l)))) return null;
+  if (!paras.some((p) => p.some((l) => parseItemLine(l) !== null))) return null;
 
-  const byLabel = new Map(tasks.map((t) => [t.label, t]));
+  const byLabel = new Map(tasks.map((t) => [t.label.trim().toLowerCase(), t]));
   const sections: V3Section[] = [];
   let current: V3Section = { label: null, intro: "", items: [] };
   // Single-task answers have no task heading, so their items belong to the one task.
@@ -130,41 +169,39 @@ export function parseV3Answer(text: string, tasks: V3Task[]): V3Section[] | null
   };
 
   for (const para of paras) {
-    const first = para[0]!;
-    const bold = BOLD_LINE_RE.exec(first);
-    if (para.length === 1 && bold && byLabel.has(bold[1]!)) {
+    const key = headingKey(para[0]!);
+    const headed = key !== null && !parseItemLine(para[0]!) ? byLabel.get(key) : undefined;
+    if (headed) {
       push(current);
-      task = byLabel.get(bold[1]!)!;
+      task = headed;
       current = { label: task.label, intro: "", items: [] };
-      continue;
-    }
-    // A task heading directly followed by the intro line in the same paragraph.
-    if (bold && byLabel.has(bold[1]!) && para.length > 1) {
-      push(current);
-      task = byLabel.get(bold[1]!)!;
-      current = { label: task.label, intro: "", items: [] };
+      // The heading may sit alone or be followed by the intro in the same paragraph.
       para.shift();
+      if (para.length === 0) continue;
     }
     // Within one paragraph, several items may appear back-to-back (no blank line).
     let itemLines: string[] | null = null;
+    let itemHead: ItemLine | null = null;
     const proseLines: string[] = [];
     const flushItem = () => {
-      if (!itemLines) return;
-      const m = ITEM_RE.exec(itemLines[0]!)!;
-      const rank = Number(m[1]);
+      if (!itemLines || !itemHead) return;
+      const { rank, heading, rest } = itemHead;
       const recommendation = task?.recommendations.find((r) => r.rank === rank) ?? null;
-      const lines = [m[3]!.trim(), ...itemLines.slice(1)].filter(Boolean);
+      const lines = [rest, ...itemLines.slice(1)].filter(Boolean);
       // The prompt asks the model to mention contact details in prose; with a
       // card, the same phone/e-mail/website are action chips right below, so
       // the "Kontakt: …" line would be printed twice. Text-only items keep it.
       const reason = (recommendation ? lines.filter((l) => !CONTACT_LINE_RE.test(l)) : lines).join("\n");
-      current.items.push({ rank, heading: m[2]!.trim(), reason, recommendation });
+      current.items.push({ rank, heading, reason, recommendation });
       itemLines = null;
+      itemHead = null;
     };
     for (const line of para) {
-      if (ITEM_RE.test(line)) {
+      const head = parseItemLine(line);
+      if (head) {
         flushItem();
         itemLines = [line];
+        itemHead = head;
       } else if (itemLines) itemLines.push(line);
       else proseLines.push(line);
     }
