@@ -43,6 +43,10 @@ export function RerankView({ output }: { output: RerankOutput }) {
     else { setSortKey(k); setDesc(k !== "rank"); }
   }
   const arrow = (k: SortKey) => (k === sortKey ? (desc ? " ↓" : " ↑") : "");
+  const ariaSort = (k: SortKey): "ascending" | "descending" | "none" =>
+    k !== sortKey ? "none" : desc ? "descending" : "ascending";
+  const SORT_BTN =
+    "flex w-full items-center justify-end gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500";
   const kept = output.rows.filter((r) => r.kept).length;
 
   return (
@@ -55,17 +59,23 @@ export function RerankView({ output }: { output: RerankOutput }) {
         <table className={TABLE}>
           <thead>
             <tr>
-              <th className={`${TH} cursor-pointer text-right`} onClick={() => clickSort("rank")}>Rank{arrow("rank")}</th>
+              <th className={`${TH} text-right`} aria-sort={ariaSort("rank")}>
+                <button type="button" className={SORT_BTN} onClick={() => clickSort("rank")}>
+                  Rank{arrow("rank")}
+                </button>
+              </th>
               <th className={TH}>Partner</th>
               <th className={TH}>City</th>
               <th className={TH}>Role</th>
               {NUMERIC.map((c) => (
-                <th
-                  key={c.key}
-                  className={`${TH} cursor-pointer text-right ${c.key === "finalScore" ? "text-zinc-800 dark:text-zinc-100" : ""}`}
-                  onClick={() => clickSort(c.key)}
-                >
-                  {c.label}{arrow(c.key)}
+                <th key={c.key} className={`${TH} text-right`} aria-sort={ariaSort(c.key)}>
+                  <button
+                    type="button"
+                    className={`${SORT_BTN} ${c.key === "finalScore" ? "text-zinc-800 dark:text-zinc-100" : ""}`}
+                    onClick={() => clickSort(c.key)}
+                  >
+                    {c.label}{arrow(c.key)}
+                  </button>
                 </th>
               ))}
               <th className={TH}>Kept / drop reason</th>

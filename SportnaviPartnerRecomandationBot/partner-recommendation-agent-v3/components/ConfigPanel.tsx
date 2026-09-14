@@ -12,7 +12,10 @@ export interface ConfigPanelProps {
 type Key = keyof WorkflowConfig;
 const INPUT = "w-full rounded border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900";
 
-/** Every key of `defaults`, with `targetCity` first (it may be absent from defaults). */
+/**
+ * Every key of `defaults`, with `targetCity` prepended manually: it is optional on
+ * `WorkflowConfig`, so `Object.keys(defaults)` never contains it, yet the panel must offer it.
+ */
 function keysOf(defaults: WorkflowConfig): Key[] {
   const rest = (Object.keys(defaults) as Key[]).filter((k) => k !== "targetCity");
   return ["targetCity", ...rest];
@@ -38,13 +41,13 @@ export function ConfigPanel({ defaults, envSet, overrides, setOverrides }: Confi
           {overrideCount > 0 ? `${overrideCount} override${overrideCount === 1 ? "" : "s"} for this run` : "defaults (env applied)"}
         </span>
         {overrideCount > 0 && (
-          <span
-            role="button"
+          <button
+            type="button"
             className="ml-auto rounded border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
             onClick={(e) => { e.stopPropagation(); setOverrides({}); }}
           >
             Reset to defaults
-          </span>
+          </button>
         )}
       </button>
       {open && (
