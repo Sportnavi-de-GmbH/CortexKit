@@ -43,14 +43,26 @@ const trace = await runWorkflow(
   { query, homeCity },
   radiusArg !== undefined ? { searchRadiusKm: Number(radiusArg) } : {},
 );
-for (const s of trace.stages) {
-  console.log(`\n[${s.status.toUpperCase()}] ${s.title} (${s.durationMs} ms)`);
-  if (s.counts) console.log("  counts:", JSON.stringify(s.counts));
-  for (const w of s.warnings) console.log("  ⚠", w);
-  if (s.error) console.log("  ✖", s.error.message);
+function printStages(stages: typeof trace.stages, indent = ""): void {
+  for (const s of stages) {
+    console.log(`${indent}[${s.status.toUpperCase()}] ${s.title} (${s.durationMs} ms)`);
+    if (s.counts) console.log(`${indent}  counts:`, JSON.stringify(s.counts));
+    for (const w of s.warnings) console.log(`${indent}  ⚠`, w);
+    if (s.error) console.log(`${indent}  ✖`, s.error.message);
+  }
 }
-console.log(`\nstatus: ${trace.status} · ${trace.totalMs} ms`);
+
+console.log("");
+printStages([trace.decompose]);
+for (const t of trace.tasks) {
+  console.log(`\n── task ${t.task.id} · ${t.task.label} · ${t.status} · ${t.totalMs} ms`);
+  printStages(t.stages, "  ");
+}
+console.log(`\nstatus: ${trace.status} · ${trace.totalMs} ms · ${trace.tasks.length} task(s) run, ${trace.deferred.length} deferred, ${trace.pending.length} pending`);
+if (trace.error) console.log("✖", trace.error.message);
 if (trace.clarification) console.log(trace.clarification);
 if (trace.answer) console.log("\n" + trace.answer);
+if (trace.deferred.length) console.log("\ndeferred:", trace.deferred.map((d) => d.label).join(", "));
+if (trace.pending.length) console.log("pending:", trace.pending.map((p) => p.label).join(", "));
 if (json) console.log(JSON.stringify(trace, null, 2));
 if (trace.status !== "ok") process.exit(1);
