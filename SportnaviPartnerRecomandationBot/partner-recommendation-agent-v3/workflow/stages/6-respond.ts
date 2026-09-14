@@ -1,7 +1,8 @@
 /**
  * Stage 6 — Hydrate the kept partners' profiles (one batched call) and let
  * the model phrase the answer from those profiles ONLY. A missing profile
- * drops that partner (the cut was fixed in stage 5, so UI and answer agree).
+ * drops that partner (the cut was fixed in stage 5, so UI and answer agree);
+ * survivors are renumbered 1..N; no partner beyond the stage-5 cut is added.
  */
 import { timeoutSignal } from "../../lib/reused/timeout";
 import { buildAnswerPrompt, type AnswerPartner } from "./answer-prompt";
@@ -20,7 +21,7 @@ export async function respond(input: { query: string; targetCity: string; kept: 
     const p = byId.get(r.id);
     const profile = p?.llm_profile?.trim() || p?.body_markdown?.trim() || "";
     if (!p || !profile) { warnings.push(`Partner ${r.id} (${r.name}) has no profile text and was dropped from the answer.`); continue; }
-    const rank = r.rank ?? partners.length + 1;
+    const rank = partners.length + 1;
     partners.push({ rank, name: p.title || r.name, city: p.city || r.city, role: r.role, distanceKm: r.distanceKm, profile });
     recommendations.push({ rank, id: r.id, name: p.title || r.name, city: p.city || r.city, role: r.role, distanceKm: r.distanceKm, finalScore: r.finalScore, relevance: r.relevance, profile });
   }
