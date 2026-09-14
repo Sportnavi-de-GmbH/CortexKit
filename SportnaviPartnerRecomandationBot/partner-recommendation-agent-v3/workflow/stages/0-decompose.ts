@@ -66,7 +66,7 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
         warnings.push("Decomposition returned no tasks; treating the message as one task.");
         fresh = [singleTask(input.query)];
         degraded = true;
-      } else if (fresh.length === 1 && pending.length === 0 && !pending.some((p) => p.id === fresh[0]!.id)) {
+      } else if (fresh.length === 1 && !pending.some((p) => p.id === fresh[0]!.id)) {
         // Single-intent message: the model may shorten/rewrite the query, but
         // stages 2/6 must see the same text the user typed, matching pre-decompose behaviour.
         fresh = [{ ...fresh[0]!, query: input.query }];
