@@ -5,4 +5,6 @@ export const EXAMPLE_QUERIES = [
   "Ich möchte in der Nähe von Dortmund Tennis spielen.",
   "Ich brauche Physiotherapie für meinen Rücken irgendwo um Bochum.",
   "Yoga in Bochum",
+  "Tennis in Dortmund, Boxen in Bochum und etwas gegen Rückenschmerzen in Essen",
+  "Yoga in Bochum, Klettern in Dortmund, Schwimmen in Essen, Reha-Sport in Hagen und Tennis in Lünen",
 ];

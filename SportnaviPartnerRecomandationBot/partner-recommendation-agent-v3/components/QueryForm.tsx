@@ -1,5 +1,6 @@
 "use client";
 import { EXAMPLE_QUERIES } from "../lib/ui/examples";
+import type { ResumeState } from "../workflow/types";
 
 export interface QueryFormProps {
   query: string;
@@ -8,11 +9,13 @@ export interface QueryFormProps {
   setHomeCity: (c: string) => void;
   running: boolean;
   onRun: () => void;
+  resume: ResumeState | null;
+  onClearResume: () => void;
 }
 
 const INPUT = "w-full rounded border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900";
 
-export function QueryForm({ query, setQuery, homeCity, setHomeCity, running, onRun }: QueryFormProps) {
+export function QueryForm({ query, setQuery, homeCity, setHomeCity, running, onRun, resume, onClearResume }: QueryFormProps) {
   const canRun = !running && query.trim().length > 0;
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -48,6 +51,15 @@ export function QueryForm({ query, setQuery, homeCity, setHomeCity, running, onR
           </button>
         ))}
       </div>
+      {resume && (resume.pending.length > 0 || resume.deferred.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <span className="font-semibold">Weiter mit:</span>
+          <span>{resume.pending.length} offen{resume.pending.length ? ` (${resume.pending.map((p) => p.label).join(", ")})` : ""}</span>
+          <span>·</span>
+          <span>{resume.deferred.length} zurückgestellt{resume.deferred.length ? ` (${resume.deferred.map((d) => d.label).join(", ")})` : ""}</span>
+          <button type="button" onClick={onClearResume} aria-label="Resume-Status verwerfen" className="ml-auto rounded border border-amber-300 px-2 py-0.5 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/40">×</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-64 flex-1">
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500">Home city (fallback when no city is mentioned)</span>
