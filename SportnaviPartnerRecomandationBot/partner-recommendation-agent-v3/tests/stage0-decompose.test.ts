@@ -95,4 +95,16 @@ describe("stage 0 — decompose", () => {
     expect(r.output.fresh).toHaveLength(1);
     expect(r.counts).toMatchObject({ fresh: 1, carried: 2, runnable: 2, deferred: 1 });
   });
+
+  it("a pending id can be claimed by at most one task; a second claimant gets a fresh id", async () => {
+    const pending = [task("p1", "Tennis")];
+    const llm = fakeLlm({ decompose: () => [
+      rawTask({ query: "Tennis in Dortmund", cityMention: "Dortmund", resolvesPending: "p1" }),
+      rawTask({ query: "Tennis in Bochum", cityMention: "Bochum", resolvesPending: "p1", priority: 2 }),
+    ] });
+    const r = await decompose({ query: "Dortmund und Bochum", resume: { pending, deferred: [] } }, ctx({}, { llm }));
+    expect(r.output.tasks.map((t) => t.id)[0]).toBe("p1");
+    expect(r.output.tasks[1]!.id).not.toBe("p1");
+    expect(new Set(r.output.tasks.map((t) => t.id)).size).toBe(2);
+  });
 });

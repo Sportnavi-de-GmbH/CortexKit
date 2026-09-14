@@ -25,6 +25,7 @@ function singleTask(query: string): Task {
 /** Trim, drop empties, clamp, assign ids, dedupe, sort by (priority, mention order), cap. */
 export function normalizeTasks(raw: RawTask[], pending: Task[]): Task[] {
   const pendingIds = new Set(pending.map((p) => p.id));
+  const usedIds = new Set<string>();
   const seen = new Set<string>();
   const tasks: Array<Task & { mentionIndex: number }> = [];
   raw.forEach((r, mentionIndex) => {
@@ -36,7 +37,8 @@ export function normalizeTasks(raw: RawTask[], pending: Task[]): Task[] {
     const label = ((r.label ?? "").trim() || query).slice(0, MAX_LABEL_CHARS);
     const cityMention = (r.cityMention ?? "").trim() || null;
     const priority = Number.isFinite(r.priority) ? r.priority : mentionIndex + 1;
-    const id = r.resolvesPending && pendingIds.has(r.resolvesPending) ? r.resolvesPending : newTaskId();
+    const id = r.resolvesPending && pendingIds.has(r.resolvesPending) && !usedIds.has(r.resolvesPending) ? r.resolvesPending : newTaskId();
+    usedIds.add(id);
     tasks.push({ id, label, query, cityMention, priority, mentionIndex });
   });
   tasks.sort((a, b) => a.priority - b.priority || a.mentionIndex - b.mentionIndex);
