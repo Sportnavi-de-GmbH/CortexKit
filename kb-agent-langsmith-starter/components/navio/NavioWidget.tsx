@@ -34,6 +34,10 @@ import { PageHelpOverlay, type HelpScreen } from "./PageHelp";
 import { parseMessageActions, resolveActions } from "../../lib/navio-actions";
 import { MessageActions } from "./MessageActions";
 import { DataNotice } from "./DataNotice";
+import { PartnerCards } from "./PartnerCards";
+import { extractPartnerCards } from "../../lib/partner-cards";
+import { V3Answer } from "./V3Answer";
+import { parseV3Answer, readV3Result } from "../../lib/v3-answer";
 // The SAME cap the API enforces (agent/channels/eve.ts + the /api/partner
 // route), so the counter never promises what the server would reject.
 import {
@@ -641,14 +645,34 @@ function BotMessage({
   const { text, actions, notices } = parseMessageActions(messageText(message));
   // The screen's guaranteed chips ride along even when the agent forgot to ask.
   const chips = resolveActions(actions, surface);
+  // The partner agent's structured result travels on a tool part next to the
+  // prose; `null` for any other agent or shape, so the FAQ screen and the live
+  // (non-V2) partner agent render exactly as before. Read on every render, not
+  // memoised on first completion: `status` can flip back to streaming when the
+  // model spoke before calling the tool.
+  const partnerCards = surface === "partner" ? extractPartnerCards(message.parts) : null;
+  // The V3 workflow agent's structured recommendations travel on
+  // `metadata.result` (lib/use-workflow-agent.ts). When present AND the prose
+  // has V3's numbered shape, each partner renders as a card carrying its own
+  // sentence; otherwise the reply renders exactly as before.
+  const v3Tasks = surface === "partner" && complete ? readV3Result(message.metadata?.result) : null;
+  const v3Sections = v3Tasks ? parseV3Answer(text, v3Tasks) : null;
 
   return (
     <div>
-      <BotBubble>
-        <Markdown text={text} />
-        {streaming && <Cursor />}
-      </BotBubble>
-      {complete && notices.includes("data") && <DataNotice />}
+      {v3Sections ? (
+        <V3Answer sections={v3Sections} Bubble={BotBubble} Markdown={Markdown} />
+      ) : (
+        <BotBubble>
+          <Markdown text={text} />
+          {streaming && <Cursor />}
+        </BotBubble>
+      )}
+      {complete && partnerCards && <PartnerCards groups={partnerCards} />}
+      {/* The eve agents ask for the notice with `[[notice:data]]`; the V3
+          workflow agent emits no markers, so an answer that rendered partner
+          cards carries it by construction — same condition, decided here. */}
+      {complete && (notices.includes("data") || !!v3Sections?.some((s) => s.items.length > 0)) && <DataNotice />}
       {complete && (
         <MessageActions actions={chips} onScreen={onAction} bookingUrl={bookingUrl} />
       )}

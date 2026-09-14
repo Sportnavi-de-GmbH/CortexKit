@@ -1,43 +1,114 @@
-// Server side of the V3 partner adapter: /api/partner/workflow → ${PARTNER_AGENT_HOST}/api/workflow
+// Server side of the V3 partner adapter: /api/partner/workflow → ${PARTNER_WORKFLOW_HOST}/api/workflow
 //
 // The existing proxy (lib/partner-proxy.ts) only forwards eve/* paths, because the
 // eve-based partner agents speak eve's session + SSE protocol. V3 is a plain
 // JSON workflow (`POST /api/workflow` → WorkflowTrace), so it gets its own tiny
-// forwarder. Same host normalisation, same self-target refusal, same shared
-// secret as the proxy — the browser never talks to V3 directly.
+// forwarder. Same host normalisation and self-target refusal as the proxy.
+//
+// Security model (server-to-server):
+//  - The browser only ever reaches THIS same-origin route; it never learns V3's
+//    address or credential.
+//  - V3 authenticates this forwarder with HTTP Basic `navio-proxy:<secret>`
+//    (V3's lib/request-gate.ts). The pair PARTNER_WORKFLOW_HOST /
+//    PARTNER_WORKFLOW_SECRET is dedicated to V3 and falls back to the eve-proxy
+//    pair PARTNER_AGENT_HOST / PARTNER_PROXY_SECRET only when unset, so V3 can be
+//    rolled out without rotating the secret shared with the other agents.
+//  - V3's reply is a full WorkflowTrace (config, every stage's internals,
+//    candidate scores, raw error messages) — fine between servers, not for a
+//    browser. Only the UI projection below leaves this route, and every failure
+//    is reported generically; the specifics go to the server log.
 //
 // The widget POSTs `{ message, resume? }` (keeps `message` so the shared
 // length gate `checkPartnerMessageLength` applies) and this maps it to V3's
 // `{ query, resume }`.
 
 import { isSelfTarget } from "./partner-proxy";
+import type { WorkflowTaskLite, WorkflowTraceLite } from "./workflow-agent-state";
+import type { V3Recommendation } from "./v3-answer";
 
 export interface WorkflowForwardDeps {
-  /** Defaults to process.env.PARTNER_AGENT_HOST. */
+  /** Defaults to process.env.PARTNER_WORKFLOW_HOST, then PARTNER_AGENT_HOST. */
+  workflowHost?: string;
+  /** Defaults to process.env.PARTNER_WORKFLOW_SECRET, then PARTNER_PROXY_SECRET. */
+  workflowSecret?: string;
+  /** Test seam for the fallback pair. */
   host?: string;
-  /** Defaults to process.env.PARTNER_PROXY_SECRET. */
   secret?: string;
   fetchImpl?: typeof fetch;
   /** Upstream deadline; a V3 run is 10–45 s. */
   timeoutMs?: number;
 }
 
+const UNAVAILABLE = "Partner agent unavailable.";
+
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+function normalizeHost(raw: string | undefined): string {
+  const h = (raw ?? "").trim().replace(/\/+$/, "");
+  return h && !/^https?:\/\//i.test(h) ? `https://${h}` : h;
+}
+
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+function taskLite(v: unknown): WorkflowTaskLite | null {
+  if (!isRec(v) || typeof v.id !== "string" || typeof v.label !== "string" || typeof v.query !== "string") return null;
+  return { id: v.id, label: v.label, query: v.query, cityMention: str(v.cityMention), priority: typeof v.priority === "number" ? v.priority : 1 };
+}
+
+function recommendation(v: unknown): V3Recommendation | null {
+  if (!isRec(v) || typeof v.rank !== "number" || typeof v.id !== "number" || typeof v.name !== "string" || !isRec(v.card)) return null;
+  const c = v.card;
+  const strs = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
+  return {
+    rank: v.rank, id: v.id, name: v.name, city: str(v.city) ?? "", role: v.role === "nearby" ? "nearby" : "target",
+    distanceKm: typeof v.distanceKm === "number" ? v.distanceKm : 0,
+    card: { logoUrl: str(c.logoUrl), street: str(c.street), postalCode: str(c.postalCode), email: str(c.email), phone: str(c.phone), websiteUrl: str(c.websiteUrl), mapsUrl: str(c.mapsUrl), tags: strs(c.tags), courses: strs(c.courses) },
+  };
+}
+
+/**
+ * What the browser gets: answer text, the multi-turn carry-over, and per-task
+ * recommendations with their cards. Nothing else — see the header.
+ */
+export function projectTrace(trace: unknown): WorkflowTraceLite | null {
+  if (!isRec(trace) || typeof trace.runId !== "string" || typeof trace.status !== "string") return null;
+  const status = trace.status;
+  if (status !== "ok" && status !== "needs_clarification" && status !== "partial" && status !== "failed") return null;
+  const list = (x: unknown) => (Array.isArray(x) ? x.map(taskLite).filter((t): t is WorkflowTaskLite => t !== null) : []);
+  const tasks = Array.isArray(trace.tasks)
+    ? trace.tasks.flatMap((t) => {
+        if (!isRec(t)) return [];
+        const task = taskLite(t.task);
+        const s = t.status;
+        if (!task || (s !== "ok" && s !== "needs_clarification" && s !== "failed")) return [];
+        const status: "ok" | "needs_clarification" | "failed" = s;
+        const recs = Array.isArray(t.recommendations) ? t.recommendations.map(recommendation).filter((r): r is V3Recommendation => r !== null) : undefined;
+        return [{ task, status, ...(recs ? { recommendations: recs } : {}) }];
+      })
+    : [];
+  return {
+    runId: trace.runId,
+    status,
+    ...(typeof trace.answer === "string" ? { answer: trace.answer } : {}),
+    ...(typeof trace.clarification === "string" ? { clarification: trace.clarification } : {}),
+    pending: list(trace.pending),
+    deferred: list(trace.deferred),
+    tasks,
+  };
+}
+
 export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps = {}): Promise<Response> {
-  const rawHost = (deps.host ?? process.env.PARTNER_AGENT_HOST ?? "").trim().replace(/\/+$/, "");
-  const host = rawHost && !/^https?:\/\//i.test(rawHost) ? `https://${rawHost}` : rawHost;
+  const host = normalizeHost(deps.workflowHost ?? process.env.PARTNER_WORKFLOW_HOST) || normalizeHost(deps.host ?? process.env.PARTNER_AGENT_HOST);
   if (!host) return json({ detail: "Partner agent not configured." }, 503);
 
   const target = `${host}/api/workflow`;
   if (isSelfTarget(req.url, target, req.headers.get("host"))) {
-    console.error(`[partner-workflow] PARTNER_AGENT_HOST (${host}) points at THIS service; refusing to forward.`);
-    return json(
-      { detail: "Partner agent misconfigured: PARTNER_AGENT_HOST points at this service itself. Set it to the partner agent's own host and port." },
-      503,
-    );
+    console.error(`[partner-workflow] partner host (${host}) points at THIS service; refusing to forward.`);
+    return json({ detail: "Partner agent misconfigured." }, 503);
   }
 
   let body: { message?: unknown; resume?: unknown };
@@ -50,7 +121,7 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
   if (!message) return json({ detail: "message is required." }, 400);
 
   const headers = new Headers({ "content-type": "application/json" });
-  const secret = deps.secret ?? process.env.PARTNER_PROXY_SECRET?.trim();
+  const secret = (deps.workflowSecret ?? process.env.PARTNER_WORKFLOW_SECRET ?? deps.secret ?? process.env.PARTNER_PROXY_SECRET)?.trim();
   if (secret) headers.set("authorization", `Basic ${Buffer.from(`navio-proxy:${secret}`).toString("base64")}`);
 
   const doFetch = deps.fetchImpl ?? fetch;
@@ -66,11 +137,28 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
     const cause = (e as Error & { cause?: Error & { code?: string } }).cause;
     const causeText = cause ? ` (${cause.code ?? ""} ${cause.message})`.trimEnd() : "";
     console.error(`[partner-workflow] fetch to ${target} failed: ${(e as Error).message}${causeText}`);
-    return json({ detail: `Upstream unreachable: ${(e as Error).message}${causeText}` }, 502);
+    return json({ detail: UNAVAILABLE }, 502);
   }
 
-  return new Response(await upstream.text(), {
-    status: upstream.status,
-    headers: { "Content-Type": upstream.headers.get("content-type") ?? "application/json" },
-  });
+  if (!upstream.ok) {
+    console.error(`[partner-workflow] upstream ${upstream.status} from ${target}`);
+    return json({ detail: UNAVAILABLE }, 502);
+  }
+  let parsed: unknown;
+  try {
+    parsed = await upstream.json();
+  } catch {
+    console.error(`[partner-workflow] upstream returned non-JSON from ${target}`);
+    return json({ detail: UNAVAILABLE }, 502);
+  }
+  const lite = projectTrace(parsed);
+  if (!lite) {
+    console.error(`[partner-workflow] upstream JSON is not a WorkflowTrace`);
+    return json({ detail: UNAVAILABLE }, 502);
+  }
+  if (lite.status === "failed" || lite.status === "partial") {
+    const msg = isRec(parsed) && isRec(parsed.error) ? String(parsed.error.message) : "(no message)";
+    console.error(`[partner-workflow] run ${lite.runId} ${lite.status}: ${msg}`);
+  }
+  return json(lite, 200);
 }

@@ -58,6 +58,9 @@ export function initialWorkflowState(): WorkflowAgentState {
 
 const turnId = (n: number) => `turn_${n}`;
 
+export const FAILED_MESSAGE =
+  "Die Partnersuche ist gerade nicht erreichbar – bitte versuch es in einem Moment noch einmal. · The partner search is temporarily unavailable – please try again in a moment.";
+
 export function applyUserMessage(s: WorkflowAgentState, text: string): WorkflowAgentState {
   const turn = s.turn + 1;
   const msg: EveMessage = {
@@ -84,8 +87,9 @@ function markLastUserFailed(messages: readonly EveMessage[]): EveMessage[] {
 export function applyTrace(s: WorkflowAgentState, trace: WorkflowTraceLite): WorkflowAgentState {
   const text = trace.answer ?? trace.clarification;
   if (trace.status === "failed" || !text) {
-    const message = trace.error?.message ?? "Die Partnersuche ist gerade nicht erreichbar.";
-    return { ...s, messages: markLastUserFailed(s.messages), error: new Error(message) };
+    // Never surface V3's internal message (it names infrastructure); the server
+    // route already logged it. The visitor gets one calm, bilingual line.
+    return { ...s, messages: markLastUserFailed(s.messages), error: new Error(FAILED_MESSAGE) };
   }
   // Structured partner facts ride on eve's `metadata.result` slot (the harness
   // "structured result" of a turn), so the widget's message type is unchanged.

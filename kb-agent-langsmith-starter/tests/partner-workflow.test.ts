@@ -68,11 +68,12 @@ describe("workflow agent state", () => {
     expect(s.messages[1]!.parts).toEqual([{ type: "text", text: "In welcher Stadt?", state: "done" }]);
   });
 
-  it("a failed trace becomes a failed user turn plus an error, no assistant bubble", () => {
-    const s = applyTrace(applyUserMessage(initialWorkflowState(), "x"), trace({ status: "failed", error: { message: "embed down" } }));
+  it("a failed trace becomes a failed user turn plus a GENERIC error, no assistant bubble", () => {
+    const s = applyTrace(applyUserMessage(initialWorkflowState(), "x"), trace({ status: "failed", error: { message: "embed down: ECONNREFUSED" } }));
     expect(s.messages).toHaveLength(1);
     expect(s.messages[0]!.metadata?.status).toBe("failed");
-    expect(s.error?.message).toMatch(/embed down/);
+    expect(s.error?.message).not.toMatch(/embed|ECONNREFUSED/);
+    expect(s.error?.message).toMatch(/Partnersuche/);
   });
 
   it("a transport failure marks the user turn failed and records the error", () => {
@@ -107,12 +108,22 @@ describe("forwardToWorkflow", () => {
     expect(res.status).toBe(400);
   });
 
-  it("maps { message, resume } to V3's { query, resume } and returns the upstream JSON + status", async () => {
+  it("maps { message, resume } to V3's { query, resume }, authenticates, and returns ONLY the UI projection", async () => {
+    const card = { logoUrl: null, street: null, postalCode: null, email: null, phone: null, websiteUrl: "https://a.de", mapsUrl: null, tags: [], courses: [] };
+    const fullTrace = {
+      runId: "r", startedAt: "t", totalMs: 9000, status: "ok", answer: "A", pending: [], deferred: [],
+      input: { query: "Yoga in Bochum" }, config: { runTimeoutMs: 45000 }, decompose: { id: "decompose", output: { tasks: [] } },
+      tasks: [{
+        task: { id: "t1", label: "Yoga in Bochum", query: "Yoga in Bochum", cityMention: "Bochum", priority: 1 }, status: "ok", totalMs: 8000,
+        stages: [{ id: "search", output: { candidates: [{ id: 1, similarity: 0.9 }], embedding: { preview: [0.1] } } }],
+        recommendations: [{ rank: 1, id: 7, name: "A", city: "Bochum", role: "target", distanceKm: 0, finalScore: 0.8, relevance: 0.7, profile: "long profile text", card }],
+      }],
+    };
     const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
       expect(url).toBe("http://127.0.0.1:3008/api/workflow");
       expect(JSON.parse(init.body as string)).toEqual({ query: "Yoga in Bochum", resume: { pending: [], deferred: [] } });
-      expect((init.headers as Headers).get("authorization")).toMatch(/^Basic /);
-      return new Response(JSON.stringify({ runId: "r", status: "ok", answer: "A" }), { status: 200, headers: { "content-type": "application/json" } });
+      expect((init.headers as Headers).get("authorization")).toBe("Basic " + Buffer.from("navio-proxy:s3cret").toString("base64"));
+      return new Response(JSON.stringify(fullTrace), { status: 200, headers: { "content-type": "application/json" } });
     });
     const res = await forwardToWorkflow(post({ message: "Yoga in Bochum", resume: { pending: [], deferred: [] } }), {
       host: "http://127.0.0.1:3008",
@@ -120,21 +131,66 @@ describe("forwardToWorkflow", () => {
       secret: "s3cret",
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ answer: "A" });
+    const body = await res.json();
+    expect(body).toEqual({
+      runId: "r", status: "ok", answer: "A", pending: [], deferred: [],
+      tasks: [{ task: { id: "t1", label: "Yoga in Bochum", query: "Yoga in Bochum", cityMention: "Bochum", priority: 1 }, status: "ok",
+        recommendations: [{ rank: 1, id: 7, name: "A", city: "Bochum", role: "target", distanceKm: 0, card }] }],
+    });
+    for (const k of ["config", "decompose", "stages", "input", "totalMs"]) expect(body).not.toHaveProperty(k);
+    expect(JSON.stringify(body)).not.toMatch(/similarity|finalScore|profile text|preview/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed trace reaches the browser as status=failed with NO internal message", async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ runId: "r", status: "failed", pending: [], deferred: [], tasks: [], error: { message: "dependencies: MEMORY_SUPABASE_SERVICE_ROLE_KEY missing" } }), { status: 200 })) as unknown as typeof fetch;
+    const res = await forwardToWorkflow(post({ message: "x" }), { host: "http://127.0.0.1:3008", fetchImpl, secret: "s" });
+    const body = await res.json();
+    expect(body.status).toBe("failed");
+    expect(JSON.stringify(body)).not.toMatch(/SUPABASE|dependencies/);
+  });
+
+  it("prefers the dedicated PARTNER_WORKFLOW_HOST/SECRET over the shared eve-proxy pair", async () => {
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://v3.example.com/api/workflow");
+      expect((init.headers as Headers).get("authorization")).toBe("Basic " + Buffer.from("navio-proxy:v3-only").toString("base64"));
+      return new Response(JSON.stringify({ runId: "r", status: "ok", answer: "A", pending: [], deferred: [], tasks: [] }), { status: 200 });
+    });
+    const res = await forwardToWorkflow(post({ message: "x" }), {
+      host: "http://old-agent", secret: "shared",
+      workflowHost: "https://v3.example.com", workflowSecret: "v3-only",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("upstream 401/5xx/non-JSON become a generic 502 for the browser (details stay in server logs)", async () => {
+    const ups = [
+      () => new Response(JSON.stringify({ error: "Unauthorized." }), { status: 401 }),
+      () => new Response("<html>gateway timeout</html>", { status: 504 }),
+      () => new Response("not json", { status: 200 }),
+    ];
+    for (const up of ups) {
+      const res = await forwardToWorkflow(post({ message: "x" }), { host: "http://127.0.0.1:3008", fetchImpl: (async () => up()) as unknown as typeof fetch, secret: "s" });
+      expect(res.status).toBe(502);
+      expect((await res.json()).detail).toBe("Partner agent unavailable.");
+    }
   });
 
   it("refuses a self-target host", async () => {
     const res = await forwardToWorkflow(post({ message: "x" }), { host: "http://localhost:3000" });
     expect(res.status).toBe(503);
-    expect((await res.json()).detail).toMatch(/itself/);
+    expect((await res.json()).detail).toMatch(/misconfigured/);
   });
 
-  it("502 when the upstream is unreachable", async () => {
+  it("502 with a generic detail when the upstream is unreachable", async () => {
     const res = await forwardToWorkflow(post({ message: "x" }), {
       host: "http://127.0.0.1:3008",
-      fetchImpl: (async () => { throw new Error("fetch failed"); }) as unknown as typeof fetch,
+      fetchImpl: (async () => { throw Object.assign(new Error("fetch failed"), { cause: { code: "ECONNREFUSED", message: "connect ECONNREFUSED 127.0.0.1:3008" } }); }) as unknown as typeof fetch,
     });
     expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.detail).toBe("Partner agent unavailable.");
+    expect(JSON.stringify(body)).not.toMatch(/ECONNREFUSED|127\.0\.0\.1/);
   });
 });

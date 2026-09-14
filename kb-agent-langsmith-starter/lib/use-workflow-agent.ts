@@ -17,6 +17,7 @@ import {
   applyFailure,
   applyTrace,
   applyUserMessage,
+  FAILED_MESSAGE,
   initialWorkflowState,
   type WorkflowAgentState,
   type WorkflowTraceLite,
@@ -62,12 +63,16 @@ export function useWorkflowAgent(options: UseWorkflowAgentOptions = {}): UseEveA
           signal: controller.signal,
         });
         if (!res.ok) {
-          let detail = `HTTP ${res.status}`;
-          try {
-            const body = (await res.json()) as { detail?: string; error?: string };
-            detail = body.detail ?? body.error ?? detail;
-          } catch {
-            /* non-JSON error body */
+          // 4xx carries a user-actionable detail from our own route (too long,
+          // origin); anything else is an outage and gets the generic line.
+          let detail = FAILED_MESSAGE;
+          if (res.status < 500) {
+            try {
+              const body = (await res.json()) as { detail?: string };
+              if (body.detail) detail = body.detail;
+            } catch {
+              /* non-JSON error body */
+            }
           }
           throw new Error(detail);
         }

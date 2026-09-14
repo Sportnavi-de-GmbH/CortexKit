@@ -14,11 +14,13 @@ import { useEveAgent } from "eve/react";
 import { useWorkflowAgent } from "@/lib/use-workflow-agent";
 import { NavioWidget } from "@/components/navio/NavioWidget";
 
-// Which partner agent the "Partner finden" card talks to. "v3" (default) is the
-// JSON workflow at PARTNER_AGENT_HOST/api/workflow (partner-recommendation-agent-v3)
-// via /api/partner/workflow; "eve" is the previous eve-protocol agents via the
-// /api/partner/eve/* proxy. Both hooks are lazy (no request until first send).
-const PARTNER_AGENT_KIND = process.env.NEXT_PUBLIC_PARTNER_AGENT === "eve" ? "eve" : "v3";
+// Which partner agent the "Partner finden" card talks to. "v3" is the JSON
+// workflow (partner-recommendation-agent-v3) via /api/partner/workflow and
+// PARTNER_WORKFLOW_HOST; anything else is the previous eve-protocol agents via the
+// /api/partner/eve/* proxy. Opt-in on purpose: a deployment that has not set
+// NEXT_PUBLIC_PARTNER_AGENT=v3 (and the V3 host + secret) keeps working as before.
+// Both hooks are lazy (no request until first send).
+const PARTNER_AGENT_KIND = process.env.NEXT_PUBLIC_PARTNER_AGENT === "v3" ? "v3" : "eve";
 
 /** Ensure a stable first-party visitor id cookie (analytics + soft rate-shaping). */
 function ensureVisitorId(): void {
