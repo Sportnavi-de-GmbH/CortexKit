@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { raceAbort } from "../../lib/abortable";
 import { timeoutSignal } from "../../lib/reused/timeout";
 import type { RawTask } from "../../lib/llm-port";
-import type { DecomposeOutput, ResumeState, StageContext, StageResult, Task } from "../types";
+import type { DecomposeOutput, LlmUsage, ResumeState, StageContext, StageResult, Task } from "../types";
 
 export const MAX_LABEL_CHARS = 40;
 export const MAX_TASKS = 10;
@@ -53,6 +53,7 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
   let fresh: Task[] = [];
   let degraded = false;
   let model: string | undefined;
+  let usage: LlmUsage | undefined;
 
   if (!ctx.config.enableDecomposition) {
     fresh = [singleTask(input.query)];
@@ -62,6 +63,7 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
       const raw = await raceAbort(ctx.deps.llm.decompose(input.query, { pending, signal }), signal, "decompose");
       fresh = normalizeTasks(raw.tasks ?? [], pending);
       model = ctx.deps.llm.modelName;
+      usage = raw.usage;
       if (fresh.length === 0) {
         warnings.push("Decomposition returned no tasks; treating the message as one task.");
         fresh = [singleTask(input.query)];
@@ -92,6 +94,8 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
   return {
     output: { tasks, runnable, deferred, fresh: fresh.map((t) => t.id), degraded, ...(model ? { model } : {}) },
     config,
+    ...(usage ? { usage } : {}),
+    ...(model ? { model } : {}),
     counts: { fresh: fresh.length, carried: carried.length, runnable: runnable.length, deferred: deferred.length, pendingIn: pending.length },
     warnings,
   };

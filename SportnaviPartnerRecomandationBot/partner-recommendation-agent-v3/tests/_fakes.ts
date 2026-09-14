@@ -16,7 +16,7 @@ import type {
   SupabasePartnerRow,
   SupabaseResolvedCityRow,
 } from "../lib/reused/supabase";
-import type { LlmPort, RawTask } from "../lib/llm-port";
+import type { LlmPort, LlmUsage, RawTask } from "../lib/llm-port";
 import type { StageContext, Task, WorkflowDeps } from "../workflow/types";
 import { resolveConfig, type WorkflowConfig } from "../config/workflow.config";
 
@@ -200,6 +200,8 @@ export interface FakeLlmOptions {
   failReformulate?: Error;
   failAnswer?: Error;
   failDecompose?: Error;
+  /** Reported on every model call when set (the Azure port reads it from the AI SDK result). */
+  usage?: LlmUsage;
 }
 export interface FakeLlm extends LlmPort {
   calls: Array<{ fn: "decompose" | "detectCity" | "reformulate" | "answer"; arg: string }>;
@@ -210,31 +212,32 @@ export function fakeLlm(o: FakeLlmOptions = {}): FakeLlm {
     const m = typeof o.cityMention === "function" ? o.cityMention(query) : o.cityMention;
     return m === undefined ? null : m;
   };
+  const usage = o.usage ? { usage: o.usage } : {};
   return {
     modelName: "fake-model",
     calls,
     async decompose(query, { pending }) {
       calls.push({ fn: "decompose", arg: query });
       if (o.failDecompose) throw o.failDecompose;
-      if (o.decompose === undefined) return { tasks: [{ label: query.slice(0, 40), query, cityMention: mention(query), priority: 1, resolvesPending: null }] };
-      return { tasks: typeof o.decompose === "function" ? o.decompose(query, pending) : o.decompose };
+      if (o.decompose === undefined) return { tasks: [{ label: query.slice(0, 40), query, cityMention: mention(query), priority: 1, resolvesPending: null }], ...usage };
+      return { tasks: typeof o.decompose === "function" ? o.decompose(query, pending) : o.decompose, ...usage };
     },
     async detectCity(query) {
       calls.push({ fn: "detectCity", arg: query });
       if (o.failDetect) throw o.failDetect;
-      return { cityMention: mention(query) };
+      return { cityMention: mention(query), ...usage };
     },
     async reformulate(query) {
       calls.push({ fn: "reformulate", arg: query });
       if (o.failReformulate) throw o.failReformulate;
-      if (o.reformulated === undefined) return `REFORMULATED: ${query}`;
-      return typeof o.reformulated === "function" ? o.reformulated(query) : o.reformulated;
+      if (o.reformulated === undefined) return { text: `REFORMULATED: ${query}`, ...usage };
+      return { text: typeof o.reformulated === "function" ? o.reformulated(query) : o.reformulated, ...usage };
     },
     async answer(prompt) {
       calls.push({ fn: "answer", arg: prompt });
       if (o.failAnswer) throw o.failAnswer;
-      if (o.answer === undefined) return "ANSWER";
-      return typeof o.answer === "function" ? o.answer(prompt) : o.answer;
+      if (o.answer === undefined) return { text: "ANSWER", ...usage };
+      return { text: typeof o.answer === "function" ? o.answer(prompt) : o.answer, ...usage };
     },
   };
 }

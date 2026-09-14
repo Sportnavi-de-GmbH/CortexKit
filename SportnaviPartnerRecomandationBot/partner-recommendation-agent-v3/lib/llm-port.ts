@@ -15,16 +15,32 @@ export interface RawTask {
   resolvesPending: string | null;
 }
 
+/** Token usage of one model call, when the provider reported it (additive; monitoring only). */
+export interface LlmUsage {
+  input: number;
+  output: number;
+  cached?: number;
+}
+
 export interface LlmPort {
   readonly modelName: string;
   /** Stage 0: independent search tasks in the message; may merge a pending task. */
-  decompose(query: string, opts: { pending: Task[]; signal: AbortSignal }): Promise<{ tasks: RawTask[] }>;
+  decompose(query: string, opts: { pending: Task[]; signal: AbortSignal }): Promise<{ tasks: RawTask[]; usage?: LlmUsage }>;
   /** Stage 1: the location verbatim as the user wrote it, or null. */
-  detectCity(query: string, opts: { signal: AbortSignal }): Promise<{ cityMention: string | null }>;
+  detectCity(query: string, opts: { signal: AbortSignal }): Promise<{ cityMention: string | null; usage?: LlmUsage }>;
   /** Stage 2: a descriptive German semantic-search query preserving the intent. */
-  reformulate(query: string, opts: { maxChars: number; signal: AbortSignal }): Promise<string>;
+  reformulate(query: string, opts: { maxChars: number; signal: AbortSignal }): Promise<{ text: string; usage?: LlmUsage }>;
   /** Stage 6: the user-facing answer from a fully rendered prompt. */
-  answer(prompt: string, opts: { signal: AbortSignal }): Promise<string>;
+  answer(prompt: string, opts: { signal: AbortSignal }): Promise<{ text: string; usage?: LlmUsage }>;
+}
+
+/** AI SDK usage → our shape. Undefined when the provider reported nothing. */
+function toUsage(u: unknown): LlmUsage | undefined {
+  const r = (u ?? {}) as Record<string, unknown>;
+  if (typeof r.inputTokens !== "number") return undefined;
+  const details = r.inputTokenDetails as Record<string, unknown> | undefined;
+  const cached = typeof details?.cacheReadTokens === "number" ? details.cacheReadTokens : typeof r.cachedInputTokens === "number" ? r.cachedInputTokens : undefined;
+  return { input: r.inputTokens, output: typeof r.outputTokens === "number" ? r.outputTokens : 0, ...(cached !== undefined ? { cached } : {}) };
 }
 
 import { generateObject, generateText } from "ai";
@@ -66,23 +82,23 @@ export function createAzureLlmPort(): LlmPort {
       const pendingText = pending.length
         ? `\n\nPending tasks from the previous turn (id · label · query):\n${pending.map((p) => `- ${p.id} · ${p.label} · ${p.query}`).join("\n")}`
         : "";
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model, schema: decomposeSchema, abortSignal: signal, temperature: 0,
         system: DECOMPOSE_SYSTEM,
         prompt: `User message:\n${query}${pendingText}`,
       });
-      return { tasks: object.tasks };
+      return { tasks: object.tasks, usage: toUsage(usage) };
     },
     async detectCity(query, { signal }) {
-      const { object } = await generateObject({
+      const { object, usage } = await generateObject({
         model, schema: citySchema, abortSignal: signal, temperature: 0,
         system: "Extract only the location the user wants to train in. Do not guess a city that is not in the text. Words like 'in meiner Nähe' or 'hier' are NOT a city.",
         prompt: query,
       });
-      return { cityMention: object.cityMention?.trim() || null };
+      return { cityMention: object.cityMention?.trim() || null, usage: toUsage(usage) };
     },
     async reformulate(query, { maxChars, signal }) {
-      const { text } = await generateText({
+      const { text, usage } = await generateText({
         model, abortSignal: signal, temperature: 0.2,
         system: [
           "Du formulierst Nutzerfragen in eine ausführlichere, semantisch reichhaltige Suchanfrage für eine Vektorsuche über Sport-, Gesundheits- und Therapieangebote um.",
@@ -92,11 +108,11 @@ export function createAzureLlmPort(): LlmPort {
         ].join(" "),
         prompt: query,
       });
-      return text.trim();
+      return { text: text.trim(), usage: toUsage(usage) };
     },
     async answer(prompt, { signal }) {
-      const { text } = await generateText({ model, abortSignal: signal, temperature: 0.3, prompt });
-      return text;
+      const { text, usage } = await generateText({ model, abortSignal: signal, temperature: 0.3, prompt });
+      return { text, usage: toUsage(usage) };
     },
   };
 }

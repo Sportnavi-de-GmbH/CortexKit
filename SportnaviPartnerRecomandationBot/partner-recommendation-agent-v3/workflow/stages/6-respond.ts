@@ -51,12 +51,15 @@ export async function respond(input: { query: string; targetCity: string; kept: 
   }
 
   const prompt = buildAnswerPrompt({ query: input.query, targetCity: input.targetCity, partners });
-  const answer = (await ctx.deps.llm.answer(prompt, { signal: signal(ctx.config.modelTimeoutMs) })).trim();
+  const r = await ctx.deps.llm.answer(prompt, { signal: signal(ctx.config.modelTimeoutMs) });
+  const answer = r.text.trim();
 
   return {
     output: { answer, recommendations, profilesGiven: partners.length, model: ctx.deps.llm.modelName },
     config: { modelTimeoutMs: ctx.config.modelTimeoutMs },
     counts: { kept: input.kept.length, profilesFound: profiles.length, recommended: recommendations.length, promptChars: prompt.length },
     warnings,
+    ...(r.usage ? { usage: r.usage } : {}),
+    model: ctx.deps.llm.modelName,
   };
 }

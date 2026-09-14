@@ -16,7 +16,7 @@ describe("fakes", () => {
     expect(e.calls).toEqual(["q"]);
     const l = fakeLlm({ cityMention: "Bochum" });
     expect(await l.detectCity("q", { signal: AbortSignal.timeout(100) })).toEqual({ cityMention: "Bochum" });
-    expect(await l.reformulate("q", { maxChars: 100, signal: AbortSignal.timeout(100) })).toBe("REFORMULATED: q");
+    expect(await l.reformulate("q", { maxChars: 100, signal: AbortSignal.timeout(100) })).toEqual({ text: "REFORMULATED: q" });
     expect(l.calls.map((c) => c.fn)).toEqual(["detectCity", "reformulate"]);
   });
   it("ctx builds a validated config", () => {
