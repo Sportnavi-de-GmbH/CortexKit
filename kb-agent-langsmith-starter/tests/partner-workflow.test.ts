@@ -37,6 +37,24 @@ describe("workflow agent state", () => {
     expect(s.resume).toBeNull();
   });
 
+  it("executed tasks' recommendations ride on metadata.result as the v3-tasks envelope", () => {
+    const card = { logoUrl: null, street: null, postalCode: null, email: null, phone: null, websiteUrl: "https://a.de", mapsUrl: null, tags: [], courses: [] };
+    const rec = { rank: 1, id: 7, name: "A", city: "Dortmund", role: "target" as const, distanceKm: 0, card };
+    const s = applyTrace(applyUserMessage(initialWorkflowState(), "x"), trace({
+      answer: "**A**",
+      tasks: [
+        { task: { id: "t1", label: "Tennis in Dortmund", query: "q", cityMention: null, priority: 1 }, status: "ok", recommendations: [rec] },
+        { task: { id: "t2", label: "Boxen", query: "q", cityMention: null, priority: 2 }, status: "needs_clarification" },
+      ],
+    }));
+    expect(s.messages[1]!.metadata?.result).toEqual({ kind: "v3-tasks", tasks: [{ label: "Tennis in Dortmund", recommendations: [rec] }] });
+  });
+
+  it("no executed tasks ⇒ no result envelope", () => {
+    const s = applyTrace(applyUserMessage(initialWorkflowState(), "x"), trace({ answer: "A" }));
+    expect(s.messages[1]!.metadata?.result).toBeUndefined();
+  });
+
   it("a clarification trace shows the question and keeps pending/deferred for the next turn", () => {
     const pending = [{ id: "p1", label: "Tennis", query: "Tennis", cityMention: null, priority: 1 }];
     const deferred = [{ id: "d1", label: "Yoga in Essen", query: "Yoga in Essen", cityMention: "Essen", priority: 2 }];

@@ -11,6 +11,7 @@
 // them back as `resume` on the next request.
 
 import type { EveMessage } from "eve/react";
+import { V3_RESULT_KIND, type V3Recommendation, type V3Task } from "./v3-answer";
 
 export interface WorkflowTaskLite {
   id: string;
@@ -25,6 +26,13 @@ export interface WorkflowResume {
   deferred: WorkflowTaskLite[];
 }
 
+/** One executed task of the trace — only what the cards need. */
+export interface WorkflowTaskRunLite {
+  task: WorkflowTaskLite;
+  status: "ok" | "needs_clarification" | "failed";
+  recommendations?: V3Recommendation[];
+}
+
 /** The subset of V3's WorkflowTrace the widget consumes. */
 export interface WorkflowTraceLite {
   runId: string;
@@ -34,6 +42,7 @@ export interface WorkflowTraceLite {
   error?: { message: string };
   pending: WorkflowTaskLite[];
   deferred: WorkflowTaskLite[];
+  tasks?: WorkflowTaskRunLite[];
 }
 
 export interface WorkflowAgentState {
@@ -78,11 +87,16 @@ export function applyTrace(s: WorkflowAgentState, trace: WorkflowTraceLite): Wor
     const message = trace.error?.message ?? "Die Partnersuche ist gerade nicht erreichbar.";
     return { ...s, messages: markLastUserFailed(s.messages), error: new Error(message) };
   }
+  // Structured partner facts ride on eve's `metadata.result` slot (the harness
+  // "structured result" of a turn), so the widget's message type is unchanged.
+  const tasks: V3Task[] = (trace.tasks ?? [])
+    .filter((t) => t.status === "ok" && Array.isArray(t.recommendations))
+    .map((t) => ({ label: t.task.label, recommendations: t.recommendations ?? [] }));
   const reply: EveMessage = {
     id: `a-${trace.runId}`,
     role: "assistant",
     parts: [{ type: "text", text, state: "done" }],
-    metadata: { status: "complete", turnId: turnId(s.turn) },
+    metadata: { status: "complete", turnId: turnId(s.turn), ...(tasks.length ? { result: { kind: V3_RESULT_KIND, tasks } } : {}) },
   };
   const hasCarry = trace.pending.length > 0 || trace.deferred.length > 0;
   return {
