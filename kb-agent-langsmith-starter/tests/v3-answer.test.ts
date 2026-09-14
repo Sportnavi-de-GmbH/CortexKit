@@ -132,3 +132,19 @@ describe("card helpers", () => {
     expect(formatAddress(null, "45359", rec)).toBeNull();
   });
 });
+
+describe("contact de-duplication in carded items", () => {
+  const L = (...lines: string[]) => lines.join(String.fromCharCode(10));
+  const one = (reason: string) => parseV3Answer(L("**Intro**", "", "**1. A — X**  ", reason), [{ label: "L", recommendations: [rec(1, "A")] }])![0]!.items[0]!.reason;
+
+  it("drops a trailing inline contact run after a finished sentence", () => {
+    expect(one("Gute Option, wenn Du bereit bist, etwas weiter zu fahren. [Website](https://a.de) | Telefon: +4923 | E-Mail: a@b.de")).toBe("Gute Option, wenn Du bereit bist, etwas weiter zu fahren.");
+    expect(one("Tolle Kurse. Telefon: +4923, E-Mail: a@b.de")).toBe("Tolle Kurse.");
+    expect(one("Tolle Kurse. Website: https://a.de")).toBe("Tolle Kurse.");
+  });
+
+  it("keeps a sentence that merely mentions a website mid-sentence", () => {
+    expect(one("Weitere Informationen findest Du auf ihrer [Website](https://a.de).")).toBe("Weitere Informationen findest Du auf ihrer [Website](https://a.de).");
+    expect(one("Auf der Website gibt es einen Kursplan.")).toBe("Auf der Website gibt es einen Kursplan.");
+  });
+});

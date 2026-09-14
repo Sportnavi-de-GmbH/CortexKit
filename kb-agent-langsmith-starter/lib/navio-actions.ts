@@ -38,15 +38,20 @@ export type NavioSurface = "faq" | "partner";
  * Chips that appear under EVERY answer on a screen, whether the agent remembered
  * them or not.
  *
- * Both entries are product requirements — sportnavi.de/ueber-uns must always be one
+ * These are product requirements — sportnavi.de/ueber-uns must always be one
  * click away, and the partner screen must always offer the full studio search — and
  * a prompt rule alone cannot deliver "always": a model skips an instruction now and
  * then, and the miss is invisible. So the prompts ask for them and this guarantees
  * them.
+ *
+ * The partner screen guarantees its WHOLE row, in a fixed order: the V3 workflow
+ * agent that answers there emits no markers at all, and the row must read the
+ * same under every answer as it does under a FAQ answer (hand-off to the FAQ
+ * agent, studio search, the two human contacts, about).
  */
 export const ALWAYS_ACTIONS: Record<NavioSurface, readonly NavioActionId[]> = {
   faq: ["about"],
-  partner: ["studios", "about"],
+  partner: ["faq-agent", "studios", "contact", "meeting", "about"],
 };
 
 /**
@@ -63,8 +68,13 @@ const MARKER = /\[\[(action|notice):([a-z0-9_-]+)\]\]/gi;
  */
 const PARTIAL_MARKER = /\[\[[^\]\n]*$/;
 
-/** Ceiling on the whole row — past four the chips wrap badly in a 380px panel. */
-const MAX_ACTIONS = 4;
+/**
+ * Ceiling on the whole row. Five, so the FAQ agent's usual four (partner,
+ * contact, meeting, faq) all survive next to the guaranteed `about` — at four,
+ * `faq` was silently dropped. The row wraps to a second line in the 380px panel;
+ * that is by design (MessageActions uses flex-wrap).
+ */
+const MAX_ACTIONS = 5;
 
 export interface ParsedMessage {
   /** The reply with every marker removed, ready for the markdown renderer. */

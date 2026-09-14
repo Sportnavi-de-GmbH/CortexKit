@@ -14,8 +14,9 @@
 // `[[notice:data]]` when it has named partners), never WHAT it says. A caveat that
 // the model rewrites each turn is a caveat that can be softened away.
 //
-// The text is German because the whole widget chrome is — headers, menu cards and
-// the chips all are. Only the agent's own prose follows the visitor's language.
+// Bilingual, German first and English subordinate — the same two-level pattern
+// the chat intro uses (§4 of the design guidelines): the widget is embedded on a
+// German site, but the visitor may be reading the agent's answer in English.
 
 import { AlertTriangle } from "lucide-react";
 
@@ -39,12 +40,19 @@ export function DataNotice() {
         className="mt-0.5 shrink-0"
         style={{ color: "var(--warn-icon)" }}
       />
-      <p>
-        <strong className="font-semibold">Hinweis:</strong> Informationen können gelegentlich
-        veraltet oder noch nicht aktualisiert sein. Wir bemühen uns, unsere Daten stets aktuell zu
-        halten, aber kleine Abweichungen können vorkommen. Für die aktuellsten Informationen
-        empfehlen wir, das Studio direkt zu kontaktieren.
-      </p>
+      <div>
+        <p lang="de">
+          <strong className="font-semibold">Hinweis:</strong> Informationen können gelegentlich
+          veraltet oder noch nicht aktualisiert sein. Wir bemühen uns, unsere Daten stets aktuell zu
+          halten, aber kleine Abweichungen können vorkommen. Für die aktuellsten Informationen
+          empfehlen wir, das Studio direkt zu kontaktieren.
+        </p>
+        <p lang="en" className="mt-1.5 text-[12px] leading-[1.5] opacity-85">
+          <strong className="font-semibold">Note:</strong> Information may occasionally be outdated
+          or not yet updated. We do our best to keep our data current, but small discrepancies can
+          occur. For the latest details, we recommend contacting the studio directly.
+        </p>
+      </div>
     </div>
   );
 }

@@ -109,48 +109,46 @@ describe("the chips that are always there", () => {
     ]);
   });
 
-  it("adds both partner-screen chips when the agent forgot them", () => {
-    expect(resolveActions(["faq-agent", "contact"], "partner")).toEqual([
-      "faq-agent",
-      "contact",
-      "studios",
-      "about",
-    ]);
+  // The partner screen's whole row is guaranteed (the V3 workflow agent emits
+  // no markers at all), in a fixed order, so it reads the same under every
+  // answer: FAQ-Agent · Studios durchsuchen · Kontaktformular · Termin buchen · Über uns.
+  const PARTNER_ROW = ["faq-agent", "studios", "contact", "meeting", "about"];
+
+  it("shows the full partner row whatever the agent asked for", () => {
+    expect(resolveActions([], "partner")).toEqual(PARTNER_ROW);
+    expect(resolveActions(["faq-agent", "contact"], "partner")).toEqual(PARTNER_ROW);
+    expect(resolveActions(["studios", "contact"], "partner")).toEqual(PARTNER_ROW);
+    expect(resolveActions(["faq", "meeting"], "partner")).toEqual(PARTNER_ROW);
   });
 
-  it("shows them even on an answer that asked for nothing", () => {
+  it("shows the about chip even on a FAQ answer that asked for nothing", () => {
     expect(resolveActions([], "faq")).toEqual(["about"]);
-    expect(resolveActions([], "partner")).toEqual(["studios", "about"]);
   });
 
-  it("does not duplicate one the agent did emit, and keeps it in its fixed slot", () => {
-    // Guaranteed chips always trail, wherever the agent put them, so the row ends
-    // the same way on every answer instead of shuffling under the reader.
-    expect(resolveActions(["studios", "contact"], "partner")).toEqual([
+  it("the FAQ agent's usual four requested chips all survive next to the guaranteed one", () => {
+    // Before the cap was raised to 5, `faq` was silently dropped here.
+    expect(resolveActions(["partner", "contact", "meeting", "faq"], "faq")).toEqual([
+      "partner",
       "contact",
-      "studios",
+      "meeting",
+      "faq",
       "about",
     ]);
-  });
-
-  it("keeps the agent's most relevant step leftmost", () => {
-    expect(resolveActions(["faq-agent", "contact", "meeting"], "partner")[0]).toBe("faq-agent");
   });
 
   it("reserves room first, so a chatty answer cannot push a guaranteed chip off", () => {
-    // Four requested chips on the partner screen, which already owes two of its own.
     const { actions } = parseMessageActions(
-      "x\n\n[[action:faq-agent]] [[action:contact]] [[action:meeting]] [[action:faq]]",
+      "x\n\n[[action:partner]] [[action:faq-agent]] [[action:contact]] [[action:meeting]] [[action:faq]] [[action:studios]]",
     );
-    const resolved = resolveActions(actions, "partner");
-    expect(resolved.length).toBeLessThanOrEqual(4);
-    for (const id of ALWAYS_ACTIONS.partner) expect(resolved).toContain(id);
+    const resolved = resolveActions(actions, "faq");
+    expect(resolved.length).toBeLessThanOrEqual(5);
+    expect(resolved.at(-1)).toBe("about");
   });
 
   it("never exceeds the row cap on either surface", () => {
     for (const surface of ["faq", "partner"] as const) {
       const resolved = resolveActions([...NAVIO_ACTION_IDS], surface);
-      expect(resolved.length).toBeLessThanOrEqual(4);
+      expect(resolved.length).toBeLessThanOrEqual(5);
       expect(new Set(resolved).size).toBe(resolved.length);
       for (const id of ALWAYS_ACTIONS[surface]) expect(resolved).toContain(id);
     }

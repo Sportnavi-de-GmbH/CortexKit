@@ -124,6 +124,22 @@ function parseItemLine(line: string): ItemLine | null {
   return plain ? { rank: Number(plain[1]), heading: plain[2]!.trim(), rest: "" } : null;
 }
 const CONTACT_LINE_RE = /^\**_*\s*Kontakt\s*:/i;
+/**
+ * A contact run the model appends to a sentence — "… zu fahren. [Website](…) |
+ * Telefon: … | E-Mail: …" or "… Kurse. Website: https://…". It starts at the
+ * first contact keyword that follows a sentence end (or a "|" separator) and
+ * runs to the end of the line. A keyword inside a sentence ("Auf der Website
+ * gibt es …", "… auf ihrer [Website](…).") is not a run and stays.
+ */
+const CONTACT_TAIL_RE =
+  /(?:(?<=[.!?:])\s+|\s*\|\s*)(?:\**\s*)?(?:\[Website\]\([^)]*\)|Website\s*:|Webseite\s*:|Telefon\s*:|Tel\.?\s*:|E-?Mail\s*:|Kontakt\s*:)[^\n]*$/i;
+
+/** Strip the contact facts a carded item shows as chips anyway. */
+function stripContact(line: string): string | null {
+  if (CONTACT_LINE_RE.test(line)) return null;
+  const cut = line.replace(CONTACT_TAIL_RE, "").trim();
+  return cut || null;
+}
 
 /** Paragraphs (blank-line separated), each as its trimmed lines. */
 function paragraphs(text: string): string[][] {
@@ -191,7 +207,7 @@ export function parseV3Answer(text: string, tasks: V3Task[]): V3Section[] | null
       // The prompt asks the model to mention contact details in prose; with a
       // card, the same phone/e-mail/website are action chips right below, so
       // the "Kontakt: …" line would be printed twice. Text-only items keep it.
-      const reason = (recommendation ? lines.filter((l) => !CONTACT_LINE_RE.test(l)) : lines).join("\n");
+      const reason = (recommendation ? lines.map(stripContact).filter((l): l is string => l !== null) : lines).join("\n");
       current.items.push({ rank, heading, reason, recommendation });
       itemLines = null;
       itemHead = null;
