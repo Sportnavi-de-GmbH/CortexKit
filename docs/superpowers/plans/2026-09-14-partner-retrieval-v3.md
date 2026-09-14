@@ -1271,7 +1271,7 @@ export async function search(
 ```ts
 import { describe, expect, it } from "vitest";
 import { combineAndDedupe, locationTerm, rerank } from "../workflow/stages/5-rerank";
-import { ctx, ruhrWorld } from "./_fakes";
+import { ctx, QUERY_VECTOR, ruhrWorld } from "./_fakes";
 import type { Candidate } from "../workflow/types";
 
 const cand = (id: number, city: string, role: "target" | "nearby", distanceKm: number, similarity = 0.5, rankInCity = 0): Candidate =>
@@ -1299,7 +1299,7 @@ describe("stage 5 — rerank", () => {
     // A 0.78 Dortmund · B 0.65 Dortmund · C 0.86 Bochum 18 km · D 0.81 Lünen 15 km · E 0.72 Hagen 20 km
     const backend = ruhrWorld({ relevance: { 101: 0.78, 102: 0.65, 201: 0.86, 301: 0.81, 501: 0.72 } });
     const candidates = [cand(101, "Dortmund", "target", 0), cand(102, "Dortmund", "target", 0), cand(201, "Bochum", "nearby", 18), cand(301, "Lünen", "nearby", 15), cand(501, "Hagen", "nearby", 20)];
-    const r = await rerank({ candidates, queryEmbedding: [1] }, ctx({ searchRadiusKm: 30, topKReranked: 5 }, { backend }));
+    const r = await rerank({ candidates, queryEmbedding: QUERY_VECTOR }, ctx({ searchRadiusKm: 30, topKReranked: 5 }, { backend }));
     expect(r.output.kept.map((k) => k.id)).toEqual([101, 201, 301, 102, 501]);
     expect(r.output.kept[0]).toMatchObject({ rank: 1, finalScore: 0.83, relevanceSource: "embedding" });
     expect(r.output.kept[1]?.finalScore).toBeCloseTo(0.83, 3); // 0.86 − 0.03 — ties broken target-first
@@ -1308,7 +1308,7 @@ describe("stage 5 — rerank", () => {
 
   it("drops nearby candidates below minNearbyRelevance but never target ones; cut rows stay in the table", async () => {
     const backend = ruhrWorld({ relevance: { 101: 0.05, 201: 0.05, 202: 0.9 } });
-    const r = await rerank({ candidates: [cand(101, "Dortmund", "target", 0), cand(201, "Bochum", "nearby", 17), cand(202, "Bochum", "nearby", 17, 0.5, 1)], queryEmbedding: [1] }, ctx({ minNearbyRelevance: 0.15, topKReranked: 1 }, { backend }));
+    const r = await rerank({ candidates: [cand(101, "Dortmund", "target", 0), cand(201, "Bochum", "nearby", 17), cand(202, "Bochum", "nearby", 17, 0.5, 1)], queryEmbedding: QUERY_VECTOR }, ctx({ minNearbyRelevance: 0.15, topKReranked: 1 }, { backend }));
     expect(r.output.kept.map((k) => k.id)).toEqual([202]);
     const rows = Object.fromEntries(r.output.rows.map((x) => [x.id, x]));
     expect(rows[201]).toMatchObject({ kept: false, dropReason: expect.stringContaining("minNearbyRelevance"), rank: null });
@@ -1319,14 +1319,14 @@ describe("stage 5 — rerank", () => {
   it("falls back to the directory similarity when a stored embedding is missing", async () => {
     const backend = ruhrWorld();
     backend.getPartnerEmbeddings = async () => [];
-    const r = await rerank({ candidates: [cand(101, "Dortmund", "target", 0, 0.42)], queryEmbedding: [1] }, ctx({}, { backend }));
+    const r = await rerank({ candidates: [cand(101, "Dortmund", "target", 0, 0.42)], queryEmbedding: QUERY_VECTOR }, ctx({}, { backend }));
     expect(r.output.rows[0]).toMatchObject({ relevance: 0.42, relevanceSource: "similarity", finalScore: 0.47 });
     expect(r.warnings?.[0]).toMatch(/embedding/);
   });
 
   it("is deterministic on ties: target first, nearer, in-city rank, id", async () => {
     const backend = ruhrWorld({ relevance: { 301: 0.5, 401: 0.5, 501: 0.5 } });
-    const r = await rerank({ candidates: [cand(501, "Hagen", "nearby", 10, 0.5, 0), cand(401, "X", "nearby", 10, 0.5, 1), cand(301, "Y", "nearby", 10, 0.5, 0)], queryEmbedding: [1] }, ctx({}, { backend }));
+    const r = await rerank({ candidates: [cand(501, "Hagen", "nearby", 10, 0.5, 0), cand(401, "X", "nearby", 10, 0.5, 1), cand(301, "Y", "nearby", 10, 0.5, 0)], queryEmbedding: QUERY_VECTOR }, ctx({}, { backend }));
     expect(r.output.kept.map((k) => k.id)).toEqual([301, 501, 401]);
   });
 });
