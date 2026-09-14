@@ -27,7 +27,7 @@ export async function captureWorkflow(
     const common = {
       sessionId,
       turnId,
-      turnIndex: Number(turnId.replace("turn_", "")) || undefined,
+      turnIndex: /^turn_\d+$/.test(turnId) ? Number(turnId.slice(5)) : undefined,
       origin: o.origin,
       agentVersion: agentVersion(),
       environment: monitoringEnvironment(),

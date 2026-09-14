@@ -84,7 +84,11 @@ export function readUsage(usage: unknown): { input: number; output: number; cach
 }
 
 const iso = (ms: number | undefined) => (ms === undefined ? undefined : new Date(ms).toISOString());
-const turnIndex = (turnId: string | undefined) => (turnId ? Number(turnId.replace("turn_", "")) || undefined : undefined);
+/** eve numbers turns from `turn_0`, so zero is a real index — never `|| undefined` it away. */
+const turnIndex = (turnId: string | undefined): number | undefined => {
+  const m = turnId?.match(/^turn_(\d+)$/);
+  return m ? Number(m[1]) : undefined;
+};
 
 function base(s: FaqTurnState, env: FaqMapperEnv): TraceDraft["trace"] {
   return {
