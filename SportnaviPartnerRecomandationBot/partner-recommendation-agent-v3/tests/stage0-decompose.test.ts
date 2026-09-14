@@ -120,7 +120,8 @@ describe("stage 0 — decompose", () => {
     );
     expect(r.output.tasks.map((t) => t.id)).toEqual(["d1", "d2", expect.any(String)]);
     expect(r.output.runnable.map((t) => t.id)).toEqual(["d1", "d2"]);
-    expect(r.output.deferred.map((t) => t.query)).toEqual(["Yoga in Bochum"]);
+    // one fresh task that is not a merged pending task ⇒ single-intent rule keeps the user's text
+    expect(r.output.deferred.map((t) => t.query)).toEqual(["Und Yoga in Bochum bitte"]);
     expect(r.output.tasks.some((t) => t.id === "p1")).toBe(false);
     expect(r.output.fresh).toHaveLength(1);
     expect(r.counts).toMatchObject({ fresh: 1, carried: 2, runnable: 2, deferred: 1 });
