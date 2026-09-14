@@ -18,7 +18,8 @@ export const ABOUT_URL = "https://www.sportnavi.de/ueber-uns/";
 /** The full studio directory — the Partner screen always offers it as a chip. */
 export const STUDIOS_URL = "https://www.sportnavi.de/studios/";
 
-export type SiteLink = { label: string; href: string };
+/** `en` is omitted when the English label would be identical (e.g. "Studios"). */
+export type SiteLink = { label: string; en?: string; href: string };
 
 /**
  * Deep links shown at the bottom of the menu. These LEAVE the widget, so they open
@@ -26,9 +27,9 @@ export type SiteLink = { label: string; href: string };
  * replace the chat rather than the host page.
  */
 export const SITE_LINKS: SiteLink[] = [
-  { label: "FAQ / Hilfe", href: FAQ_URL },
+  { label: "FAQ / Hilfe", en: "FAQ / Help", href: FAQ_URL },
   { label: "Studios", href: STUDIOS_URL },
-  { label: "Kontakt", href: "https://www.sportnavi.de/kontakt/" },
-  { label: "Über uns", href: ABOUT_URL },
-  { label: "Datenschutz", href: PRIVACY_URL },
+  { label: "Kontakt", en: "Contact", href: "https://www.sportnavi.de/kontakt/" },
+  { label: "Über uns", en: "About us", href: ABOUT_URL },
+  { label: "Datenschutz", en: "Privacy", href: PRIVACY_URL },
 ];

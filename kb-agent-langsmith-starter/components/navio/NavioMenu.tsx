@@ -9,6 +9,12 @@
 // primary vs secondary in LAYOUT rather than in colour alone, it stops the menu
 // reading as four near-identical boxes, and it is what makes all four options fit
 // the 380x560 panel without scrolling.
+//
+// Every label is bilingual, German first and English subordinate — the same
+// two-level pattern the chat intro and the info panel use ("Über Navio Plus" /
+// "About Navio Plus"): the widget is embedded on a German site, but many
+// visitors read English. Compact labels (tier headings, link chips) join both
+// with " · ", the way the footer's "Datenschutz · Privacy Policy" already does.
 
 import { ArrowUpRight, ChevronRight, Bot, Calendar, Mail, MapPin } from "lucide-react";
 import { SITE_LINKS } from "./links";
@@ -77,17 +83,22 @@ function Rail({ accent }: { accent: Accent }) {
   );
 }
 
-/** Primary option: full row — icon, title, two-line description, chevron. */
+/** Primary option: full row — icon, title, description (DE + EN), chevron. */
 function PrimaryRow({
   icon,
   title,
+  titleEn,
   body,
+  bodyEn,
   accent,
   onClick,
 }: {
   icon: React.ReactNode;
   title: string;
+  /** Omit when identical to `title`. */
+  titleEn?: string;
   body: string;
+  bodyEn: string;
   accent: Accent;
   onClick: () => void;
 }) {
@@ -107,10 +118,17 @@ function PrimaryRow({
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block font-headline text-[15px] font-semibold leading-tight text-(--fg)">
+        <span className="block font-headline text-[15px] font-semibold leading-tight text-(--fg)" lang="de">
           {title}
+          {titleEn && (
+            <span className="ml-1.5 text-[12px] font-medium text-(--fg-subtle)" lang="en">
+              <span aria-hidden="true">·&nbsp;</span>
+              {titleEn}
+            </span>
+          )}
         </span>
-        <span className="mt-1 block text-[13px] leading-snug text-(--fg-muted)">{body}</span>
+        <span className="mt-1 block text-[13px] leading-snug text-(--fg-muted)" lang="de">{body}</span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-(--fg-subtle)" lang="en">{bodyEn}</span>
       </span>
       <span
         className={`hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--surface-muted) text-(--fg-subtle) transition-colors duration-200 min-[360px]:flex ${a.chevron}`}
@@ -122,15 +140,17 @@ function PrimaryRow({
   );
 }
 
-/** Secondary option: compact tile — icon over label, no description. */
+/** Secondary option: compact tile — icon over label (DE, EN beneath), no description. */
 function SecondaryTile({
   icon,
   title,
+  titleEn,
   accent,
   onClick,
 }: {
   icon: React.ReactNode;
   title: string;
+  titleEn: string;
   accent: Accent;
   onClick: () => void;
 }) {
@@ -149,17 +169,24 @@ function SecondaryTile({
       >
         {icon}
       </span>
-      <span className="font-headline text-[13px] font-semibold leading-tight text-(--fg)">
+      <span className="font-headline text-[13px] font-semibold leading-tight text-(--fg)" lang="de">
         {title}
+      </span>
+      <span className="-mt-1 text-[11px] leading-tight text-(--fg-subtle)" lang="en">
+        {titleEn}
       </span>
     </button>
   );
 }
 
-function TierLabel({ children }: { children: React.ReactNode }) {
+function TierLabel({ de, en }: { de: string; en: string }) {
   return (
     <h2 className="px-1 text-[11px] font-semibold tracking-[0.14em] text-(--fg-subtle) uppercase">
-      {children}
+      <span lang="de">{de}</span>
+      <span aria-hidden="true"> · </span>
+      <span lang="en" className="font-medium opacity-80">
+        {en}
+      </span>
     </h2>
   );
 }
@@ -178,29 +205,35 @@ export function NavioMenu({
   onSelectMeeting?: () => void;
 }) {
   return (
-    <nav aria-label="Navio Plus Hauptmenü" className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
+    <nav aria-label="Navio Plus Hauptmenü · main menu" className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
       {/* Readable measure. The widget is 380px in its desktop iframe, but launcher.js
           switches to a full-screen iframe under 480px — including landscape phones,
           where an unconstrained list would stretch to 740px+ per row. */}
       <div className="mx-auto w-full max-w-[420px]">
-        <h1 className="px-1 font-headline text-xl font-semibold leading-tight tracking-[-0.01em] text-(--fg)">
+        <h1 className="px-1 font-headline text-xl font-semibold leading-tight tracking-[-0.01em] text-(--fg)" lang="de">
           Wie können wir dir helfen?
         </h1>
+        <p className="mt-0.5 px-1 text-[13px] leading-snug text-(--fg-subtle)" lang="en">
+          How can we help you?
+        </p>
 
         <div className="mt-5">
-          <TierLabel>Mit Navio chatten</TierLabel>
+          <TierLabel de="Mit Navio chatten" en="Chat with Navio" />
           <div className="mt-2 flex flex-col gap-2">
             <PrimaryRow
               icon={<Bot size={22} strokeWidth={1.75} />}
               title="FAQ-Agent"
               body="Fragen zu Tarifen, Check-in & Co. – sofort beantwortet."
+              bodyEn="Questions about plans, check-in & more — answered instantly."
               accent="green"
               onClick={onSelectFaq}
             />
             <PrimaryRow
               icon={<MapPin size={22} strokeWidth={1.75} />}
               title="Partner finden"
+              titleEn="Find partners"
               body="Studios & Kurse in deiner Nähe – sag Stadt und Sportart."
+              bodyEn="Studios & classes near you — just name a city and a sport."
               accent="green"
               onClick={onSelectPartner}
             />
@@ -208,11 +241,12 @@ export function NavioMenu({
         </div>
 
         <div className="mt-5">
-          <TierLabel>Direkter Kontakt</TierLabel>
+          <TierLabel de="Direkter Kontakt" en="Direct contact" />
           <div className={`mt-2 grid gap-2 ${onSelectMeeting ? "grid-cols-2" : "grid-cols-1"}`}>
             <SecondaryTile
               icon={<Mail size={20} strokeWidth={1.75} />}
               title="Kontaktformular"
+              titleEn="Contact form"
               accent="orange"
               onClick={onSelectContact}
             />
@@ -220,6 +254,7 @@ export function NavioMenu({
               <SecondaryTile
                 icon={<Calendar size={20} strokeWidth={1.75} />}
                 title="Termin buchen"
+                titleEn="Book a meeting"
                 accent="orange"
                 onClick={onSelectMeeting}
               />
@@ -228,7 +263,7 @@ export function NavioMenu({
         </div>
 
         <div className="mt-6 border-t border-(--border) pt-4">
-          <TierLabel>Mehr auf sportnavi.de</TierLabel>
+          <TierLabel de="Mehr auf sportnavi.de" en="More on sportnavi.de" />
           <ul className="mt-2.5 flex flex-wrap gap-2">
             {SITE_LINKS.map((link) => (
               <li key={link.href}>
@@ -238,9 +273,15 @@ export function NavioMenu({
                   rel="noreferrer"
                   className="inline-flex min-h-[32px] items-center gap-1 rounded-full border border-(--border) bg-(--surface) px-3 py-1.5 text-[13px] font-medium text-(--fg-muted) transition-colors hover:border-(--fg)/25 hover:bg-(--surface-muted) hover:text-(--fg) focus-visible:outline-2 focus-visible:outline-offset-2"
                 >
-                  {link.label}
+                  <span lang="de">{link.label}</span>
+                  {link.en && (
+                    <span lang="en" className="font-normal text-(--fg-subtle)">
+                      <span aria-hidden="true">· </span>
+                      {link.en}
+                    </span>
+                  )}
                   <ArrowUpRight size={13} strokeWidth={2} className="text-(--fg-subtle)" aria-hidden="true" />
-                  <span className="sr-only">(öffnet in neuem Tab)</span>
+                  <span className="sr-only">(öffnet in neuem Tab · opens in a new tab)</span>
                 </a>
               </li>
             ))}
