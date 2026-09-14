@@ -13,12 +13,14 @@ export function PerDayBars({ perDay }: { perDay: Stats["per_day"] }) {
   const max = Math.max(...days.map(([, d]) => d.faq + d.partner), 1);
   return (
     <div>
-      <div className="flex h-40 items-end gap-2 overflow-x-auto">
+      <div className="flex h-40 items-stretch gap-2 overflow-x-auto">
         {days.map(([day, d]) => {
           const total = d.faq + d.partner;
           return (
-            <div key={day} className="flex min-w-8 flex-1 flex-col items-center gap-1" title={`${day}: ${d.faq} FAQ · ${d.partner} Partner`}>
-              <div className="flex w-full flex-col justify-end" style={{ height: `${(total / max) * 100}%` }}>
+            // The column stretches to the row's fixed height, so the percentage
+            // height of the bar wrapper below resolves against a definite size.
+            <div key={day} className="flex min-w-8 flex-1 flex-col items-center justify-end gap-1" title={`${day}: ${d.faq} FAQ · ${d.partner} Partner`}>
+              <div className="flex w-full flex-col justify-end" style={{ height: `${Math.max(2, (total / max) * 100)}%` }}>
                 <div className="w-full rounded-t-md bg-(--brand-orange)" style={{ height: `${total ? (d.partner / total) * 100 : 0}%` }} />
                 <div className="w-full rounded-b-md bg-(--brand-green)" style={{ height: `${total ? (d.faq / total) * 100 : 0}%` }} />
               </div>

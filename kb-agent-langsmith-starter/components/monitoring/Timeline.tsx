@@ -70,7 +70,7 @@ export function Timeline({ steps, totalMs }: { steps: StepNode[]; totalMs: numbe
             <li key={`lanes-${i}`} className="relative">
               <span className="absolute -left-[23px] top-4 h-3 w-3 rounded-full border-2 border-(--surface) bg-(--brand-orange)" />
               <div className="mb-1 text-xs text-(--fg-subtle)">{row.groups.length} task{row.groups.length > 1 ? "s ran in parallel" : ""}</div>
-              <div className={`grid gap-3 ${row.groups.length > 1 ? "md:grid-cols-2 xl:grid-cols-3" : ""}`}>
+              <div className={`grid grid-cols-1 gap-3 ${row.groups.length > 1 ? "md:grid-cols-2 xl:grid-cols-3" : ""}`}>
                 {row.groups.map((g) => (
                   <StepCard key={g.id} {...cardProps} step={g} depth={0} open={true} focused={focusedId === g.id} />
                 ))}

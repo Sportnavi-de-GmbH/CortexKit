@@ -34,13 +34,14 @@ export default async function TracePage({ params }: { params: Promise<{ id: stri
           </span>
         </div>
       </header>
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+      {/* grid-cols-1 = minmax(0,1fr): without it the implicit auto track takes the cards' min-content width (measured 917 px at a 400 px viewport). */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0 space-y-5">
           <section className="rounded-2xl border border-(--border) bg-(--surface) p-4">
             <h2 className="font-display text-xs font-semibold uppercase tracking-wide text-(--fg-subtle)">What the user asked</h2>
-            <p className="mt-1 whitespace-pre-wrap text-sm">{trace.user_input}</p>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm">{trace.user_input}</p>
             <h2 className="mt-4 font-display text-xs font-semibold uppercase tracking-wide text-(--fg-subtle)">What Navio answered</h2>
-            <p className="mt-1 whitespace-pre-wrap text-sm">
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {trace.final_output || <span className="text-(--fg-subtle)">(no answer)</span>}
             </p>
           </section>

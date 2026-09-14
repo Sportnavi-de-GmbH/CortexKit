@@ -39,12 +39,12 @@ export default async function OverviewPage({
         </p>
       )}
       {stats && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <section className="rounded-2xl border border-(--border) bg-(--surface) p-4 lg:col-span-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <section className="min-w-0 rounded-2xl border border-(--border) bg-(--surface) p-4 lg:col-span-2">
             <h2 className="mb-3 font-display text-sm font-semibold">Executions per day</h2>
             <PerDayBars perDay={stats.per_day} />
           </section>
-          <section className="rounded-2xl border border-(--border) bg-(--surface) p-4">
+          <section className="min-w-0 rounded-2xl border border-(--border) bg-(--surface) p-4">
             <h2 className="mb-3 font-display text-sm font-semibold">Latest errors</h2>
             {stats.latest_errors.length === 0 ? (
               <p className="text-sm text-(--fg-subtle)">None in this range.</p>
@@ -57,7 +57,7 @@ export default async function OverviewPage({
                         <AgentBadge agent={e.agent} />
                         {fmtTime(e.created_at)} · {e.type}
                       </div>
-                      <div className={`truncate ${e.level === "error" ? "text-(--red)" : "text-(--warn-fg)"}`}>{e.message}</div>
+                      <div className={`line-clamp-2 break-words ${e.level === "error" ? "text-(--red)" : "text-(--warn-fg)"}`}>{e.message}</div>
                     </Link>
                   </li>
                 ))}

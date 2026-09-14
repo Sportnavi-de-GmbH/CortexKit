@@ -31,7 +31,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
               {t.user_input || <span className="opacity-60">(empty)</span>}
             </div>
             <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-(--surface-muted) px-4 py-2 text-sm">
-              <p className="whitespace-pre-wrap">{t.final_output || <span className="text-(--fg-subtle)">(no answer)</span>}</p>
+              <p className="whitespace-pre-wrap break-words">{t.final_output || <span className="text-(--fg-subtle)">(no answer)</span>}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-(--fg-subtle)">
                 <StatusPill status={t.status} abandoned={traceIsAbandoned(t)} />
                 <span>{fmtMs(t.duration_ms)}</span>
