@@ -16,8 +16,8 @@ import type {
   SupabasePartnerRow,
   SupabaseResolvedCityRow,
 } from "../lib/reused/supabase";
-import type { LlmPort } from "../lib/llm-port";
-import type { StageContext, WorkflowDeps } from "../workflow/types";
+import type { LlmPort, RawTask } from "../lib/llm-port";
+import type { StageContext, Task, WorkflowDeps } from "../workflow/types";
 import { resolveConfig, type WorkflowConfig } from "../config/workflow.config";
 
 export interface RecordedCall {
@@ -194,23 +194,35 @@ export interface FakeLlmOptions {
   cityMention?: string | null | ((query: string) => string | null);
   reformulated?: string | ((query: string) => string);
   answer?: string | ((prompt: string) => string);
+  /** Stage 0 result. Default: one task = the whole query, cityMention per `cityMention`. */
+  decompose?: RawTask[] | ((query: string, pending: Task[]) => RawTask[]);
   failDetect?: Error;
   failReformulate?: Error;
   failAnswer?: Error;
+  failDecompose?: Error;
 }
 export interface FakeLlm extends LlmPort {
-  calls: Array<{ fn: "detectCity" | "reformulate" | "answer"; arg: string }>;
+  calls: Array<{ fn: "decompose" | "detectCity" | "reformulate" | "answer"; arg: string }>;
 }
 export function fakeLlm(o: FakeLlmOptions = {}): FakeLlm {
   const calls: FakeLlm["calls"] = [];
+  const mention = (query: string): string | null => {
+    const m = typeof o.cityMention === "function" ? o.cityMention(query) : o.cityMention;
+    return m === undefined ? null : m;
+  };
   return {
     modelName: "fake-model",
     calls,
+    async decompose(query, { pending }) {
+      calls.push({ fn: "decompose", arg: query });
+      if (o.failDecompose) throw o.failDecompose;
+      if (o.decompose === undefined) return { tasks: [{ label: query.slice(0, 40), query, cityMention: mention(query), priority: 1, resolvesPending: null }] };
+      return { tasks: typeof o.decompose === "function" ? o.decompose(query, pending) : o.decompose };
+    },
     async detectCity(query) {
       calls.push({ fn: "detectCity", arg: query });
       if (o.failDetect) throw o.failDetect;
-      const m = typeof o.cityMention === "function" ? o.cityMention(query) : o.cityMention;
-      return { cityMention: m === undefined ? null : m };
+      return { cityMention: mention(query) };
     },
     async reformulate(query) {
       calls.push({ fn: "reformulate", arg: query });
@@ -233,4 +245,9 @@ export function deps(over: Partial<WorkflowDeps> = {}): WorkflowDeps {
 
 export function ctx(config: Partial<WorkflowConfig> = {}, d: Partial<WorkflowDeps> = {}): StageContext {
   return { config: resolveConfig(config, {} as NodeJS.ProcessEnv), deps: deps(d), signal: AbortSignal.timeout(5000) };
+}
+
+/** A RawTask with sensible defaults for stage-0 tests. */
+export function rawTask(p: Pick<RawTask, "query"> & Partial<RawTask>): RawTask {
+  return { label: p.query.slice(0, 40), cityMention: null, priority: 1, resolvesPending: null, ...p };
 }

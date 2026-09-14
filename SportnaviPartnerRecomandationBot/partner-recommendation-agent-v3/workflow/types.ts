@@ -9,9 +9,42 @@ export interface WorkflowInput {
   query: string;
   homeCity?: string;
   sessionCities?: string[];
+  /** Tasks carried over from the previous turn (client-held). */
+  resume?: ResumeState;
 }
 
-export type StageId = "detect-city" | "reformulate" | "nearby-cities" | "search" | "rerank" | "respond";
+/** One independent search request extracted from the message. */
+export interface Task {
+  id: string;
+  /** ≤ 40 chars, used as the answer section heading. */
+  label: string;
+  /** Self-contained sub-query in the user's words. */
+  query: string;
+  cityMention: string | null;
+  /** 1 = run first. */
+  priority: number;
+}
+
+export interface ResumeState {
+  /** Ran last turn, ended in needs_clarification. */
+  pending: Task[];
+  /** Not run last turn (beyond maxTasksPerTurn). */
+  deferred: Task[];
+}
+
+export interface DecomposeOutput {
+  /** Every task of this turn in execution order (carried deferred first). */
+  tasks: Task[];
+  runnable: Task[];
+  deferred: Task[];
+  /** ids of the tasks produced by THIS turn's model call (carried deferred tasks are not fresh). */
+  fresh: string[];
+  /** true when the model call failed/returned nothing and the whole message became one task. */
+  degraded: boolean;
+  model?: string;
+}
+
+export type StageId = "decompose" | "detect-city" | "reformulate" | "nearby-cities" | "search" | "rerank" | "respond";
 
 export type StageStatus = "ok" | "warning" | "error" | "skipped";
 
@@ -160,7 +193,21 @@ export interface RespondOutput {
   model?: string;
 }
 
-export type WorkflowStatus = "ok" | "needs_clarification" | "failed";
+export type TaskStatus = "ok" | "needs_clarification" | "failed";
+
+/** Stages 1–6 for one task. */
+export interface TaskRun {
+  task: Task;
+  status: TaskStatus;
+  totalMs: number;
+  stages: StageRecord[];
+  answer?: string;
+  recommendations?: Recommendation[];
+  clarification?: string;
+  error?: { message: string };
+}
+
+export type WorkflowStatus = "ok" | "needs_clarification" | "partial" | "failed";
 
 export interface WorkflowTrace {
   runId: string;
@@ -169,9 +216,18 @@ export interface WorkflowTrace {
   status: WorkflowStatus;
   input: WorkflowInput;
   config: WorkflowConfig;
+  /** Stage 0. `skipped` when decomposition is disabled or config/deps failed. */
+  decompose: StageRecord;
+  tasks: TaskRun[];
+  deferred: Task[];
+  pending: Task[];
+  /** = tasks[0].stages when exactly one task ran, else []. Kept so single-task traces read as before. */
   stages: StageRecord[];
+  /** Composed answer (verbatim task answer for a single task). */
   answer?: string;
   recommendations?: Recommendation[];
   clarification?: string;
   error?: { message: string };
 }
+
+export type { RawTask } from "../lib/llm-port";

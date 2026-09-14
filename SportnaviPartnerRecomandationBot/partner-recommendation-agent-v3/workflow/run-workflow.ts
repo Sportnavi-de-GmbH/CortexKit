@@ -16,6 +16,7 @@ import { respond } from "./stages/6-respond";
 import type { StageContext, StageId, StageRecord, StageResult, WorkflowDeps, WorkflowInput, WorkflowTrace } from "./types";
 
 const TITLES: Record<StageId, string> = {
+  decompose: "Decompose message",
   "detect-city": "Detect city", reformulate: "Reformulate question", "nearby-cities": "Find nearby cities",
   search: "Embed once + similarity search", rerank: "Combine, dedupe, rerank", respond: "Final response",
 };
@@ -50,7 +51,7 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
   const t0 = performance.now();
   const runId = randomUUID();
   const done = (partial: Partial<WorkflowTrace> & { status: WorkflowTrace["status"]; config: WorkflowConfig; stages: StageRecord[] }): WorkflowTrace =>
-    ({ runId, startedAt, totalMs: Math.round(performance.now() - t0), input, ...partial });
+    ({ runId, startedAt, totalMs: Math.round(performance.now() - t0), input, decompose: skipped("decompose"), tasks: [], deferred: [], pending: [], ...partial });
 
   let config: WorkflowConfig;
   try {
