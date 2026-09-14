@@ -51,6 +51,9 @@ export function useWorkflowAgent(options: UseWorkflowAgentOptions = {}): UseEveA
       if (inFlight.current) throw new Error("A turn is already in flight.");
 
       const resume = stateRef.current.resume;
+      // Same turn id the reducer stamps on the messages (`turn_N`) — it is the
+      // key feedback and monitoring use to name this answer server-side.
+      const turnId = `turn_${stateRef.current.turn + 1}`;
       setState((s) => applyUserMessage(s, message));
       setStatus("submitted");
       const controller = new AbortController();
@@ -59,7 +62,7 @@ export function useWorkflowAgent(options: UseWorkflowAgentOptions = {}): UseEveA
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message, ...(resume ? { resume } : {}) }),
+          body: JSON.stringify({ message, sessionId, turnId, ...(resume ? { resume } : {}) }),
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -91,7 +94,7 @@ export function useWorkflowAgent(options: UseWorkflowAgentOptions = {}): UseEveA
         if (inFlight.current === controller) inFlight.current = null;
       }
     },
-    [endpoint],
+    [endpoint, sessionId],
   );
 
   const stop = useCallback(() => {

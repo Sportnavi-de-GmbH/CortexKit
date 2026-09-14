@@ -194,3 +194,47 @@ describe("forwardToWorkflow", () => {
     expect(JSON.stringify(body)).not.toMatch(/ECONNREFUSED|127\.0\.0\.1/);
   });
 });
+
+describe("forwardToWorkflow — monitoring observer", () => {
+  const req = (body: unknown) =>
+    new Request("http://widget.local/api/partner/workflow", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://widget.local", host: "widget.local" },
+      body: JSON.stringify(body),
+    });
+  const fullTrace = { runId: "r1", status: "ok", answer: "A", pending: [], deferred: [], tasks: [] };
+
+  it("strips sessionId/turnId before forwarding and hands the FULL trace to observe()", async () => {
+    let forwarded: unknown;
+    const seen: unknown[] = [];
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      forwarded = JSON.parse(String(init.body));
+      return new Response(JSON.stringify(fullTrace), { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const res = await forwardToWorkflow(req({ message: "Yoga in Bochum", sessionId: "s1", turnId: "turn_3" }), {
+      host: "http://127.0.0.1:3008", fetchImpl, observe: async (o) => { seen.push(o); },
+    });
+    expect(res.status).toBe(200);
+    expect(forwarded).toEqual({ query: "Yoga in Bochum" });
+    expect(seen[0]).toMatchObject({ sessionId: "s1", turnId: "turn_3", message: "Yoga in Bochum", status: 200, origin: "http://widget.local", trace: fullTrace });
+  });
+
+  it("an upstream failure is observed with its status and no trace", async () => {
+    const seen: unknown[] = [];
+    const fetchImpl = (async () => new Response("Bad Gateway", { status: 502 })) as unknown as typeof fetch;
+    const res = await forwardToWorkflow(req({ message: "x", sessionId: "s1", turnId: "turn_1" }), { host: "http://127.0.0.1:3008", fetchImpl, observe: (o) => { seen.push(o); } });
+    expect(res.status).toBe(502);
+    expect(seen[0]).toMatchObject({ status: 502, detail: "Bad Gateway" });
+    expect((seen[0] as { trace?: unknown }).trace).toBeUndefined();
+  });
+
+  it("a malformed turnId is dropped, and a throwing observer never changes the response", async () => {
+    const seen: unknown[] = [];
+    const fetchImpl = (async () => new Response(JSON.stringify(fullTrace), { status: 200 })) as unknown as typeof fetch;
+    const res = await forwardToWorkflow(req({ message: "x", sessionId: "s1", turnId: "evil" }), {
+      host: "http://127.0.0.1:3008", fetchImpl, observe: (o) => { seen.push(o); throw new Error("db down"); },
+    });
+    expect(res.status).toBe(200);
+    expect((seen[0] as { turnId?: string }).turnId).toBeUndefined();
+  });
+});
