@@ -35,6 +35,7 @@ describe("runWorkflow", () => {
     expect(t.stages[3]).toMatchObject({ id: "search", status: "error", error: { message: "embed down" } });
     expect(t.stages[4]!.status).toBe("skipped");
     expect(t.stages[5]!.status).toBe("skipped");
+    expect(t.error?.message).toMatch(/embed down/);
   });
 
   it("marks a stage 'warning' when it has warnings, and echoes the effective config", async () => {

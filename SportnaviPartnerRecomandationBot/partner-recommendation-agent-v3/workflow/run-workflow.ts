@@ -62,27 +62,40 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
   const ctx: StageContext = { config, deps: d, signal: AbortSignal.timeout(config.runTimeoutMs) };
   const stages: StageRecord[] = [];
   const skipRest = () => { for (const id of ORDER.slice(stages.length)) stages.push(skipped(id)); };
+  // Mirrors a failed stage's error into the trace's top-level `error`, so a
+  // stage failure has the same shape as the config-failure case above.
+  const stageError = (record: StageRecord): { message: string } | undefined =>
+    record.error && { message: `${record.title}: ${record.error.message}` };
 
   // 1
   const s1 = await runStage("detect-city", { query: input.query, homeCity: input.homeCity, sessionCities: input.sessionCities }, () => detectCity(input, ctx));
   stages.push(s1.record);
-  if (!s1.result) { skipRest(); return done({ status: "failed", config, stages }); }
+  if (!s1.result) { skipRest(); return done({ status: "failed", config, stages, error: stageError(s1.record) }); }
   const target = s1.result.output.target;
   if (!target) { skipRest(); return done({ status: "needs_clarification", config, stages, clarification: CLARIFICATION }); }
 
   // 2
   const s2 = await runStage("reformulate", { query: input.query }, () => reformulate({ query: input.query }, ctx));
   stages.push(s2.record);
-  if (!s2.result) { skipRest(); return done({ status: "failed", config, stages }); }
+  if (!s2.result) { skipRest(); return done({ status: "failed", config, stages, error: stageError(s2.record) }); }
   const retrievalQuery = s2.result.output.retrievalQuery;
 
   // 3
   const s3 = await runStage("nearby-cities", { target: target.canonical, centroid: target.centroid }, () => nearbyCities({ target }, ctx));
   stages.push(s3.record);
-  if (!s3.result) { skipRest(); return done({ status: "failed", config, stages }); }
+  if (!s3.result) { skipRest(); return done({ status: "failed", config, stages, error: stageError(s3.record) }); }
   const cities = s3.result.output.cities;
 
   // 4
+  // Stage 4 returns its full query vector alongside the normal StageResult
+  // (`search()`'s return type is intersected with `{ queryEmbedding }`).
+  // `queryEmbedding` is captured here via closure so stage 5 can reuse the
+  // same vector without re-embedding. It is assigned synchronously before
+  // the wrapped fn's promise resolves, so it's populated by the time
+  // `runStage` returns — but only on success: if `search()` throws,
+  // `runStage`'s catch takes over and this line never runs, which is fine
+  // because stage 5 is skipped in that case anyway (see the `!s4.result`
+  // check just below).
   let queryEmbedding: number[] = [];
   const s4 = await runStage("search", { retrievalQuery, cities: cities.map((c) => c.city) }, async () => {
     const r = await search({ retrievalQuery, cities }, ctx);
@@ -90,19 +103,19 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
     return r;
   });
   stages.push(s4.record);
-  if (!s4.result) { skipRest(); return done({ status: "failed", config, stages }); }
+  if (!s4.result) { skipRest(); return done({ status: "failed", config, stages, error: stageError(s4.record) }); }
 
   // 5
   const candidates = s4.result.output.candidates;
   const s5 = await runStage("rerank", { candidates: candidates.length }, () => rerank({ candidates, queryEmbedding }, ctx));
   stages.push(s5.record);
-  if (!s5.result) { skipRest(); return done({ status: "failed", config, stages }); }
+  if (!s5.result) { skipRest(); return done({ status: "failed", config, stages, error: stageError(s5.record) }); }
 
   // 6
   const kept = s5.result.output.kept;
   const s6 = await runStage("respond", { query: input.query, targetCity: target.canonical, kept: kept.map((k) => k.id) }, () => respond({ query: input.query, targetCity: target.canonical, kept }, ctx));
   stages.push(s6.record);
-  if (!s6.result) return done({ status: "failed", config, stages });
+  if (!s6.result) return done({ status: "failed", config, stages, error: stageError(s6.record) });
 
   return done({ status: "ok", config, stages, answer: s6.result.output.answer, recommendations: s6.result.output.recommendations });
 }
