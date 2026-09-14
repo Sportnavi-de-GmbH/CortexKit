@@ -5,6 +5,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE_NAME, isProtectedPath, verifySession } from "./lib/monitoring/auth";
 
 export const config = {
+  // Node runtime (stable since Next 15.5): the edge bundle is loaded with a bare
+  // `require` by this project's dev server (`self is not defined`, measured
+  // 2026-09-14); the Node bundle works in both dev and on Vercel.
+  runtime: "nodejs",
   matcher: [
     "/monitoring/:path*",
     "/api/monitoring/traces",

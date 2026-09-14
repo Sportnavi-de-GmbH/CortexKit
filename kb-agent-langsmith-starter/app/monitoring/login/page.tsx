@@ -61,10 +61,11 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-(--bg) px-4 font-body text-(--fg)">
+    // Rendered inside app/monitoring/layout.tsx (header + main), so no full-screen shell here.
+    <div className="flex min-h-[60vh] items-center justify-center">
       <Suspense fallback={null}>
         <LoginForm />
       </Suspense>
-    </main>
+    </div>
   );
 }
