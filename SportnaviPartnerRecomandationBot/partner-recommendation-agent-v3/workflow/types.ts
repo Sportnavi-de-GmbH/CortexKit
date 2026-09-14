@@ -173,4 +173,5 @@ export interface WorkflowTrace {
   answer?: string;
   recommendations?: Recommendation[];
   clarification?: string;
+  error?: { message: string };
 }
