@@ -5,11 +5,13 @@
  * resolved with the directory's fuzzy resolver; the first one at or above
  * cityConfidenceMin wins. No target ⇒ the runner asks the user.
  */
+import { raceAbort } from "../../lib/abortable";
 import { timeoutSignal } from "../../lib/reused/timeout";
 import type { CityAttempt, CitySource, DetectCityOutput, ResolvedCity, StageContext, StageResult, WorkflowInput } from "../types";
 
 async function resolve(mention: string, ctx: StageContext): Promise<ResolvedCity | null> {
-  const row = await ctx.deps.backend.resolveCityFuzzy(mention, { signal: anySignal(ctx) });
+  const signal = anySignal(ctx);
+  const row = await raceAbort(ctx.deps.backend.resolveCityFuzzy(mention, { signal }), signal, "resolve_city_fuzzy");
   if (!row) return null;
   return { canonical: row.city, centroid: { lat: row.lat, lng: row.lon }, confidence: row.sim };
 }
@@ -27,7 +29,8 @@ export async function detectCity(input: WorkflowInput, ctx: StageContext): Promi
     candidates.push({ source: "override", mention: ctx.config.targetCity });
   } else {
     try {
-      cityMention = (await ctx.deps.llm.detectCity(input.query, { signal: anySignal(ctx) })).cityMention;
+      const signal = anySignal(ctx);
+      cityMention = (await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity")).cityMention;
     } catch (e) {
       warnings.push(`City detection model call failed (${(e as Error).message}); treating the question as having no city mention.`);
     }
