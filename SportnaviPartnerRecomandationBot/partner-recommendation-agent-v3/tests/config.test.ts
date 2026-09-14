@@ -9,6 +9,7 @@ describe("workflow config", () => {
       topKSimilarity: 15, similarityThreshold: 0.2, maxParallelSearches: 4,
       topKReranked: 5, targetCityBonus: 0.05, maxDistancePenalty: 0.05, minNearbyRelevance: 0.15,
       reranker: "embedding", runTimeoutMs: 45_000, callTimeoutMs: 8_000, modelTimeoutMs: 20_000,
+      enableDecomposition: true, maxTasksPerTurn: 3,
     });
     expect(DEFAULT_CONFIG.targetCity).toBeUndefined();
   });
@@ -48,5 +49,21 @@ describe("workflow config", () => {
   it("keeps an explicit targetCity override and trims it", () => {
     expect(resolveConfig({ targetCity: "  Bochum " }, {} as unknown as NodeJS.ProcessEnv).targetCity).toBe("Bochum");
     expect(resolveConfig({ targetCity: "   " }, {} as unknown as NodeJS.ProcessEnv).targetCity).toBeUndefined();
+  });
+
+  it("has the stage-0 defaults and reads their env vars", () => {
+    expect(DEFAULT_CONFIG.enableDecomposition).toBe(true);
+    expect(DEFAULT_CONFIG.maxTasksPerTurn).toBe(3);
+    const { config, envSet } = loadConfigFromEnv({ V3_ENABLE_DECOMPOSITION: "false", V3_MAX_TASKS_PER_TURN: "2" } as unknown as NodeJS.ProcessEnv);
+    expect(config.enableDecomposition).toBe(false);
+    expect(config.maxTasksPerTurn).toBe(2);
+    expect(envSet.sort()).toEqual(["enableDecomposition", "maxTasksPerTurn"]);
+  });
+
+  it("never allows more than 3 tasks per turn", () => {
+    expect(() => resolveConfig({ maxTasksPerTurn: 4 }, {} as unknown as NodeJS.ProcessEnv)).toThrow(ConfigError);
+    expect(() => resolveConfig({ maxTasksPerTurn: 0 }, {} as unknown as NodeJS.ProcessEnv)).toThrow(/maxTasksPerTurn/);
+    expect(() => resolveConfig({ maxTasksPerTurn: 2.5 }, {} as unknown as NodeJS.ProcessEnv)).toThrow(/maxTasksPerTurn/);
+    expect(resolveConfig({ maxTasksPerTurn: 1 }, {} as unknown as NodeJS.ProcessEnv).maxTasksPerTurn).toBe(1);
   });
 });

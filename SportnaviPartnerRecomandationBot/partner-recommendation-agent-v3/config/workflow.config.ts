@@ -45,6 +45,10 @@ export interface WorkflowConfig {
   callTimeoutMs: number;
   /** One chat-model call: stage 1 detectCity, stage 2 reformulate, stage 6 answer. */
   modelTimeoutMs: number;
+  /** Stage 0: split the message into independent search tasks (off ⇒ the whole message is one task). */
+  enableDecomposition: boolean;
+  /** Stage 0: tasks run per turn, and the concurrency of the task pool. Hard-capped at 3 by validation. */
+  maxTasksPerTurn: number;
 }
 
 export const DEFAULT_CONFIG: WorkflowConfig = {
@@ -66,6 +70,8 @@ export const DEFAULT_CONFIG: WorkflowConfig = {
   runTimeoutMs: 45_000,
   callTimeoutMs: 8_000,
   modelTimeoutMs: 20_000,
+  enableDecomposition: true,
+  maxTasksPerTurn: 3,
 };
 
 type EnvKey = Exclude<keyof WorkflowConfig, "targetCity">;
@@ -89,6 +95,8 @@ export const V3_ENV: Record<EnvKey, string> = {
   runTimeoutMs: "V3_RUN_TIMEOUT_MS",
   callTimeoutMs: "V3_CALL_TIMEOUT_MS",
   modelTimeoutMs: "V3_MODEL_TIMEOUT_MS",
+  enableDecomposition: "V3_ENABLE_DECOMPOSITION",
+  maxTasksPerTurn: "V3_MAX_TASKS_PER_TURN",
 };
 
 export class ConfigError extends Error {
@@ -151,6 +159,7 @@ export function validateConfig(c: WorkflowConfig): WorkflowConfig {
   assert(int(c.runTimeoutMs) && c.runTimeoutMs >= 1000, "runTimeoutMs must be an integer >= 1000");
   assert(int(c.callTimeoutMs) && c.callTimeoutMs >= 100, "callTimeoutMs must be an integer >= 100");
   assert(int(c.modelTimeoutMs) && c.modelTimeoutMs >= 1000, "modelTimeoutMs must be an integer >= 1000");
+  assert(int(c.maxTasksPerTurn) && c.maxTasksPerTurn >= 1 && c.maxTasksPerTurn <= 3, "maxTasksPerTurn must be an integer in [1,3] (never more than 3 searches in parallel)");
   return c;
 }
 
