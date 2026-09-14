@@ -168,8 +168,8 @@ threw instead gets its own `**Label**` failure line and does not block the other
 **Resume contract.** The client is the only place multi-turn state lives: after a run, if
 `trace.pending` or `trace.deferred` is non-empty, the client holds onto both and sends them back
 as `resume: { pending, deferred }` on the next request. Stage 0 then runs deferred tasks first
-(they already waited a turn), and reuses a pending task's id — without a new stage-0 model call
-for it — only when the model's fresh output names `resolvesPending` with that id, i.e. it
+(they already waited a turn), and reuses a pending task's id (inside the turn's single stage-0
+model call) only when the model's fresh output names `resolvesPending` with that id, i.e. it
 recognised the new message as answering that earlier clarification. A pending task that is not
 recognised in a later message is silently dropped, with a warning on the decompose stage
 (`Pending task(s) not answered by this message were dropped: …`).
@@ -216,8 +216,8 @@ The runner (`workflow/run-workflow.ts`) **never throws**. Every run ends in one 
 - **`ok`** — every task ran stages 1–6 to completion; `answer` and (for a single task)
   `recommendations` are populated.
 - **`needs_clarification`** — at least one task could not resolve a city with enough confidence;
-  the others' answers are still in `answer`, and `trace.pending` holds the unresolved task(s) plus
-  the clarifying question.
+  the others' answers are still in `answer`, and `trace.pending` holds the unresolved task(s) and
+  `trace.clarification` the question asked.
 - **`partial`** — at least one task failed but not all of them; the successful tasks' answers are
   still in `answer`, and `trace.error` summarizes the failed task(s).
 - **`failed`** — every task failed, or the request's config overrides failed `validateConfig`, or
