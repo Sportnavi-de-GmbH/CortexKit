@@ -6,7 +6,31 @@
  */
 import { timeoutSignal } from "../../lib/reused/timeout";
 import { buildAnswerPrompt, type AnswerPartner } from "./answer-prompt";
-import type { RankedRow, Recommendation, RespondOutput, StageContext, StageResult } from "../types";
+import type { SupabasePartnerProfileRow } from "../../lib/reused/supabase";
+import type { RankedRow, Recommendation, RecommendationCard, RespondOutput, StageContext, StageResult } from "../types";
+
+const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+const httpUrl = (v: unknown): string | null => {
+  const s = text(v);
+  return s && /^https?:\/\//i.test(s) ? s : null;
+};
+
+/** Everything the widget card shows, from the row already in hand. Pure. */
+export function cardFromProfile(p: SupabasePartnerProfileRow): RecommendationCard {
+  const pd = (p.profile_data && typeof p.profile_data === "object" ? p.profile_data : {}) as Record<string, unknown>;
+  const courses = (text(pd.courses) ?? "").split("|").map((c) => c.trim()).filter(Boolean);
+  return {
+    logoUrl: httpUrl(p.logo_url),
+    street: text(p.street),
+    postalCode: text(p.postal_code),
+    email: text(p.email),
+    phone: text(p.phone),
+    websiteUrl: httpUrl(p.website_url),
+    mapsUrl: httpUrl(pd.google_maps),
+    tags: (p.tags ?? []).map((t) => t.trim()).filter(Boolean),
+    courses,
+  };
+}
 
 export async function respond(input: { query: string; targetCity: string; kept: RankedRow[] }, ctx: StageContext): Promise<StageResult<RespondOutput>> {
   const warnings: string[] = [];
@@ -23,7 +47,7 @@ export async function respond(input: { query: string; targetCity: string; kept: 
     if (!p || !profile) { warnings.push(`Partner ${r.id} (${r.name}) has no profile text and was dropped from the answer.`); continue; }
     const rank = partners.length + 1;
     partners.push({ rank, name: p.title || r.name, city: p.city || r.city, role: r.role, distanceKm: r.distanceKm, profile });
-    recommendations.push({ rank, id: r.id, name: p.title || r.name, city: p.city || r.city, role: r.role, distanceKm: r.distanceKm, finalScore: r.finalScore, relevance: r.relevance, profile });
+    recommendations.push({ rank, id: r.id, name: p.title || r.name, city: p.city || r.city, role: r.role, distanceKm: r.distanceKm, finalScore: r.finalScore, relevance: r.relevance, profile, card: cardFromProfile(p) });
   }
 
   const prompt = buildAnswerPrompt({ query: input.query, targetCity: input.targetCity, partners });

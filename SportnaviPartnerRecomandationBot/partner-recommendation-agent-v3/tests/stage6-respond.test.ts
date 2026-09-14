@@ -22,6 +22,23 @@ describe("stage 6 — respond", () => {
     expect(prompt).not.toContain("finalScore");
   });
 
+  it("attaches a structured card per recommendation from the already-hydrated profile row (no extra call)", async () => {
+    const backend = ruhrWorld();
+    backend.getPartnerProfiles = async (ids) => ids.map((id) => profileRow({
+      partner_id: id, title: `P${id}`, city: "Dortmund", street: "Ruhrallee 12, 44139 Dortmund", postal_code: "44139",
+      tags: ["tennis", "fitness"], email: id === 101 ? "info@p101.de" : null, phone: "+49 231 123", website_url: id === 101 ? "https://p101.de" : "javascript:alert(1)",
+      logo_url: id === 101 ? "https://cdn/logo.png" : null,
+      profile_data: { courses: "Tennis | Squash | Fitness", google_maps: "https://www.google.com/maps/search/?api=1&query=51.5,7.4" },
+    }));
+    const r = await respond({ query: "Q", targetCity: "Dortmund", kept: [row(1, 101, "Dortmund", "target", 0), row(2, 201, "Bochum", "nearby", 17)] }, ctx({}, { backend }));
+    expect(r.output.recommendations[0]!.card).toEqual({
+      logoUrl: "https://cdn/logo.png", street: "Ruhrallee 12, 44139 Dortmund", postalCode: "44139", email: "info@p101.de", phone: "+49 231 123",
+      websiteUrl: "https://p101.de", mapsUrl: "https://www.google.com/maps/search/?api=1&query=51.5,7.4", tags: ["tennis", "fitness"], courses: ["Tennis", "Squash", "Fitness"],
+    });
+    // non-http(s) URLs and nulls are dropped, never passed to the browser
+    expect(r.output.recommendations[1]!.card).toMatchObject({ websiteUrl: null, logoUrl: null, email: null });
+  });
+
   it("drops a partner whose profile is missing, with a warning, without promoting the next", async () => {
     const backend = ruhrWorld();
     backend.getPartnerProfiles = async (ids) => ids.filter((id) => id !== 201).map((id) => profileRow({ partner_id: id, title: `P${id}`, city: "Dortmund", llm_profile: "text" }));

@@ -174,6 +174,23 @@ export interface RerankOutput {
   kept: RankedRow[];
 }
 
+/**
+ * Structured partner facts for the widget's card, copied from the profile row
+ * stage 6 already hydrated — never a second query, never model output. Null /
+ * empty when the directory has nothing; URLs are http(s)-validated here.
+ */
+export interface RecommendationCard {
+  logoUrl: string | null;
+  street: string | null;
+  postalCode: string | null;
+  email: string | null;
+  phone: string | null;
+  websiteUrl: string | null;
+  mapsUrl: string | null;
+  tags: string[];
+  courses: string[];
+}
+
 export interface Recommendation {
   rank: number;
   id: number;
@@ -184,6 +201,7 @@ export interface Recommendation {
   finalScore: number;
   relevance: number;
   profile: string;
+  card: RecommendationCard;
 }
 
 export interface RespondOutput {
