@@ -53,6 +53,19 @@ describe("stage 5 — rerank", () => {
     expect(r.warnings?.[0]).toMatch(/embedding/);
   });
 
+  it("falls back to the directory similarity when a stored embedding has the wrong dimensionality", async () => {
+    const backend = ruhrWorld();
+    backend.getPartnerEmbeddings = async (ids) => ids.map((id) => ({ id, embedding: [0.9, 0.1, 0] }));
+    const r = await rerank(
+      { candidates: [cand(101, "Dortmund", "target", 0, 0.42), cand(201, "Bochum", "nearby", 18, 0.31)], queryEmbedding: QUERY_VECTOR },
+      ctx({}, { backend }),
+    );
+    const rows = Object.fromEntries(r.output.rows.map((x) => [x.id, x]));
+    expect(rows[101]).toMatchObject({ relevance: 0.42, relevanceSource: "similarity" });
+    expect(rows[201]).toMatchObject({ relevance: 0.31, relevanceSource: "similarity" });
+    expect(r.warnings?.some((w) => /dims/.test(w))).toBe(true);
+  });
+
   it("is deterministic on ties: target first, nearer, in-city rank, id", async () => {
     const backend = ruhrWorld({ relevance: { 301: 0.5, 401: 0.5, 501: 0.5 } });
     const r = await rerank({ candidates: [cand(501, "Hagen", "nearby", 10, 0.5, 0), cand(401, "X", "nearby", 10, 0.5, 1), cand(301, "Y", "nearby", 10, 0.5, 0)], queryEmbedding: QUERY_VECTOR }, ctx({}, { backend }));
