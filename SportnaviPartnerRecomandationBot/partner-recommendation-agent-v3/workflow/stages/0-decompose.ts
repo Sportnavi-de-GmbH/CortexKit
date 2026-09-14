@@ -66,6 +66,10 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
         warnings.push("Decomposition returned no tasks; treating the message as one task.");
         fresh = [singleTask(input.query)];
         degraded = true;
+      } else if (fresh.length === 1 && pending.length === 0 && !pending.some((p) => p.id === fresh[0]!.id)) {
+        // Single-intent message: the model may shorten/rewrite the query, but
+        // stages 2/6 must see the same text the user typed, matching pre-decompose behaviour.
+        fresh = [{ ...fresh[0]!, query: input.query }];
       }
     } catch (e) {
       warnings.push(`Decomposition failed (${(e as Error).message}); treating the message as one task.`);
@@ -76,7 +80,10 @@ export async function decompose(input: { query: string; resume?: ResumeState }, 
 
   const freshIds = new Set(fresh.map((t) => t.id));
   const carried = deferredIn.filter((t) => !freshIds.has(t.id));
-  const tasks = [...carried, ...fresh];
+  const combined = [...carried, ...fresh];
+  const tasks = combined.slice(0, MAX_TASKS);
+  const droppedForCap = combined.slice(MAX_TASKS);
+  if (droppedForCap.length) warnings.push(`Task list capped at ${MAX_TASKS}; dropped: ${droppedForCap.map((t) => t.label).join(", ")}.`);
   const runnable = tasks.slice(0, ctx.config.maxTasksPerTurn);
   const deferred = tasks.slice(ctx.config.maxTasksPerTurn);
   const dropped = pending.filter((p) => !freshIds.has(p.id));

@@ -172,13 +172,23 @@ as `resume: { pending, deferred }` on the next request. Stage 0 then runs deferr
 model call) only when the model's fresh output names `resolvesPending` with that id, i.e. it
 recognised the new message as answering that earlier clarification. A pending task that is not
 recognised in a later message is silently dropped, with a warning on the decompose stage
-(`Pending task(s) not answered by this message were dropped: …`).
+(`Pending task(s) not answered by this message were dropped: …`). With decomposition disabled,
+there is no model call to merge a reply into a pending task at all, so pending tasks are always
+dropped (with that same warning); deferred tasks are still carried over unchanged. The carried
+(deferred) + fresh task list is capped at 10 after concatenation — any overflow is dropped from
+the tail (fresh tasks first, since deferred tasks are prepended) with a warning
+(`Task list capped at 10; dropped: …`) so a resume can never grow `deferred` past the request
+schema's own 10-item limit.
 
-**Cost.** For N tasks in one turn: 1 decompose call, plus per task 1 reformulate + 1 answer call
-(and 1 detect-city call only when stage 1 has no hint from stage 0 — a task that is disabled,
-degraded, or carried over from a previous turn), plus 1 embedding per task. Normally (stage 1 uses
-the hint): **1 + 2·N chat completions + N embeddings**. When detection falls back to its own model
-call for every task: **1 + 3·N chat completions + N embeddings**.
+**Cost.** For N tasks in one turn: 1 decompose call when decomposition is enabled (none when
+disabled — stage 0 skips the model entirely), plus per task 1 reformulate + 1 answer call (and 1
+detect-city call only when stage 1 has no hint from stage 0 — a task that is disabled, degraded, or
+carried over from a previous turn), plus 1 embedding per task. Normally (decomposition enabled,
+stage 1 uses the hint): **1 + 2·N chat completions + N embeddings**. When decomposition is
+*degraded* (the decompose call ran but failed or returned nothing usable), detection falls back to
+its own model call for every task: **1 + 3·N chat completions + N embeddings**. When decomposition
+is *disabled* outright, there is no decompose call at all, so it's **3·N chat completions + N
+embeddings**.
 
 ## The dev UI
 
@@ -246,8 +256,9 @@ cancellation propagated from the run's own `AbortSignal`.
   **all interfaces**, so anyone reachable on the network can trigger paid model calls; on a shared
   network run `npm run dev -- -p 3008 -H 127.0.0.1`.
 - For N tasks, a run normally costs **1 + 2·N chat completions + N embeddings** (1 + 3·N chat
-  completions when stage 1 falls back to its own city-detection call instead of using stage 0's
-  hint) and there is **no rate limit**.
+  completions when decomposition is degraded and stage 1 falls back to its own city-detection call
+  instead of using stage 0's hint; **3·N** with no `+1` when decomposition is disabled outright,
+  since then there is no decompose call at all) and there is **no rate limit**.
 - Node **>= 20.3** is required (`AbortSignal.any`).
 - Not deployed anywhere; no Vercel project, no `vercel.json`.
 - No Langfuse, no feedback loop, no evals — the trace JSON is the only observability.

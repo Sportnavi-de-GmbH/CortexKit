@@ -148,7 +148,7 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
   const s0 = await runStage("decompose", { query: input.query, pending: resume?.pending.map((p) => p.id) ?? [], deferred: resume?.deferred.map((d) => d.id) ?? [] },
     () => decompose({ query: input.query, resume }, ctx));
   if (!s0.result) return done({ status: "failed", config, decompose: s0.record, error: { message: `${s0.record.title}: ${s0.record.error?.message}` } });
-  const decomposeRecord = config.enableDecomposition ? s0.record : skipped("decompose");
+  const decomposeRecord = !config.enableDecomposition && !input.resume ? skipped("decompose") : s0.record;
   const { runnable, deferred, degraded, fresh } = s0.result.output;
   const freshIds = new Set(fresh);
 

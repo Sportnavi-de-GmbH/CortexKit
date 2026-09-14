@@ -196,6 +196,14 @@ describe("runWorkflow — multi-task", () => {
     expect(t.pending).toEqual([]);
   });
 
+  it("enableDecomposition=false with a resume ⇒ decompose is NOT skipped and shows the real dropped-pending warning", async () => {
+    const resume = { pending: [task("p1", "Tennis")], deferred: [] };
+    const llm = fakeLlm({ cityMention: "Dortmund", answer: "A" });
+    const t = await runWorkflow({ query: "Dortmund", resume }, { enableDecomposition: false, maxNearbyHubs: 0 }, deps({ llm }));
+    expect(t.decompose.status).toBe("warning");
+    expect(t.decompose.warnings.some((w) => /dropped/i.test(w))).toBe(true);
+  });
+
   it("invalid config ⇒ failed with an empty task list and a skipped stage 0", async () => {
     const t = await runWorkflow({ query: Q }, { maxTasksPerTurn: 9 }, happy());
     expect(t.status).toBe("failed");
