@@ -33,7 +33,7 @@ Six stages, always in that order (`workflow/run-workflow.ts`):
 
 ```powershell
 npm install
-copy ..\partner-recommendation-agent-v2\.env.local .env.local   # same Azure/Supabase/embedding creds
+copy .env.local.example .env.local   # then fill in the same Azure / Supabase (service-role) / embedding credentials the live partner agent uses
 npm run dev -- -p 3008        # → http://localhost:3008
 ```
 
@@ -80,8 +80,9 @@ default**. Nothing else in this folder hard-codes these numbers.
 | `maxDistancePenalty` | `V3_MAX_DISTANCE_PENALTY` | `0.05` | Stage 5 — penalty at `searchRadiusKm`, scaled linearly from 0 at the target city |
 | `minNearbyRelevance` | `V3_MIN_NEARBY_RELEVANCE` | `0.15` | Stage 5 — nearby partners below this relevance are dropped; target-city ones never are |
 | `reranker` | `V3_RERANKER` | `"embedding"` | Stage 5 — which reranker implementation |
-| `runTimeoutMs` | `V3_RUN_TIMEOUT_MS` | `30000` | whole-run deadline |
-| `callTimeoutMs` | `V3_CALL_TIMEOUT_MS` | `8000` | one directory / embedding / model round trip |
+| `runTimeoutMs` | `V3_RUN_TIMEOUT_MS` | `45000` | whole-run deadline |
+| `callTimeoutMs` | `V3_CALL_TIMEOUT_MS` | `8000` | one directory / embedding round trip (never a model call) |
+| `modelTimeoutMs` | `V3_MODEL_TIMEOUT_MS` | `20000` | one chat-model call: Stage 1 city detection, Stage 2 reformulation, Stage 6 answer |
 
 `GET /api/workflow` returns the resolved defaults plus which keys came from env (`envSet`), and
 the dev UI's config panel reads that to show overrides against the actual baseline.
@@ -102,7 +103,7 @@ has no stored embedding or a dimension mismatch (see below). `locationTerm` is:
 - **nearby city:** `-maxDistancePenalty * min(1, distanceKm / searchRadiusKm)` — 0 at the target
   city, ramping linearly to the full penalty at `searchRadiusKm`
 
-Ties on `finalScore` favor target-city role, then shorter distance, then insertion order — so an
+Ties on `finalScore` favor target-city role, then shorter distance, then in-city rank, then id — so an
 equally-relevant nearby partner never beats a target-city one, but a **clearly** more relevant
 nearby partner can.
 
@@ -174,7 +175,11 @@ cancellation propagated from the run's own `AbortSignal`.
 
 ## Limits
 
-- `/api/workflow` has **no auth** — it's a local dev tool, not a public endpoint.
+- `/api/workflow` has **no auth** — it's a local dev tool, not a public endpoint. `next dev` binds
+  **all interfaces**, so anyone reachable on the network can trigger paid model calls; on a shared
+  network run `npm run dev -- -p 3008 -H 127.0.0.1`.
+- Each run costs **3 chat completions + 1 embedding** and there is **no rate limit**.
+- Node **>= 20.3** is required (`AbortSignal.any`).
 - Not deployed anywhere; no Vercel project, no `vercel.json`.
 - No Langfuse, no feedback loop, no evals — the trace JSON is the only observability.
 - Only one reranker is implemented (`embedding`); the `reranker` dial exists for future

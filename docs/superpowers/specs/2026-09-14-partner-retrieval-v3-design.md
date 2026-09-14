@@ -169,8 +169,9 @@ interface WorkflowTrace {
 ### Runner semantics
 - Stages run strictly in order; a thrown error in a stage is recorded (`status: "error"`, message,
   no stack in the UI) and the run stops with `status: "failed"`, remaining stages `skipped`.
-- Whole-run deadline `runTimeoutMs` via `AbortSignal`; per-call `callTimeoutMs` (reused
-  `withTimeout`). Timeouts surface as that stage's error.
+- Whole-run deadline `runTimeoutMs` via `AbortSignal`; per-call `callTimeoutMs` for directory /
+  embedding calls and `modelTimeoutMs` for the three chat-model calls. Timeouts surface as that
+  stage's error.
 - The runner never throws; the API route always returns a trace (HTTP 200) unless the body is
   invalid (400).
 
@@ -195,7 +196,8 @@ interface WorkflowTrace {
 | `maxDistancePenalty` | `V3_MAX_DISTANCE_PENALTY` | 0.05 | 5 |
 | `minNearbyRelevance` | `V3_MIN_NEARBY_RELEVANCE` | 0.15 | 5 |
 | `reranker` | `V3_RERANKER` | `"embedding"` | 5 |
-| `runTimeoutMs` / `callTimeoutMs` | `V3_RUN_TIMEOUT_MS` / `V3_CALL_TIMEOUT_MS` | 30000 / 8000 | all |
+| `runTimeoutMs` / `callTimeoutMs` | `V3_RUN_TIMEOUT_MS` / `V3_CALL_TIMEOUT_MS` | 45000 / 8000 | all (`callTimeoutMs`: directory + embedding calls only) |
+| `modelTimeoutMs` | `V3_MODEL_TIMEOUT_MS` | 20000 | 1, 2, 6 (the three chat-model calls) |
 
 Precedence: per-request override (API body / UI) > env > defaults. `loadConfig()` validates
 ranges (e.g. `topKSimilarity ≤ 40`, `0 ≤ thresholds ≤ 1`) and returns the effective config, which

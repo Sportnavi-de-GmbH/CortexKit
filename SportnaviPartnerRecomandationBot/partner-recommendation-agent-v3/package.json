@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "version": "3.0.0",
+  "engines": { "node": ">=20.3" },
   "description": "Navio partner-retrieval workflow V3 — sequential pipeline (detect city → reformulate → nearby cities → one embedding → per-city similarity search → rerank → answer) with a developer UI. Independent of the existing agents.",
   "scripts": {
     "dev": "next dev",

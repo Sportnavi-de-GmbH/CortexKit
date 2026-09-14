@@ -52,6 +52,18 @@ describe("stage 1 — detect city", () => {
     expect(r.warnings?.some((w) => w.includes("azure down"))).toBe(true);
   });
 
+  it("a resolver exception is a stage error, not a clarification", async () => {
+    const backend = fakeBackend({ resolveCityFuzzy: new Error("db down") });
+    await expect(detectCity({ query: Q, homeCity: "Bochum" }, ctx({}, { llm: fakeLlm({ cityMention: "Dortmund" }), backend }))).rejects.toThrow(/db down/);
+  });
+
+  it("a mention the directory does not know still falls through to the home city (no throw)", async () => {
+    const backend = fakeBackend({ resolveCityFuzzy: (p) => (p === "Atlantis" ? null : resolveKnownCity(p)) });
+    const r = await detectCity({ query: "Yoga in Atlantis", homeCity: "Bochum" }, ctx({}, { llm: fakeLlm({ cityMention: "Atlantis" }), backend }));
+    expect(r.output.target).toMatchObject({ canonical: "Bochum", source: "home" });
+    expect(r.output.attempts[0]).toMatchObject({ source: "explicit", mention: "Atlantis", accepted: false, reason: "no matching city in the directory" });
+  });
+
   it("records the config it used", async () => {
     const r = await detectCity({ query: Q }, ctx({}, { llm: fakeLlm({ cityMention: "Dortmund" }) }));
     expect(r.config).toEqual({ cityConfidenceMin: 0.6, targetCity: undefined });

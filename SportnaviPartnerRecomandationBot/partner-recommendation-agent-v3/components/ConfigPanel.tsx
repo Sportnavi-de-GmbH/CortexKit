@@ -34,22 +34,25 @@ export function ConfigPanel({ defaults, envSet, overrides, setOverrides }: Confi
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-        <span className="text-zinc-400">{open ? "▼" : "▶"}</span>
-        <span className="font-semibold">Configuration</span>
-        <span className="text-xs text-zinc-500">
-          {overrideCount > 0 ? `${overrideCount} override${overrideCount === 1 ? "" : "s"} for this run` : "defaults (env applied)"}
-        </span>
+      {/* The toggle and the reset are SIBLINGS: a <button> may not contain another <button>. */}
+      <div className="flex items-center gap-3 px-4 py-3">
+        <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex flex-1 items-center gap-3 text-left">
+          <span className="text-zinc-400">{open ? "▼" : "▶"}</span>
+          <span className="font-semibold">Configuration</span>
+          <span className="text-xs text-zinc-500">
+            {overrideCount > 0 ? `${overrideCount} override${overrideCount === 1 ? "" : "s"} for this run` : "defaults (env applied)"}
+          </span>
+        </button>
         {overrideCount > 0 && (
           <button
             type="button"
             className="ml-auto rounded border border-zinc-300 px-2 py-0.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-            onClick={(e) => { e.stopPropagation(); setOverrides({}); }}
+            onClick={() => setOverrides({})}
           >
             Reset to defaults
           </button>
         )}
-      </button>
+      </div>
       {open && (
         <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
           <div className="grid gap-3 md:grid-cols-3">

@@ -16,7 +16,7 @@ export async function reformulate(input: { query: string }, ctx: StageContext): 
 
   const warnings: string[] = [];
   try {
-    const signal = AbortSignal.any([ctx.signal, timeoutSignal(ctx.config.callTimeoutMs)]);
+    const signal = AbortSignal.any([ctx.signal, timeoutSignal(ctx.config.modelTimeoutMs)]);
     let text = (await ctx.deps.llm.reformulate(input.query, { maxChars: ctx.config.maxRetrievalQueryChars, signal })).trim();
     if (!text) {
       warnings.push("Reformulation returned an empty query; using the original question.");

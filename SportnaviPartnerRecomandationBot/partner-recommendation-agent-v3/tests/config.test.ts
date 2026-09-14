@@ -8,7 +8,7 @@ describe("workflow config", () => {
       searchRadiusKm: 30, maxNearbyCities: 5, maxNearbyHubs: 2, includeTargetCity: true,
       topKSimilarity: 15, similarityThreshold: 0.2, maxParallelSearches: 4,
       topKReranked: 5, targetCityBonus: 0.05, maxDistancePenalty: 0.05, minNearbyRelevance: 0.15,
-      reranker: "embedding", runTimeoutMs: 30_000, callTimeoutMs: 8_000,
+      reranker: "embedding", runTimeoutMs: 45_000, callTimeoutMs: 8_000, modelTimeoutMs: 20_000,
     });
     expect(DEFAULT_CONFIG.targetCity).toBeUndefined();
   });

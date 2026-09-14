@@ -41,8 +41,10 @@ export interface WorkflowConfig {
   reranker: RerankerName;
   /** Whole-run deadline. */
   runTimeoutMs: number;
-  /** One directory / embedding / model round trip. */
+  /** One directory / embedding round trip (stages 1, 3, 4, 5, 6 — never a model call). */
   callTimeoutMs: number;
+  /** One chat-model call: stage 1 detectCity, stage 2 reformulate, stage 6 answer. */
+  modelTimeoutMs: number;
 }
 
 export const DEFAULT_CONFIG: WorkflowConfig = {
@@ -61,8 +63,9 @@ export const DEFAULT_CONFIG: WorkflowConfig = {
   maxDistancePenalty: 0.05,
   minNearbyRelevance: 0.15,
   reranker: "embedding",
-  runTimeoutMs: 30_000,
+  runTimeoutMs: 45_000,
   callTimeoutMs: 8_000,
+  modelTimeoutMs: 20_000,
 };
 
 type EnvKey = Exclude<keyof WorkflowConfig, "targetCity">;
@@ -85,6 +88,7 @@ export const V3_ENV: Record<EnvKey, string> = {
   reranker: "V3_RERANKER",
   runTimeoutMs: "V3_RUN_TIMEOUT_MS",
   callTimeoutMs: "V3_CALL_TIMEOUT_MS",
+  modelTimeoutMs: "V3_MODEL_TIMEOUT_MS",
 };
 
 export class ConfigError extends Error {
@@ -146,6 +150,7 @@ export function validateConfig(c: WorkflowConfig): WorkflowConfig {
   assert(c.reranker === "embedding", `unknown reranker "${String(c.reranker)}"`);
   assert(int(c.runTimeoutMs) && c.runTimeoutMs >= 1000, "runTimeoutMs must be an integer >= 1000");
   assert(int(c.callTimeoutMs) && c.callTimeoutMs >= 100, "callTimeoutMs must be an integer >= 100");
+  assert(int(c.modelTimeoutMs) && c.modelTimeoutMs >= 1000, "modelTimeoutMs must be an integer >= 1000");
   return c;
 }
 

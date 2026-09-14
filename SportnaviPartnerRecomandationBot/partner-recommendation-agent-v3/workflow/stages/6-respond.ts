@@ -10,9 +10,9 @@ import type { RankedRow, Recommendation, RespondOutput, StageContext, StageResul
 
 export async function respond(input: { query: string; targetCity: string; kept: RankedRow[] }, ctx: StageContext): Promise<StageResult<RespondOutput>> {
   const warnings: string[] = [];
-  const signal = () => AbortSignal.any([ctx.signal, timeoutSignal(ctx.config.callTimeoutMs)]);
+  const signal = (ms: number) => AbortSignal.any([ctx.signal, timeoutSignal(ms)]);
   const ids = input.kept.map((r) => r.id);
-  const profiles = ids.length ? await ctx.deps.backend.getPartnerProfiles(ids, { signal: signal() }) : [];
+  const profiles = ids.length ? await ctx.deps.backend.getPartnerProfiles(ids, { signal: signal(ctx.config.callTimeoutMs) }) : [];
   const byId = new Map(profiles.map((p) => [p.partner_id, p]));
 
   const partners: AnswerPartner[] = [];
@@ -27,11 +27,11 @@ export async function respond(input: { query: string; targetCity: string; kept: 
   }
 
   const prompt = buildAnswerPrompt({ query: input.query, targetCity: input.targetCity, partners });
-  const answer = (await ctx.deps.llm.answer(prompt, { signal: signal() })).trim();
+  const answer = (await ctx.deps.llm.answer(prompt, { signal: signal(ctx.config.modelTimeoutMs) })).trim();
 
   return {
     output: { answer, recommendations, profilesGiven: partners.length, model: ctx.deps.llm.modelName },
-    config: {},
+    config: { modelTimeoutMs: ctx.config.modelTimeoutMs },
     counts: { kept: input.kept.length, profilesFound: profiles.length, recommended: recommendations.length, promptChars: prompt.length },
     warnings,
   };

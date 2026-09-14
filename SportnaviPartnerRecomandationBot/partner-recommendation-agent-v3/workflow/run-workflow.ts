@@ -58,7 +58,16 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
   } catch (e) {
     return done({ status: "failed", config: { ...(overrides as WorkflowConfig) }, stages: [], error: { message: (e as Error).message } });
   }
-  const d = deps ?? (await import("./deps")).createDeps();
+  // `createDeps()` builds the real ports and throws synchronously when the
+  // Azure / Supabase / embedding credentials are missing. That must become a
+  // failed trace, not an exception escaping the runner.
+  let d: WorkflowDeps;
+  try {
+    d = deps ?? (await import("./deps")).createDeps();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return done({ status: "failed", config, stages: [], error: { message: `dependencies: ${message}` } });
+  }
   const ctx: StageContext = { config, deps: d, signal: AbortSignal.timeout(config.runTimeoutMs) };
   const stages: StageRecord[] = [];
   const skipRest = () => { for (const id of ORDER.slice(stages.length)) stages.push(skipped(id)); };

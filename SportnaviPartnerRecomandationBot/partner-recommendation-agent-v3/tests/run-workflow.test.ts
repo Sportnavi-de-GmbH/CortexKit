@@ -56,7 +56,11 @@ describe("runWorkflow", () => {
     const slow = ruhrWorld();
     slow.resolveCityFuzzy = () => new Promise(() => {});
     const t = await runWorkflow({ query: Q }, { runTimeoutMs: 1000, callTimeoutMs: 100 }, deps({ llm: fakeLlm({ cityMention: "Dortmund" }), backend: slow }));
-    expect(t.status).toBe("needs_clarification"); // resolve timed out → attempt rejected → no city
-    expect(t.stages[0]!.output).toMatchObject({ attempts: [{ accepted: false, reason: expect.stringMatching(/abort|timeout/i) }] });
+    // resolve timed out → infrastructure failure → stage 1 errors, the run fails (never a clarification)
+    expect(t.status).toBe("failed");
+    expect(t.stages[0]!.status).toBe("error");
+    expect(t.stages[0]!.error?.message).toMatch(/abort|timeout/i);
+    expect(t.stages.slice(1).every((s) => s.status === "skipped")).toBe(true);
+    expect(t.stages).toHaveLength(6);
   });
 });

@@ -3,21 +3,23 @@
  * Order: config.targetCity (override) → city mentioned in the question (model) →
  * input.homeCity → input.sessionCities (most recent first). Every candidate is
  * resolved with the directory's fuzzy resolver; the first one at or above
- * cityConfidenceMin wins. No target ⇒ the runner asks the user.
+ * cityConfidenceMin wins. No target ⇒ the runner asks the user — unless the
+ * resolver itself failed (exception / timeout / run deadline), which throws
+ * so the run fails visibly instead of asking the user for a city.
  */
 import { raceAbort } from "../../lib/abortable";
 import { timeoutSignal } from "../../lib/reused/timeout";
 import type { CityAttempt, CitySource, DetectCityOutput, ResolvedCity, StageContext, StageResult, WorkflowInput } from "../types";
 
 async function resolve(mention: string, ctx: StageContext): Promise<ResolvedCity | null> {
-  const signal = anySignal(ctx);
+  const signal = anySignal(ctx, ctx.config.callTimeoutMs);
   const row = await raceAbort(ctx.deps.backend.resolveCityFuzzy(mention, { signal }), signal, "resolve_city_fuzzy");
   if (!row) return null;
   return { canonical: row.city, centroid: { lat: row.lat, lng: row.lon }, confidence: row.sim };
 }
 
-function anySignal(ctx: StageContext): AbortSignal {
-  return AbortSignal.any([ctx.signal, timeoutSignal(ctx.config.callTimeoutMs)]);
+function anySignal(ctx: StageContext, ms: number): AbortSignal {
+  return AbortSignal.any([ctx.signal, timeoutSignal(ms)]);
 }
 
 export async function detectCity(input: WorkflowInput, ctx: StageContext): Promise<StageResult<DetectCityOutput>> {
@@ -29,7 +31,7 @@ export async function detectCity(input: WorkflowInput, ctx: StageContext): Promi
     candidates.push({ source: "override", mention: ctx.config.targetCity });
   } else {
     try {
-      const signal = anySignal(ctx);
+      const signal = anySignal(ctx, ctx.config.modelTimeoutMs);
       cityMention = (await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity")).cityMention;
     } catch (e) {
       warnings.push(`City detection model call failed (${(e as Error).message}); treating the question as having no city mention.`);
@@ -60,7 +62,17 @@ export async function detectCity(input: WorkflowInput, ctx: StageContext): Promi
     }
   }
 
-  if (!target) warnings.push("No city could be determined from the question, the home city or the session.");
+  if (!target) {
+    // An infrastructure failure (resolver exception, call timeout, run deadline)
+    // is a stage ERROR, not "the user did not name a city": asking for
+    // clarification would hide an outage. A genuine "no match / low
+    // confidence" outcome still returns target: null (clarification).
+    const infra = attempts.find((a) => a.reason?.startsWith("resolve_city_fuzzy failed"));
+    if (ctx.signal.aborted || infra) {
+      throw new Error(`city resolution failed: ${infra?.reason ?? "run aborted before a city could be resolved"}`);
+    }
+    warnings.push("No city could be determined from the question, the home city or the session.");
+  }
 
   return {
     output: { cityMention, target, attempts },

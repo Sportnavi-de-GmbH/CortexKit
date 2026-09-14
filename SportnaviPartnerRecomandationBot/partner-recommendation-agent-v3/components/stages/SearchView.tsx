@@ -35,7 +35,7 @@ export function SearchView({ output }: { output: SearchOutput }) {
                   <tbody>
                     {c.results.map((r) => (
                       <tr key={r.id}>
-                        <td className={NUM}>{r.rankInCity}</td>
+                        <td className={NUM}>{r.rankInCity + 1}</td>
                         <td className={TD}>{r.name} <span className="text-xs text-zinc-400">#{r.id}</span></td>
                         <td className={`${TD} text-xs text-zinc-500`}>
                           {r.tags.slice(0, 6).join(", ")}{r.tags.length > 6 ? ` +${r.tags.length - 6}` : ""}

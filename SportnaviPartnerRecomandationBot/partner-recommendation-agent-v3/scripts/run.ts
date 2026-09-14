@@ -53,3 +53,4 @@ console.log(`\nstatus: ${trace.status} · ${trace.totalMs} ms`);
 if (trace.clarification) console.log(trace.clarification);
 if (trace.answer) console.log("\n" + trace.answer);
 if (json) console.log(JSON.stringify(trace, null, 2));
+if (trace.status !== "ok") process.exit(1);
