@@ -30,14 +30,14 @@ describe("compose", () => {
   it("a pending task gets one question after the sections and is returned in pending", () => {
     const r = compose({ tasks: [ok("a", "Tennis in Dortmund", "T"), pending("b", "Rückenschmerzen"), ok("c", "Boxen in München", "B")], deferred: [] });
     const q = clarificationFor(["Rückenschmerzen"]);
-    expect(q).toBe(`Kurze Frage, bevor ich weitersuche 😄 – für „Rückenschmerzen”: in welcher Stadt (oder Umgebung) soll ich schauen?`);
+    expect(q).toBe(`Kurze Frage, bevor ich weitersuche 😄 – für „Rückenschmerzen“: in welcher Stadt (oder Umgebung) soll ich schauen?`);
     expect(r.answer).toBe(`**Tennis in Dortmund**\nT\n\n**Boxen in München**\nB\n\n${q}`);
     expect(r.clarification).toBe(q);
     expect(r.pending.map((p) => p.id)).toEqual(["b"]);
   });
 
   it("two pending tasks share one question", () => {
-    expect(clarificationFor(["Tennis", "Boxen"])).toContain(`für „Tennis” und „Boxen”`);
+    expect(clarificationFor(["Tennis", "Boxen"])).toContain(`für „Tennis“ und „Boxen“`);
   });
 
   it("deferred tasks are noted last", () => {
@@ -48,7 +48,7 @@ describe("compose", () => {
 
   it("a failed task renders a templated apology instead of vanishing", () => {
     const r = compose({ tasks: [ok("a", "Tennis in Dortmund", "T"), failed("b", "Boxen in München")], deferred: [] });
-    expect(failedSection("Boxen in München")).toBe(`**Boxen in München**\nBei „Boxen in München” ist gerade etwas schiefgelaufen – versuch es gleich noch einmal.`);
+    expect(failedSection("Boxen in München")).toBe(`**Boxen in München**\nBei „Boxen in München“ ist gerade etwas schiefgelaufen – versuch es gleich noch einmal.`);
     expect(r.answer).toBe(`**Tennis in Dortmund**\nT\n\n${failedSection("Boxen in München")}`);
   });
 });

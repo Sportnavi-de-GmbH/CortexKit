@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Pure assembly of the final answer from the per-task results. No model
  * call: the model never sees more than one task's partners, so it cannot
  * mix them up or invent a cross-task summary.
@@ -8,7 +8,7 @@ import type { Task, TaskRun } from "./types";
 export const CLARIFICATION = "In welcher Stadt (oder Umgebung) suchst du? Sag mir kurz den Ort, dann finde ich passende Angebote.";
 
 export function clarificationFor(labels: string[]): string {
-  return `Kurze Frage, bevor ich weitersuche 😄 – für „${labels.join("” und „")}”: in welcher Stadt (oder Umgebung) soll ich schauen?`;
+  return `Kurze Frage, bevor ich weitersuche 😄 – für „${labels.join("“ und „")}“: in welcher Stadt (oder Umgebung) soll ich schauen?`;
 }
 
 export function deferredNote(labels: string[]): string {
@@ -16,7 +16,7 @@ export function deferredNote(labels: string[]): string {
 }
 
 export function failedSection(label: string): string {
-  return `**${label}**\nBei „${label}” ist gerade etwas schiefgelaufen – versuch es gleich noch einmal.`;
+  return `**${label}**\nBei „${label}“ ist gerade etwas schiefgelaufen – versuch es gleich noch einmal.`;
 }
 
 export function compose(args: { tasks: TaskRun[]; deferred: Task[] }): { answer?: string; clarification?: string; pending: Task[] } {
