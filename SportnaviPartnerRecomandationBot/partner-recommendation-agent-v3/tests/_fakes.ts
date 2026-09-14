@@ -206,19 +206,19 @@ export function fakeLlm(o: FakeLlmOptions = {}): FakeLlm {
   return {
     modelName: "fake-model",
     calls,
-    async detectCity(query) {
+    async detectCity(query, opts) {
       calls.push({ fn: "detectCity", arg: query });
       if (o.failDetect) throw o.failDetect;
       const m = typeof o.cityMention === "function" ? o.cityMention(query) : o.cityMention;
       return { cityMention: m === undefined ? null : m };
     },
-    async reformulate(query) {
+    async reformulate(query, opts) {
       calls.push({ fn: "reformulate", arg: query });
       if (o.failReformulate) throw o.failReformulate;
       if (o.reformulated === undefined) return `REFORMULATED: ${query}`;
       return typeof o.reformulated === "function" ? o.reformulated(query) : o.reformulated;
     },
-    async answer(prompt) {
+    async answer(prompt, opts) {
       calls.push({ fn: "answer", arg: prompt });
       if (o.failAnswer) throw o.failAnswer;
       if (o.answer === undefined) return "ANSWER";
