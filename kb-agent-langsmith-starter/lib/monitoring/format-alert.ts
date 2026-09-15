@@ -41,6 +41,10 @@ export interface AlertMessage {
   window: string;
   permalink: string;
   timestampIso: string;
+  /** Optional key/value rows (Adaptive Card FactSet; a small table in email). */
+  facts?: { title: string; value: string }[];
+  /** Label for the permalink (default "Open in Langfuse"). */
+  linkLabel?: string;
 }
 
 const SEVERITY_EMOJI: Record<AlertMessage["severity"], string> = {
@@ -84,8 +88,11 @@ export function formatTeamsCard(msg: AlertMessage): Record<string, unknown> {
     { type: "TextBlock", weight: "Bolder", text: msg.title, wrap: true },
     { type: "TextBlock", text: msg.detail, wrap: true },
   ];
+  if (msg.facts && msg.facts.length > 0) {
+    body.push({ type: "FactSet", facts: msg.facts.map((f) => ({ title: f.title, value: f.value })) });
+  }
   if (msg.permalink) {
-    body.push({ type: "TextBlock", text: `[Open in Langfuse](${msg.permalink})`, wrap: true });
+    body.push({ type: "TextBlock", text: `[${msg.linkLabel ?? "Open in Langfuse"}](${msg.permalink})`, wrap: true });
   }
   body.push({ type: "TextBlock", text: `${msg.timestampIso} · window ${msg.window}`, isSubtle: true, wrap: true });
 
@@ -111,12 +118,15 @@ export function formatEmailSubject(msg: AlertMessage): string {
 
 export function formatEmailHtml(msg: AlertMessage): string {
   const link = msg.permalink
-    ? `<p><a href="${escapeHtml(msg.permalink)}">Open in Langfuse</a></p>`
+    ? `<p><a href="${escapeHtml(msg.permalink)}">${escapeHtml(msg.linkLabel ?? "Open in Langfuse")}</a></p>`
     : "";
   return [
     `<p>${msg.severityEmoji} <strong>${escapeHtml(msg.severityLabel)}</strong> — ${escapeHtml(msg.projectLabel)}</p>`,
     `<p><strong>${escapeHtml(msg.title)}</strong></p>`,
     `<p>${escapeHtml(msg.detail)}</p>`,
+    msg.facts && msg.facts.length > 0
+      ? `<table style="border-collapse:collapse;font-size:13px">${msg.facts.map((f) => `<tr><td style="padding:2px 12px 2px 0;color:#666">${escapeHtml(f.title)}</td><td style="padding:2px 0">${escapeHtml(f.value)}</td></tr>`).join("")}</table>`
+      : "",
     link,
     `<p style="color:#666;font-size:12px">${escapeHtml(msg.timestampIso)} · window ${escapeHtml(msg.window)}</p>`,
   ]
@@ -129,8 +139,9 @@ export function formatEmailText(msg: AlertMessage): string {
     `${msg.severityLabel} — ${msg.projectLabel}`,
     msg.title,
     msg.detail,
+    ...(msg.facts ?? []).map((f) => `${f.title}: ${f.value}`),
   ];
-  if (msg.permalink) lines.push(`Open in Langfuse: ${msg.permalink}`);
+  if (msg.permalink) lines.push(`${msg.linkLabel ?? "Open in Langfuse"}: ${msg.permalink}`);
   lines.push(`${msg.timestampIso} · window ${msg.window}`);
   return lines.join("\n\n");
 }

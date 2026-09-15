@@ -103,4 +103,11 @@ describe("cross-channel consistency", () => {
     expect(formatEmailHtml(hostile)).not.toContain("<img");
     expect(formatEmailHtml(hostile)).toContain("&lt;img");
   });
+
+  it("renders facts as a FactSet and a custom link label", () => {
+    const card = formatTeamsCard({ ...msg, facts: [{ title: "Wert", value: "15 %" }], linkLabel: "Dashboard öffnen" }) as { attachments: { content: { body: Record<string, unknown>[] } }[] };
+    const body = card.attachments[0].content.body;
+    expect(body.find((b) => b.type === "FactSet")).toMatchObject({ facts: [{ title: "Wert", value: "15 %" }] });
+    expect(JSON.stringify(body)).toContain("[Dashboard öffnen](");
+  });
 });
