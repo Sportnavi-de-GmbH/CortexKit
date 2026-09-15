@@ -16,6 +16,7 @@ export const config = {
     "/api/monitoring/stats",
     "/api/monitoring/sessions/:path*",
     "/api/monitoring/alerts/events",
+    "/api/monitoring/alerts/events/:path*",
     "/api/monitoring/alerts/rules",
     "/api/monitoring/alerts/rules/:path*",
     "/api/monitoring/alerts/settings",
