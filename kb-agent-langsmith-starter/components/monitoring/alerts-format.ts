@@ -12,7 +12,7 @@ export function fmtRuleValue(key: string, v: number | string | null): string {
   return fmtValue(key as RuleKey, n) ?? "—";
 }
 export function kindLabel(kind: string): string {
-  return kind === "fired" ? "Alarm" : kind === "recovered" ? "Entwarnung" : kind === "digest" ? "Digest" : "Test";
+  return kind === "fired" ? "Alarm" : kind === "recovered" ? "Entwarnung" : kind === "digest" ? "Statusbericht" : "Test";
 }
 export function severityTone(kind: string, severity: string | null): "red" | "warn" | "green" | "muted" {
   if (kind === "recovered") return "green";

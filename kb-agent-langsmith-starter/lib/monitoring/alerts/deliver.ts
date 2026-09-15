@@ -2,11 +2,11 @@
 // sends them through the EXISTING channels (teams.ts, graph-mail.ts). Never throws.
 // Title and body are the human story; every identifier, raw value and threshold goes into the
 // separate "Für das Technik-Team" block so the readable part stays readable.
-import type { AlertMessage } from "../format-alert";
+import { HUMAN_SEVERITY, type AlertMessage } from "../format-alert";
 import { sendTeamsAlert, teamsEnabled } from "../teams";
 import { sendAlertEmail, graphMailEnabled } from "../graph-mail";
 import { fmtObserved, fmtThreshold, humanHeadline, humanRuleName } from "./narrate";
-import { humanErrored } from "./copy";
+import { humanErrored, humanNote, humanThreshold, humanValue } from "./copy";
 import type { Observation, Transition } from "./types";
 
 export const PROJECT_LABEL = "Navio Monitoring";
@@ -18,7 +18,7 @@ export type Delivery = { teams: string; email: string };
 
 const SEV: Record<AlertMessage["severity"], string> = { ALERT: "🔴", WARNING: "🟡", OK: "🟢", NO_DATA: "⚪", PAUSED: "⏸️", UNKNOWN: "⚫" };
 function base(severity: AlertMessage["severity"], title: string, detail: string, url: string): AlertMessage {
-  return { title, detail, severity, severityEmoji: SEV[severity], severityLabel: severity, projectLabel: PROJECT_LABEL, window: "", permalink: url, linkLabel: LINK_LABEL, timestampIso: new Date().toISOString() };
+  return { title, detail, severity, severityEmoji: SEV[severity], severityLabel: severity, humanSeverity: HUMAN_SEVERITY[severity], projectLabel: PROJECT_LABEL, window: "", permalink: url, linkLabel: LINK_LABEL, timestampIso: new Date().toISOString() };
 }
 const windowOf = (o: Observation) => (o.rule.key === "cost_daily" ? "heute (Berlin)" : `${o.rule.window_hours} h`);
 const ruleRef = (o: Observation) => `${o.rule.key}·${o.agent}${o.subkey ? `·${o.subkey}` : ""}`;
@@ -42,12 +42,16 @@ export function transitionMessage(t: Transition, narrative: string, dashboardUrl
 
 export function digestMessage(obs: Observation[], errored: string[], narrative: string, dashboardUrl: string): AlertMessage {
   const breached = obs.filter((o) => o.status === "breached").length;
-  const m = base(breached > 0 ? "ALERT" : "OK", breached > 0 ? `Statusbericht: ${breached} Problem(e)` : "Statusbericht: alles in Ordnung", narrative, dashboardUrl);
+  const title = breached > 0 ? `Statusbericht: ${breached} Problem${breached === 1 ? "" : "e"}` : "Statusbericht: alles in Ordnung";
+  const m = base(breached > 0 ? "ALERT" : "OK", title, narrative, dashboardUrl);
   m.window = "Statusbericht";
-  m.facts = obs.map((o) => ({
-    title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${humanRuleName(o.rule.key, o.agent, o.subkey)}`,
-    value: `${fmtObserved(o)} (erlaubt bis ${fmtThreshold(o)})${o.note ? ` – ${o.note}` : ""}`,
-  }));
+  m.facts = obs.map((o) => {
+    const note = humanNote(o);
+    return {
+      title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${humanRuleName(o.rule.key, o.agent, o.subkey)}`,
+      value: `${humanValue(o)} (erlaubt bis ${humanThreshold(o)})${note ? ` – ${note}` : ""}`,
+    };
+  });
   if (errored.length) m.facts.push({ title: "⚪ Nicht prüfbar", value: `${errored.map(humanErrored).join(", ")} (die Daten konnten nicht geladen werden)` });
   return m;
 }

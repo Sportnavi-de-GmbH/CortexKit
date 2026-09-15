@@ -12,6 +12,7 @@ describe("alerts dashboard formatters", () => {
   });
   it("labels and tones", () => {
     expect(kindLabel("fired")).toBe("Alarm");
+    expect(kindLabel("digest")).toBe("Statusbericht");
     expect(severityTone("fired", "alert")).toBe("red");
     expect(severityTone("fired", "warning")).toBe("warn");
     expect(severityTone("recovered", "alert")).toBe("green");

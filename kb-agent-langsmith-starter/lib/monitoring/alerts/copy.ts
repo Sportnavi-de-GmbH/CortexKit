@@ -29,33 +29,102 @@ export const NO_ACTION = "Keine Aktion nötig.";
 const TELL_TECH = "Bitte das Technik-Team informieren, falls die Meldung morgen erneut kommt.";
 const COST_NEXT = "Bitte im Monitoring prüfen, ob ungewöhnlich viele Anfragen kamen, und ggf. das Technik-Team informieren.";
 const ERRORS_NEXT = "Bitte im Monitoring unter 'Neueste Fehler' nachsehen und, falls es weiter auftritt, das Technik-Team informieren.";
+/** Costs are an operating figure; nothing in the data says a user saw anything. */
+const COST_IMPACT = "Für die Nutzer ändert sich dadurch nichts Sichtbares; es geht nur um die Kosten.";
 
-const plural = (a: ObsAgent) => a === "total";
-const hat = (a: ObsAgent) => (plural(a) ? "haben" : "hat");
-const ist = (a: ObsAgent) => (plural(a) ? "sind" : "ist");
+/**
+ * Subject-aware verb forms. "Beide Assistenten hat …" is the kind of sentence that makes a
+ * reader stop trusting the message, so every template takes its verbs from here.
+ */
+export interface AgentVerbs { subject: string; title: string; hat: string; ist: string; liegt: string; antwortet: string }
+export function verbs(a: ObsAgent): AgentVerbs {
+  const p = a === "total";
+  return {
+    subject: AGENT_SUBJECT[a],
+    title: AGENT_TITLE[a],
+    hat: p ? "haben" : "hat",
+    ist: p ? "sind" : "ist",
+    liegt: p ? "liegen" : "liegt",
+    antwortet: p ? "antworten" : "antwortet",
+  };
+}
 
-/** "in den letzten 24 Stunden" / "in den letzten 7 Tagen" / "heute". */
+/** "in der letzten Stunde" / "in den letzten 24 Stunden" / "in den letzten 7 Tagen" / "heute". */
 export function windowPhrase(o: Observation): string {
   if (o.rule.key === "cost_daily") return "heute";
   const h = o.rule.window_hours;
   if (h >= 48 && h % 24 === 0) return `in den letzten ${h / 24} Tagen`;
+  if (h === 1) return "in der letzten Stunde";
   return `in den letzten ${h} Stunden`;
 }
 const Window = (o: Observation) => { const w = windowPhrase(o); return w.charAt(0).toUpperCase() + w.slice(1); };
 
+const de1 = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const de2 = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const val = (o: Observation) => fmtValue(o.rule.key, o.observed);
 const lim = (o: Observation) => fmtValue(o.rule.key, o.threshold);
-/** The cost spike is a multiplier; "3,2x Basis" is jargon, "3,2-mal so hoch" is not. */
-const times = (v: number | null) => (v === null ? "deutlich mehr" : `${v.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}-mal so hoch`);
+
+/**
+ * The cost spike is a multiplier; "3,2× Basis" is jargon, "3,2-mal so hoch wie an einem
+ * normalen Tag" is not. 999 is the "baseline was zero" sentinel from rules.ts and must never
+ * be printed as a number — it is not a measurement.
+ */
+export function times(v: number | null): string {
+  if (v === null || !Number.isFinite(v) || v >= 999) return "deutlich mehr als an einem normalen Tag";
+  return `${de1(v)}-mal so hoch wie an einem normalen Tag`;
+}
+
+/** The observed value as a human reads it (the technical view keeps `fmtValue`). */
+export function humanValue(o: Observation): string {
+  // A skipped rule has no measurement at all; saying "deutlich mehr" there would be a claim
+  // the data does not make.
+  if (o.observed === null) return "nicht gemessen";
+  if (o.rule.key === "cost_spike") return times(o.observed);
+  return fmtValue(o.rule.key, o.observed);
+}
+/** The threshold as a human reads it. */
+export function humanThreshold(o: Observation): string {
+  if (o.rule.key === "cost_spike") return `${de1(o.threshold)}-mal`;
+  return fmtValue(o.rule.key, o.threshold);
+}
+
+/**
+ * `rules.ts` writes engineer notes ("zu wenig Daten (0 < 10)"). They are diagnostics, not
+ * sentences for the team — this translates the four it can produce and returns null for
+ * anything it does not recognise, so an unknown note is dropped rather than leaked.
+ */
+export function humanNote(o: Observation): string | null {
+  const note = (o.note ?? "").trim();
+  if (!note) return null;
+  const warm = /^Aufwärmphase \(warmup\):\s*(\d+)\s*\/\s*(\d+)\s*Tage Basis$/.exec(note);
+  if (warm) return `Noch nicht genug Vergleichstage gesammelt (${warm[1]} von ${warm[2]})`;
+  if (/^zu wenig Daten \(\d+\s*<\s*\d+\)$/.test(note)) return "Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen";
+  if (note === "Fenster nicht geladen") return "Die Daten konnten nicht geladen werden";
+  const spike = /^24h\s+([\d.]+)\s*\$\s*vs\s*Basis\s+([\d.]+)\s*\$/.exec(note);
+  if (spike) {
+    const today = Number(spike[1]);
+    const base = Number(spike[2]);
+    if (!Number.isFinite(today) || !Number.isFinite(base)) return null;
+    return `Heute ${de2(today)} $, an einem normalen Tag ${de2(base)} $`;
+  }
+  return null;
+}
 
 /** A known error type explains itself; an unknown one must never be guessed at. */
-export function causeOfErrorType(type: string): string | null {
+export function causeOfErrorType(type: string, agent: ObsAgent = "total"): string | null {
   const t = (type || "").toLowerCase();
   if (t.includes("429") || t.includes("rate_limit") || t.includes("rate-limit") || t.includes("ratelimit") || t.includes("overload")) {
     return "Die meisten Fehler kamen vom KI-Anbieter, der Anfragen abgewiesen hat, weil er zeitweise überlastet war.";
   }
   if (t.includes("timeout") || t.includes("timed_out")) return "Die Antworten kamen zu spät: der Dienst hat länger gebraucht, als er darf.";
-  if (t.includes("unavailable") || t.includes("upstream")) return "Die Partner-Suche war in dieser Zeit nicht erreichbar.";
+  if (t.includes("unavailable") || t.includes("upstream")) {
+    // Only the partner search is known to depend on an external service; for the FAQ
+    // assistant (or for both at once) the data does not say which service it was.
+    return agent === "partner"
+      ? "Die Partner-Suche war in dieser Zeit nicht erreichbar."
+      : "Ein benötigter Dienst war in dieser Zeit nicht erreichbar.";
+  }
   return null;
 }
 
@@ -78,36 +147,36 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
     titleOk: (o) => `Entwarnung: Kosten ${AGENT_GENITIVE[o.agent]} wieder im Rahmen`,
     what: (o) => `Die Kosten ${AGENT_FOR[o.agent]} liegen heute bei ${val(o)} und damit über dem geplanten Tagesbudget von ${lim(o)}.`,
     why: () => UNKNOWN_CAUSE,
-    impact: () => "Der Chatbot hat weiter normal geantwortet, der Betrieb war heute nur teurer als geplant.",
+    impact: () => COST_IMPACT,
     next: () => COST_NEXT,
-    recovered: (o) => `Die Kosten ${AGENT_FOR[o.agent]} liegen heute wieder im geplanten Rahmen: ${val(o)} statt der Obergrenze von ${lim(o)}. Es entstehen keine zusätzlichen Kosten mehr.`,
+    recovered: (o) => `Die Kosten ${AGENT_FOR[o.agent]} liegen heute bei ${val(o)}, die Obergrenze liegt bei ${lim(o)}. Die Kosten liegen wieder im geplanten Rahmen.`,
   },
   cost_spike: {
     title: (o) => `${AGENT_TITLE[o.agent]}: Kosten deutlich gestiegen`,
     titleOk: (o) => `Entwarnung: Kosten ${AGENT_GENITIVE[o.agent]} wieder wie üblich`,
-    what: (o) => `Die Kosten ${AGENT_FOR[o.agent]} sind ${windowPhrase(o)} ${times(o.observed)} wie an einem normalen Tag.`,
+    what: (o) => `Die Kosten ${AGENT_FOR[o.agent]} sind ${windowPhrase(o)} ${times(o.observed)}.`,
     why: () => UNKNOWN_CAUSE,
-    impact: () => "Der Chatbot hat weiter normal geantwortet, der Betrieb war in dieser Zeit nur teurer als üblich.",
+    impact: () => COST_IMPACT,
     next: () => COST_NEXT,
-    recovered: (o) => `Die Kosten ${AGENT_FOR[o.agent]} sind wieder auf dem üblichen Niveau. Der Anstieg war vorübergehend.`,
+    recovered: (o) => `Die Kosten ${AGENT_FOR[o.agent]} sind wieder auf dem üblichen Niveau: noch ${times(o.observed)}. Der Anstieg war vorübergehend.`,
   },
   failure_rate: {
     title: (o) => `${AGENT_TITLE[o.agent]}: viele Anfragen ohne Antwort`,
-    titleOk: (o) => `Entwarnung: ${AGENT_TITLE[o.agent]} antwortet wieder`,
-    what: (o) => `${AGENT_SUBJECT[o.agent]} ${hat(o.agent)} ${windowPhrase(o)} bei ${val(o)} der Anfragen keine Antwort geliefert; normal wären höchstens ${lim(o)}.`,
+    titleOk: (o) => `Entwarnung: ${AGENT_TITLE[o.agent]} ${verbs(o.agent).antwortet} wieder`,
+    what: (o) => `${verbs(o.agent).subject} ${verbs(o.agent).hat} ${windowPhrase(o)} bei ${val(o)} der Anfragen keine Antwort geliefert; normal wären höchstens ${lim(o)}.`,
     why: () => UNKNOWN_CAUSE,
-    impact: () => "Betroffene Nutzer haben eine Fehlermeldung statt einer Antwort gesehen.",
+    impact: () => "Betroffene Nutzer haben keine brauchbare Antwort bekommen.",
     next: () => ERRORS_NEXT,
-    recovered: (o) => `${AGENT_SUBJECT[o.agent]} ${hat(o.agent)} ${windowPhrase(o)} nur noch bei ${val(o)} der Anfragen nicht geantwortet und liegt damit wieder im normalen Bereich. Die Nutzer bekommen wieder ihre Antworten.`,
+    recovered: (o) => `${verbs(o.agent).subject} ${verbs(o.agent).hat} ${windowPhrase(o)} nur noch bei ${val(o)} der Anfragen nicht geantwortet und ${verbs(o.agent).liegt} damit wieder im normalen Bereich. Die Nutzer bekommen wieder ihre Antworten.`,
   },
   latency_p95: {
     title: (o) => `${AGENT_TITLE[o.agent]}: Antworten dauern zu lange`,
-    titleOk: (o) => `Entwarnung: ${AGENT_TITLE[o.agent]} antwortet wieder schnell`,
-    what: (o) => `${AGENT_SUBJECT[o.agent]} ${hat(o.agent)} ${windowPhrase(o)} für die langsamsten Anfragen ${val(o)} gebraucht; vorgesehen sind höchstens ${lim(o)}.`,
+    titleOk: (o) => `Entwarnung: ${AGENT_TITLE[o.agent]} ${verbs(o.agent).antwortet} wieder schnell`,
+    what: (o) => `${verbs(o.agent).subject} ${verbs(o.agent).hat} ${windowPhrase(o)} für die langsamsten Anfragen ${val(o)} gebraucht; vorgesehen sind höchstens ${lim(o)}.`,
     why: () => UNKNOWN_CAUSE,
     impact: () => "Betroffene Nutzer mussten ungewöhnlich lange auf eine Antwort warten und haben womöglich vorher abgebrochen.",
     next: () => TELL_TECH,
-    recovered: (o) => `${AGENT_SUBJECT[o.agent]} ${ist(o.agent)} wieder schnell: die langsamsten Anfragen dauerten ${windowPhrase(o)} noch ${val(o)}. Die Nutzer warten wieder normal lange.`,
+    recovered: (o) => `${verbs(o.agent).subject} ${verbs(o.agent).ist} wieder schnell: die langsamsten Anfragen dauerten ${windowPhrase(o)} noch ${val(o)}. Die Nutzer warten wieder normal lange.`,
   },
   negative_feedback: {
     title: (o) => `${AGENT_TITLE[o.agent]}: viele schlechte Bewertungen`,
@@ -122,7 +191,7 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
     title: (o) => `${AGENT_TITLE[o.agent]}: derselbe Fehler tritt wiederholt auf`,
     titleOk: (o) => `Entwarnung: ${AGENT_TITLE[o.agent]} ohne wiederholte Fehler`,
     what: (o) => `${Window(o)} ist ${AGENT_AT[o.agent]} ${val(o)} derselbe Fehler aufgetreten; ab ${lim(o)} melden wir das.`,
-    why: (o) => causeOfErrorType(o.subkey) ?? UNKNOWN_CAUSE,
+    why: (o) => causeOfErrorType(o.subkey, o.agent) ?? UNKNOWN_CAUSE,
     impact: () => "Betroffene Nutzer haben statt einer Antwort eine Fehlermeldung gesehen.",
     next: () => ERRORS_NEXT,
     recovered: (o) => `Der wiederholte Fehler ${AGENT_AT[o.agent]} tritt nicht mehr auf. Die Nutzer bekommen wieder ihre Antworten.`,

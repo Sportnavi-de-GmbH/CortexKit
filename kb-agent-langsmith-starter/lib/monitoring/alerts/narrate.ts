@@ -5,7 +5,7 @@
 import type { LanguageModel } from "ai";
 import type { Observation, ObsAgent, RuleKey, Transition } from "./types";
 import { fmtValue } from "./format";
-import { AGENT_HUMAN, HUMAN, NO_ACTION, humanErrored, humanHeadline, humanRuleName, windowPhrase } from "./copy";
+import { AGENT_HUMAN, HUMAN, NO_ACTION, humanErrored, humanHeadline, humanNote, humanRuleName, humanThreshold, humanValue, windowPhrase } from "./copy";
 
 export interface NarrateDeps {
   generate?: (prompt: { system: string; user: string }) => Promise<string>;
@@ -46,15 +46,21 @@ export function templateTransition(t: Transition): string {
   return [d.what, d.why, d.impact, d.next].filter(Boolean).join(" ");
 }
 
+export function digestLine(o: Observation): string {
+  const mark = o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢";
+  const note = humanNote(o);
+  return `${mark} ${humanRuleName(o.rule.key, o.agent, o.subkey)}: ${humanValue(o)} (erlaubt bis ${humanThreshold(o)})${note ? ` – ${note}` : ""}`;
+}
+
 export function templateDigest(obs: Observation[], errored: string[]): string {
   const breached = obs.filter((o) => o.status === "breached").length;
-  const head = breached === 0
-    ? "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen."
-    : `Achtung: ${breached} Problem${breached === 1 ? "" : "e"} gefunden.`;
-  const lines = obs.map((o) => {
-    const mark = o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢";
-    return `${mark} ${humanRuleName(o.rule.key, o.agent, o.subkey)}: ${fmtObserved(o)} (erlaubt bis ${fmtThreshold(o)})${o.note ? ` – ${o.note}` : ""}`;
-  });
+  const unchecked = errored.length > 0 || obs.some((o) => o.status === "skipped");
+  const head = breached > 0
+    ? `Achtung: ${breached} Problem${breached === 1 ? "" : "e"} gefunden.`
+    : unchecked
+      ? "Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden."
+      : "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen.";
+  const lines = obs.map(digestLine);
   const err = errored.map((e) => `Nicht prüfbar: ${humanErrored(e)} (die Daten konnten nicht geladen werden)`);
   return [head, ...lines, ...err].join("\n");
 }
@@ -90,11 +96,17 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   }
 }
 
+/**
+ * Last line of defence: the model is told not to use identifiers, but a prompt is not a
+ * guarantee. If jargon reaches the text, the deterministic template is used instead.
+ */
+const TECHNICAL_LEAK = /[a-z_]+·(faq|partner|total)|failure_rate|latency_p95|cost_(daily|spike)|error_repeat|partner_upstream|HTTP \d|\bp95\b|warmup|\d+ ?< ?\d+/i;
+
 async function run(user: Record<string, unknown>, fallback: string, deps: NarrateDeps): Promise<Narrative> {
   const generate = deps.generate ?? defaultGenerate;
   try {
     const text = await withTimeout(generate({ system: SYSTEM, user: JSON.stringify(user) }), deps.timeoutMs ?? 8000);
-    if (!text || text.length > 1200) return { text: fallback, source: "template" };
+    if (!text || text.length > 1200 || TECHNICAL_LEAK.test(text)) return { text: fallback, source: "template" };
     return { text, source: "llm" };
   } catch {
     return { text: fallback, source: "template" };
@@ -111,7 +123,7 @@ export function narrateTransition(t: Transition, deps: NarrateDeps = {}): Promis
     agent: AGENT_HUMAN[o.agent],
     observed: fmtObserved(o), threshold: fmtThreshold(o),
     samples: o.samples, window: windowPhrase(o),
-    note: o.note ?? null,
+    note: humanNote(o),
     draft: draftTransition(t),
   }, templateTransition(t), deps);
 }
@@ -119,7 +131,7 @@ export function narrateTransition(t: Transition, deps: NarrateDeps = {}): Promis
 export function narrateDigest(obs: Observation[], errored: string[], deps: NarrateDeps = {}): Promise<Narrative> {
   return run({
     kind: "statusbericht",
-    rules: obs.map((o) => ({ metric: humanRuleName(o.rule.key, o.agent, o.subkey), status: o.status === "breached" ? "Problem" : o.status === "skipped" ? "nicht geprüft" : "in Ordnung", observed: fmtObserved(o), threshold: fmtThreshold(o), note: o.note ?? null })),
+    rules: obs.map((o) => ({ metric: humanRuleName(o.rule.key, o.agent, o.subkey), status: o.status === "breached" ? "Problem" : o.status === "skipped" ? "nicht geprüft" : "in Ordnung", observed: humanValue(o), threshold: humanThreshold(o), note: humanNote(o) })),
     not_evaluable: errored.map(humanErrored),
     draft: templateDigest(obs, errored),
   }, templateDigest(obs, errored), deps);

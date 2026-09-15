@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { deliver, transitionMessage, digestMessage, testMessage, TECH_LABEL } from "../lib/monitoring/alerts/deliver";
-import { formatTeamsCard, formatEmailHtml } from "../lib/monitoring/format-alert";
+import { formatTeamsCard, formatEmailHtml, formatEmailSubject } from "../lib/monitoring/format-alert";
 import type { AlertRule, Observation, Transition } from "../lib/monitoring/alerts/types";
 
 const rule: AlertRule = { id: "r1", key: "failure_rate", agent: "all", enabled: true, severity: "alert", threshold: 0.1, window_hours: 24, min_samples: 10, params: {}, description: "" };
@@ -45,12 +45,37 @@ describe("messages", () => {
   });
   it("digest has a plain-words title, one human fact per observation, and a FactSet", () => {
     const m = digestMessage([obs, { ...obs, agent: "partner", status: "ok", observed: 0.01 }], [], "Lage.", URL);
-    expect(m.title).toBe("Statusbericht: 1 Problem(e)");
+    expect(m.title).toBe("Statusbericht: 1 Problem");
     expect(m.facts).toHaveLength(2);
     expect(m.facts?.[0].title).toContain("Fehlerrate des FAQ-Assistenten");
     const card = formatTeamsCard(m) as { attachments: { content: { body: { type: string }[] } }[] };
     expect(card.attachments[0].content.body.some((b) => b.type === "FactSet")).toBe(true);
     expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], [], "Lage.", URL).title).toBe("Statusbericht: alles in Ordnung");
+    expect(digestMessage([obs, { ...obs, agent: "partner" }], [], "Lage.", URL).title).toBe("Statusbericht: 2 Probleme");
+  });
+  it("the card chrome speaks German and keeps the ISO time in the technical block", () => {
+    const m = transitionMessage(fired, "Text.", URL);
+    expect(m.humanSeverity).toBe("Alarm");
+    expect(formatEmailSubject(m)).toBe("[Navio] Alarm: FAQ-Assistent: viele Anfragen ohne Antwort");
+    expect(transitionMessage({ kind: "recovered", obs: { ...obs, status: "ok" } }, "x", URL).humanSeverity).toBe("Entwarnung / alles in Ordnung");
+    const card = formatTeamsCard(m) as { attachments: { content: { body: { type: string; text?: string; facts?: { title: string; value: string }[] }[] } }[] };
+    const body = card.attachments[0].content.body;
+    expect(body[0].text).toContain("Alarm");
+    expect(body[0].text).not.toMatch(/ALERT/);
+    const last = body[body.length - 1];
+    expect(last.text).not.toMatch(/window|\d{4}-\d{2}-\d{2}T/);
+    expect(last.text).toMatch(/^\d{2}\.\d{2}\. \d{2}:\d{2}$/);
+    const tech = body.filter((b) => b.type === "FactSet").pop();
+    expect(tech?.facts?.some((f) => f.title === "Zeitpunkt" && f.value === m.timestampIso)).toBe(true);
+  });
+  it("the digest facts read in plain words, never a raw note or a multiplier", () => {
+    const spike = { ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, status: "skipped" as const, observed: null, note: "Aufwärmphase (warmup): 0/7 Tage Basis" };
+    const m = digestMessage([spike], [], "Lage.", URL);
+    expect(m.facts?.[0].value).toContain("Noch nicht genug Vergleichstage gesammelt (0 von 7)");
+    expect(m.facts?.[0].value).not.toMatch(/warmup/);
+    const hot = digestMessage([{ ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, observed: 3.2, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }], [], "Lage.", URL);
+    expect(hot.facts?.[0].value).toContain("3,2-mal so hoch wie an einem normalen Tag");
+    expect(hot.facts?.[0].value).not.toMatch(/× Basis/);
   });
   it("test message reassures instead of alarming", () => {
     const m = testMessage(URL);

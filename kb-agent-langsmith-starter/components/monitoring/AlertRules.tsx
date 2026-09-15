@@ -84,7 +84,7 @@ function RunReport({ result }: { result: RunResult }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-(--fg-muted)">
-        Slot {result.slot ?? "—"} {"·"} {result.dryRun ? "Vorschau (nichts gesendet)" : "ausgeführt"} {"·"} {transitions.length} Übergang(e)
+        Slot {result.slot ?? "—"} {"·"} {result.dryRun ? "Vorschau (nichts gesendet)" : "ausgeführt"} {"·"} {transitions.length} Übergang{transitions.length === 1 ? "" : "e"}
         {result.errored && result.errored.length > 0 ? ` · nicht prüfbar: ${result.errored.map(humanErroredLabel).join(", ")}` : ""}
       </p>
       {transitions.length > 0 && (

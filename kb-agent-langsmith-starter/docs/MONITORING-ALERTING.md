@@ -356,10 +356,18 @@ email, feed row, run report — states four things in this order, in plain Germa
 key, agent id, error code, stack trace or metric abbreviation:**
 
 1. **Was ist passiert** — what happened, with the numbers already formatted.
-2. **Warum** — only when the data supports it (`error_repeat` / `partner_upstream` translate
-   the error type: rate limit → "der KI-Anbieter hat Anfragen abgewiesen (Überlastung)",
-   timeout → "Antworten kamen zu spät", unavailable → "die Partner-Suche war nicht
-   erreichbar"). Otherwise the sentence is literally "Die Ursache ist noch nicht bekannt."
+2. **Warum** — only when the data supports it. `causeOfErrorType()` knows exactly three, and
+   these are the sentences it writes, verbatim:
+   * rate limit / overload / `429` → "Die meisten Fehler kamen vom KI-Anbieter, der Anfragen
+     abgewiesen hat, weil er zeitweise überlastet war."
+   * timeout → "Die Antworten kamen zu spät: der Dienst hat länger gebraucht, als er darf."
+   * unavailable / upstream → "Die Partner-Suche war in dieser Zeit nicht erreichbar." **only
+     when the observation is the partner agent's**; for the FAQ agent or for both at once the
+     data does not say which service it was, so it reads "Ein benötigter Dienst war in dieser
+     Zeit nicht erreichbar."
+
+   `partner_upstream` always states "Der Dienst hinter der Partner-Suche hat in dieser Zeit
+   nicht geantwortet." Otherwise the sentence is literally "Die Ursache ist noch nicht bekannt."
 3. **Was es für die Nutzer bedeutet** — or, for a recovery, that it works again.
 4. **Was jetzt zu tun ist** — one step a non-technical person can do, always the last
    sentence; a recovery ends with "Keine Aktion nötig."
@@ -381,27 +389,68 @@ delivery strings such as `failed: HTTP 403: …`); the visible delivery chips sa
 The Regeln tab's observation table stays technical on purpose — it *is* the technical view —
 but its rows are labelled with the human rule name.
 
+**No number the data does not support, and no engineer note.** `rules.ts` writes diagnostic
+notes ("zu wenig Daten (0 < 10)", "Aufwärmphase (warmup): 0/7 Tage Basis", "Fenster nicht
+geladen", "24h 3.20 $ vs Basis 1.00 $/Tag"); `humanNote()` in `copy.ts` translates those four
+into plain German ("Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen", "Noch
+nicht genug Vergleichstage gesammelt (0 von 7)", "Die Daten konnten nicht geladen werden",
+"Heute 3,20 $, an einem normalen Tag 1,00 $") and returns `null` for anything it does not
+recognise — an unknown note is dropped, never leaked. Only the humanised note goes into the
+digest line and into the model's JSON; the raw one stays in the technical view (the Regeln
+tab's "Hinweis" column). The `cost_spike` multiplier is phrased "3,2-mal so hoch wie an einem
+normalen Tag" everywhere a human reads it (`times()`), never "3,2× Basis"; the **999
+sentinel** (baseline was zero) becomes "deutlich mehr als an einem normalen Tag" and is never
+printed as a number, and a skipped rule reads "nicht gemessen" instead of a value it never
+measured. Verbs agree with the subject, so an `agent: "total"` observation reads "Beide
+Assistenten haben … liegen …", not "hat … liegt". And because a prompt is not a guarantee,
+`narrate.ts` runs the model's answer through a jargon regex (rule keys, `p95`, `HTTP 4xx`,
+`warmup`, `a·faq`, `0 < 10`) and falls back to the template with `source: "template"` if any
+of it appears.
+
 One real card, `failure_rate` breaching for the FAQ agent (template wording; the LLM only
 rephrases it):
 
+> 🔴 Alarm — Navio Monitoring
+>
 > **FAQ-Assistent: viele Anfragen ohne Antwort**
 >
 > Der FAQ-Assistent hat in den letzten 24 Stunden bei 15 % der Anfragen keine Antwort
 > geliefert; normal wären höchstens 10 %. Die Ursache ist noch nicht bekannt. Betroffene
-> Nutzer haben eine Fehlermeldung statt einer Antwort gesehen. Bitte im Monitoring unter
+> Nutzer haben keine brauchbare Antwort bekommen. Bitte im Monitoring unter
 > 'Neueste Fehler' nachsehen und, falls es weiter auftritt, das Technik-Team informieren.
 >
 > *Für das Technik-Team* — Regel `failure_rate·faq` · Agent `faq` · Wert 15 % · Grenze 10 % ·
-> Fenster 24 h · Turns 20
+> Fenster 24 h · Turns 20 · Zeitpunkt `2026-09-15T10:44:53.448Z`
+>
+> 15.09. 12:44
 
-and its recovery: *"Entwarnung: FAQ-Assistent antwortet wieder"* — "Der FAQ-Assistent hat in
-den letzten 24 Stunden nur noch bei 2 % der Anfragen nicht geantwortet und liegt damit wieder
-im normalen Bereich. Die Nutzer bekommen wieder ihre Antworten. Keine Aktion nötig."
+The card chrome is German too: the header reads "🔴 Alarm — Navio Monitoring" (not `ALERT`),
+the email subject is `[Navio] Alarm: FAQ-Assistent: viele Anfragen ohne Antwort`, and the ISO
+timestamp moved into the technical block — the visible footer is "15.09. 12:44". This applies
+to the monitoring messages only: they carry `AlertMessage.humanSeverity` (`ALERT` → "Alarm",
+`WARNING` → "Warnung", `OK` → "Entwarnung / alles in Ordnung", `NO_DATA` → "Keine Daten",
+`PAUSED` → "Pausiert", `UNKNOWN` → "Unbekannt"), which every renderer prefers when present.
+The Langfuse relay leaves the field undefined and keeps its byte-identical English chrome.
 
-The digest is titled "Statusbericht: alles in Ordnung" / "Statusbericht: N Problem(e)" and
-opens with "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen." or
-"Achtung: N Problem(e) gefunden.", then one plain line per rule, then any rule that could not
-be evaluated as "Nicht prüfbar: <human name> (die Daten konnten nicht geladen werden)".
+Its recovery, here for `agent: "total"` — *"Entwarnung: Beide Assistenten antworten wieder"*:
+
+> Beide Assistenten haben in den letzten 24 Stunden nur noch bei 2 % der Anfragen nicht
+> geantwortet und liegen damit wieder im normalen Bereich. Die Nutzer bekommen wieder ihre
+> Antworten. Keine Aktion nötig.
+
+The digest is titled "Statusbericht: alles in Ordnung" / "Statusbericht: 1 Problem" /
+"Statusbericht: N Probleme" (no "(e)"). Its first line is "Achtung: 1 Problem gefunden." / "Achtung: N Probleme gefunden."
+when something breached, "Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft
+werden." when nothing breached but a rule was skipped or could not be evaluated, and only
+otherwise "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen."
+Then one plain line per rule, then any rule that could not be evaluated as "Nicht prüfbar:
+<human name> (die Daten konnten nicht geladen werden)". A real one with a warming-up rule:
+
+> Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden.
+> 🟢 Fehlerrate des FAQ-Assistenten: 1 % (erlaubt bis 10 %)
+> ⚪ Kostenanstieg beider Assistenten: nicht gemessen (erlaubt bis 3,0-mal) – Noch nicht genug
+> Vergleichstage gesammelt (0 von 7)
+
 The test alarm reads "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig."
 
 ### The 7 rules

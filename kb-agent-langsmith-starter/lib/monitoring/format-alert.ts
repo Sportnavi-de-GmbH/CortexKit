@@ -49,6 +49,44 @@ export interface AlertMessage {
   techFacts?: { title: string; value: string }[];
   /** Heading shown above `techFacts` (e.g. "Für das Technik-Team"). */
   techLabel?: string;
+  /**
+   * German, human severity word ("Alarm", "Warnung", "Entwarnung / alles in Ordnung").
+   * Set by the monitoring alerts only; the Langfuse relay leaves it undefined and keeps its
+   * byte-identical English chrome. Every renderer prefers it over `severityLabel` when present,
+   * and treats its presence as "this message is read by the Sportnavi team" — the ISO
+   * timestamp then moves into the technical block.
+   */
+  humanSeverity?: string;
+}
+
+/** ALERT → "Alarm": the word the team reads, not the enum. */
+export const HUMAN_SEVERITY: Record<AlertMessage["severity"], string> = {
+  ALERT: "Alarm",
+  WARNING: "Warnung",
+  OK: "Entwarnung / alles in Ordnung",
+  NO_DATA: "Keine Daten",
+  PAUSED: "Pausiert",
+  UNKNOWN: "Unbekannt",
+};
+
+/** "15.09. 10:30" — a time a human reads, not an ISO string. */
+function humanTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** The technical rows as rendered: for a human-facing message the ISO time joins them. */
+function techRowsOf(msg: AlertMessage): { title: string; value: string }[] {
+  const rows = [...(msg.techFacts ?? [])];
+  if (msg.humanSeverity) rows.push({ title: "Zeitpunkt", value: msg.timestampIso });
+  return rows;
+}
+
+/** The small grey line at the bottom of a card/email. */
+function footerOf(msg: AlertMessage): string {
+  return msg.humanSeverity ? humanTime(msg.timestampIso) : `${msg.timestampIso} · window ${msg.window}`;
 }
 
 const SEVERITY_EMOJI: Record<AlertMessage["severity"], string> = {
@@ -81,12 +119,13 @@ export function toAlertMessage(event: LangfuseWebhookPayload, projectLabel: stri
  *  flow iterates over Adaptive Card attachments, so the card shape is required, not optional.
  *  TextBlock markdown covers what we need (bold, links). */
 export function formatTeamsCard(msg: AlertMessage): Record<string, unknown> {
+  const techFacts = techRowsOf(msg);
   const body: Array<Record<string, unknown>> = [
     {
       type: "TextBlock",
       size: "Medium",
       weight: "Bolder",
-      text: `${msg.severityEmoji} ${msg.severityLabel} — ${msg.projectLabel}`,
+      text: `${msg.severityEmoji} ${msg.humanSeverity ?? msg.severityLabel} — ${msg.projectLabel}`,
       wrap: true,
     },
     { type: "TextBlock", weight: "Bolder", text: msg.title, wrap: true },
@@ -95,14 +134,14 @@ export function formatTeamsCard(msg: AlertMessage): Record<string, unknown> {
   if (msg.facts && msg.facts.length > 0) {
     body.push({ type: "FactSet", facts: msg.facts.map((f) => ({ title: f.title, value: f.value })) });
   }
-  if (msg.techFacts && msg.techFacts.length > 0) {
+  if (techFacts.length > 0) {
     body.push({ type: "TextBlock", size: "Small", isSubtle: true, text: msg.techLabel ?? "Technische Details", wrap: true });
-    body.push({ type: "FactSet", facts: msg.techFacts.map((f) => ({ title: f.title, value: f.value })) });
+    body.push({ type: "FactSet", facts: techFacts.map((f) => ({ title: f.title, value: f.value })) });
   }
   if (msg.permalink) {
     body.push({ type: "TextBlock", text: `[${msg.linkLabel ?? "Open in Langfuse"}](${msg.permalink})`, wrap: true });
   }
-  body.push({ type: "TextBlock", text: `${msg.timestampIso} · window ${msg.window}`, isSubtle: true, wrap: true });
+  body.push({ type: "TextBlock", text: footerOf(msg), isSubtle: true, wrap: true });
 
   return {
     type: "message",
@@ -121,43 +160,46 @@ export function formatTeamsCard(msg: AlertMessage): Record<string, unknown> {
 }
 
 export function formatEmailSubject(msg: AlertMessage): string {
+  if (msg.humanSeverity) return `[Navio] ${msg.humanSeverity}: ${msg.title}`;
   return `[${msg.projectLabel}] ${msg.severityLabel}: ${msg.title}`;
 }
 
 export function formatEmailHtml(msg: AlertMessage): string {
+  const techFacts = techRowsOf(msg);
   const link = msg.permalink
     ? `<p><a href="${escapeHtml(msg.permalink)}">${escapeHtml(msg.linkLabel ?? "Open in Langfuse")}</a></p>`
     : "";
   return [
-    `<p>${msg.severityEmoji} <strong>${escapeHtml(msg.severityLabel)}</strong> — ${escapeHtml(msg.projectLabel)}</p>`,
+    `<p>${msg.severityEmoji} <strong>${escapeHtml(msg.humanSeverity ?? msg.severityLabel)}</strong> — ${escapeHtml(msg.projectLabel)}</p>`,
     `<p><strong>${escapeHtml(msg.title)}</strong></p>`,
     `<p>${escapeHtml(msg.detail)}</p>`,
     msg.facts && msg.facts.length > 0
       ? `<table style="border-collapse:collapse;font-size:13px">${msg.facts.map((f) => `<tr><td style="padding:2px 12px 2px 0;color:#666">${escapeHtml(f.title)}</td><td style="padding:2px 0">${escapeHtml(f.value)}</td></tr>`).join("")}</table>`
       : "",
-    msg.techFacts && msg.techFacts.length > 0
+    techFacts.length > 0
       ? `<p>${escapeHtml(msg.techLabel ?? "Technische Details")}</p>
-<table style="border-collapse:collapse;font-size:13px">${msg.techFacts.map((f) => `<tr><td style="padding:2px 12px 2px 0;color:#666">${escapeHtml(f.title)}</td><td style="padding:2px 0">${escapeHtml(f.value)}</td></tr>`).join("")}</table>`
+<table style="border-collapse:collapse;font-size:13px">${techFacts.map((f) => `<tr><td style="padding:2px 12px 2px 0;color:#666">${escapeHtml(f.title)}</td><td style="padding:2px 0">${escapeHtml(f.value)}</td></tr>`).join("")}</table>`
       : "",
     link,
-    `<p style="color:#666;font-size:12px">${escapeHtml(msg.timestampIso)} · window ${escapeHtml(msg.window)}</p>`,
+    `<p style="color:#666;font-size:12px">${escapeHtml(footerOf(msg))}</p>`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 export function formatEmailText(msg: AlertMessage): string {
+  const techFacts = techRowsOf(msg);
   const lines = [
-    `${msg.severityLabel} — ${msg.projectLabel}`,
+    `${msg.humanSeverity ?? msg.severityLabel} — ${msg.projectLabel}`,
     msg.title,
     msg.detail,
     ...(msg.facts ?? []).map((f) => `${f.title}: ${f.value}`),
   ];
-  if (msg.techFacts && msg.techFacts.length > 0) {
-    lines.push(msg.techLabel ?? "Technische Details", ...msg.techFacts.map((f) => `${f.title}: ${f.value}`));
+  if (techFacts.length > 0) {
+    lines.push(msg.techLabel ?? "Technische Details", ...techFacts.map((f) => `${f.title}: ${f.value}`));
   }
   if (msg.permalink) lines.push(`${msg.linkLabel ?? "Open in Langfuse"}: ${msg.permalink}`);
-  lines.push(`${msg.timestampIso} · window ${msg.window}`);
+  lines.push(footerOf(msg));
   return lines.join("\n\n");
 }
 

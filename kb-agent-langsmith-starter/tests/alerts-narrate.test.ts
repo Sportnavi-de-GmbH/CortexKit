@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { narrateTransition, narrateDigest, templateTransition, templateDigest, fmtObserved, ruleTitle, humanRuleName, humanErrored } from "../lib/monitoring/alerts/narrate";
+import { humanHeadline, humanNote, times, windowPhrase } from "../lib/monitoring/alerts/copy";
 import type { AlertRule, Observation, Transition } from "../lib/monitoring/alerts/types";
 
 const rule = (o: Partial<AlertRule>): AlertRule => ({ id: "r1", key: "failure_rate", agent: "all", enabled: true, severity: "alert", threshold: 0.1, window_hours: 24, min_samples: 10, params: {}, description: "", ...o });
@@ -54,7 +55,7 @@ describe("narrateTransition", () => {
     expect(t).toContain("15 %");
     expect(t).toContain("in den letzten 24 Stunden");
     expect(t).toContain("Die Ursache ist noch nicht bekannt.");
-    expect(t).toContain("Betroffene Nutzer haben eine Fehlermeldung statt einer Antwort gesehen.");
+    expect(t).toContain("Betroffene Nutzer haben keine brauchbare Antwort bekommen.");
     expect(t).toMatch(/Technik-Team/);
     expect(t.trim().endsWith("informieren.")).toBe(true);
   });
@@ -90,6 +91,94 @@ describe("narrateTransition", () => {
   });
 });
 
+describe("plain-German notes", () => {
+  it("translates every engineer note rules.ts writes", () => {
+    const n = (note: string, key: AlertRule["key"] = "failure_rate") => humanNote(obs({ rule: rule({ key }), note }));
+    expect(n("Aufwärmphase (warmup): 0/7 Tage Basis", "cost_spike")).toBe("Noch nicht genug Vergleichstage gesammelt (0 von 7)");
+    expect(n("zu wenig Daten (0 < 10)")).toBe("Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen");
+    expect(n("Fenster nicht geladen")).toBe("Die Daten konnten nicht geladen werden");
+    expect(n("24h 3.20 $ vs Basis 1.00 $/Tag", "cost_spike")).toBe("Heute 3,20 $, an einem normalen Tag 1,00 $");
+    expect(n("etwas ganz anderes")).toBeNull();
+    expect(humanNote(obs({}))).toBeNull();
+  });
+  it("never leaks a raw note into the digest or the model JSON", async () => {
+    const warm = obs({ rule: rule({ key: "cost_spike", threshold: 3 }), status: "skipped", observed: null, note: "Aufwärmphase (warmup): 0/7 Tage Basis" });
+    const t = templateDigest([warm], []);
+    expect(t).not.toMatch(/warmup/);
+    expect(t).toContain("Noch nicht genug Vergleichstage gesammelt (0 von 7)");
+    expect(t).toContain("nicht gemessen");
+    expect(t).not.toMatch(/deutlich mehr/);
+    let user = "";
+    await narrateTransition({ kind: "fired", obs: obs({ rule: rule({ key: "cost_spike", threshold: 3 }), observed: 3.2, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }) }, { generate: async (p) => { user = p.user; return "x"; } });
+    expect(JSON.parse(user).note).toBe("Heute 3,20 $, an einem normalen Tag 1,00 $");
+  });
+});
+
+describe("the cost multiplier", () => {
+  it("is phrased the same everywhere and never prints the 999 sentinel", () => {
+    expect(times(3.2)).toBe("3,2-mal so hoch wie an einem normalen Tag");
+    expect(times(999)).toBe("deutlich mehr als an einem normalen Tag");
+    expect(times(Infinity)).toBe("deutlich mehr als an einem normalen Tag");
+    expect(times(null)).toBe("deutlich mehr als an einem normalen Tag");
+    const spike = obs({ rule: rule({ key: "cost_spike", threshold: 3 }), observed: 999, note: "24h 3.20 $ vs Basis 0.00 $/Tag" });
+    const fires = templateTransition({ kind: "fired", obs: spike });
+    expect(fires).toContain("deutlich mehr als an einem normalen Tag");
+    expect(fires).not.toMatch(/999/);
+    const digest = templateDigest([obs({ rule: rule({ key: "cost_spike", threshold: 3 }), observed: 3.2 })], []);
+    expect(digest).toContain("3,2-mal so hoch wie an einem normalen Tag");
+    expect(digest).not.toMatch(/× Basis/);
+  });
+  it("states no cost claim the data does not support", () => {
+    const rec = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "cost_daily", threshold: 2 }), status: "ok", observed: 1.2 }) });
+    expect(rec).not.toMatch(/keine zusätzlichen Kosten/);
+    expect(rec).toContain("Die Kosten liegen wieder im geplanten Rahmen.");
+    const firedCost = templateTransition({ kind: "fired", obs: obs({ rule: rule({ key: "cost_daily", threshold: 2 }), observed: 2.4 }) });
+    expect(firedCost).not.toMatch(/weiter normal geantwortet/);
+    expect(firedCost).toContain("Für die Nutzer ändert sich dadurch nichts Sichtbares; es geht nur um die Kosten.");
+    const spikeRec = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "cost_spike", threshold: 3 }), status: "ok", observed: 1.1 }) });
+    expect(spikeRec).toContain("1,1-mal so hoch wie an einem normalen Tag");
+  });
+});
+
+describe("verb agreement", () => {
+  it("uses plural forms when the subject is both assistants", () => {
+    const rec = templateTransition({ kind: "recovered", obs: obs({ agent: "total", status: "ok", observed: 0.02 }) });
+    expect(rec).toContain("Beide Assistenten haben");
+    expect(rec).toContain("liegen damit wieder im normalen Bereich");
+    expect(rec).not.toMatch(/Assistenten hat |liegt damit/);
+    const lat = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "latency_p95", threshold: 8000 }), agent: "total", status: "ok", observed: 3000 }) });
+    expect(lat).toContain("Beide Assistenten sind wieder schnell");
+  });
+  it("headlines agree too", () => {
+    expect(humanHeadline("recovered", obs({ agent: "total", status: "ok" }))).toBe("Entwarnung: Beide Assistenten antworten wieder");
+    expect(humanHeadline("recovered", obs({ agent: "faq", status: "ok" }))).toBe("Entwarnung: FAQ-Assistent antwortet wieder");
+  });
+});
+
+describe("window wording and the unreachable-service cause", () => {
+  it("says 'in der letzten Stunde' for a one-hour window", () => {
+    expect(windowPhrase(obs({ rule: rule({ window_hours: 1 }) }))).toBe("in der letzten Stunde");
+    expect(windowPhrase(obs({ rule: rule({ window_hours: 24 }) }))).toBe("in den letzten 24 Stunden");
+    expect(windowPhrase(obs({ rule: rule({ window_hours: 168 }) }))).toBe("in den letzten 7 Tagen");
+  });
+  it("stays agent-neutral unless it is the partner search", () => {
+    const faq = templateTransition({ kind: "fired", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), subkey: "upstream_unavailable", observed: 7 }) });
+    expect(faq).toContain("Ein benötigter Dienst war in dieser Zeit nicht erreichbar.");
+    const partner = templateTransition({ kind: "fired", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), agent: "partner", subkey: "upstream_unavailable", observed: 7 }) });
+    expect(partner).toContain("Die Partner-Suche war in dieser Zeit nicht erreichbar.");
+  });
+});
+
+describe("guard against technical model output", () => {
+  it("falls back to the template when the model writes jargon", async () => {
+    const n = await narrateTransition(fired, { generate: async () => "failure_rate ist 15 %" });
+    expect(n.source).toBe("template");
+    expect(n.text).toBe(templateTransition(fired));
+    const ok = await narrateTransition(fired, { generate: async () => "Der FAQ-Assistent hat bei 15 % der Anfragen nicht geantwortet." });
+    expect(ok.source).toBe("llm");
+  });
+});
+
 describe("narrateDigest", () => {
   it("template opens with the overall state, then one human line per rule", async () => {
     const n = await narrateDigest([obs({}), obs({ status: "ok", agent: "partner", observed: 0.01 })], ["cost_spike·all"], { generate: async () => { throw new Error("x"); } });
@@ -103,5 +192,11 @@ describe("narrateDigest", () => {
   it("an all-clear digest says so in plain words", () => {
     const t = templateDigest([obs({ status: "ok", observed: 0.01 })], []);
     expect(t).toMatch(/^Alles in Ordnung/);
+  });
+  it("an all-clear with an unchecked rule admits it", () => {
+    const withSkipped = templateDigest([obs({ status: "ok", observed: 0.01 }), obs({ status: "skipped", observed: null, note: "Fenster nicht geladen" })], []);
+    expect(withSkipped).toMatch(/^Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden\./);
+    const withErrored = templateDigest([obs({ status: "ok", observed: 0.01 })], ["cost_spike·all"]);
+    expect(withErrored).toMatch(/^Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden\./);
   });
 });
