@@ -90,8 +90,9 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
 1. **Supabase:** create a new project; apply `supabase/migrations/20260914000100_monitoring_schema.sql`,
    then `…000200_monitoring_rpc.sql`, then `…20260915000100_alerting_schema.sql`, then
    `…20260915000200_alerting_cron.sql` (needs the two Vault secrets first — see
-   `MONITORING-ALERTING.md` § Supabase rules) and, only after the widget is deployed with the
-   feature, `…20260915000300_alerting_cron_production.sql` (Supabase MCP `apply_migration`, or the
+   `MONITORING-ALERTING.md` § Supabase rules), only after the widget is deployed with the
+   feature, `…20260915000300_alerting_cron_production.sql`, then
+   `…20260915000400_monitoring_delete.sql` (Supabase MCP `apply_migration`, or the
    SQL editor). Tables have RLS on with no policies: only the service-role key can read or write.
 2. **Env** (`.env.local` locally, Vercel project `navio-widget` for preview + production, then redeploy):
 
