@@ -4,11 +4,14 @@
 // Filters are a plain GET form (same pattern as TraceFilters); "Mehr laden"
 // appends the next page client-side from the data API.
 import Link from "next/link";
-import { Fragment, useState } from "react";
-import { Check, ChevronDown, Inbox } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, Inbox, Trash2 } from "lucide-react";
 import type { AlertEventRow } from "@/lib/monitoring/alerts/query";
 import { fmtRuleValue, humanDelivery, humanRuleLabel, kindLabel, severityTone } from "./alerts-format";
-import { BTN_PRIMARY, BTN_SECONDARY, CARD, SELECT, Card, fmtTime } from "./ui";
+import { DeleteBar } from "./DeleteBar";
+import { allSelected, clearAll, selectAll, toggle } from "./selection";
+import { BTN_PRIMARY, BTN_SECONDARY, CARD, ICON_BTN, SELECT, Card, fmtTime } from "./ui";
+import { useDeleteFlow } from "./useDeleteFlow";
 
 const NAME_KEY = "navio_monitoring_name";
 
@@ -123,7 +126,19 @@ function Narrative({ text, collapsible }: { text: string; collapsible: boolean }
   );
 }
 
-function EventRow({ e }: { e: AlertEventRow }) {
+function EventRow({
+  e,
+  selected,
+  onToggleSelect,
+  onDelete,
+  deleteBusy,
+}: {
+  e: AlertEventRow;
+  selected: boolean;
+  onToggleSelect: () => void;
+  onDelete: () => void;
+  deleteBusy: boolean;
+}) {
   const [ackBy, setAckBy] = useState<string | null>(e.acknowledged_by);
   const [ackAt, setAckAt] = useState<string | null>(e.acknowledged_at);
   const [busy, setBusy] = useState(false);
@@ -166,6 +181,13 @@ function EventRow({ e }: { e: AlertEventRow }) {
     <li className={`flex min-w-0 flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-start sm:gap-4 ${BORDER[tone]}`}>
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="checkbox"
+            className="h-4 w-4 shrink-0 cursor-pointer accent-(--brand-green)"
+            aria-label="Meldung auswählen"
+            checked={selected}
+            onChange={onToggleSelect}
+          />
           <span className={`inline-flex h-6 items-center rounded-full px-2 font-display text-[12px] font-medium ${PILL[tone]}`}>{kindLabel(e.kind)}</span>
           {title && <span className="min-w-0 break-words font-display text-sm font-semibold text-(--fg)">{title}</span>}
           <span className="tabular text-[11px] text-(--fg-subtle)">{fmtTime(e.created_at)}</span>
@@ -184,16 +206,40 @@ function EventRow({ e }: { e: AlertEventRow }) {
       </div>
       <div className="shrink-0 sm:pt-1">
         {ackBy ? (
-          <span className="inline-flex items-center gap-1 text-xs text-(--fg-muted)">
-            <Check className="h-3.5 w-3.5 text-(--brand-green)" aria-hidden />
-            {ackBy}
-            {ackAt ? ` · ${fmtTime(ackAt)}` : ""}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 text-xs text-(--fg-muted)">
+              <Check className="h-3.5 w-3.5 text-(--brand-green)" aria-hidden />
+              {ackBy}
+              {ackAt ? ` · ${fmtTime(ackAt)}` : ""}
+            </span>
+            <button
+              type="button"
+              className={`${ICON_BTN} hover:text-(--red)`}
+              aria-label="Meldung löschen"
+              title="Meldung löschen"
+              disabled={deleteBusy}
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
         ) : (
           <div className="flex flex-col items-end gap-1">
-            <button type="button" onClick={acknowledge} disabled={busy} className={BTN_SECONDARY}>
-              Bestätigen
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={acknowledge} disabled={busy} className={BTN_SECONDARY}>
+                Bestätigen
+              </button>
+              <button
+                type="button"
+                className={`${ICON_BTN} hover:text-(--red)`}
+                aria-label="Meldung löschen"
+                title="Meldung löschen"
+                disabled={deleteBusy}
+                onClick={onDelete}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
             {ackError && <span className="max-w-[12rem] text-right text-xs text-(--red)">Bestätigen fehlgeschlagen – bitte erneut versuchen.</span>}
           </div>
         )}
@@ -227,6 +273,45 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
   const kind = sp.get("kind") ?? "";
   const agent = sp.get("agent") ?? "";
 
+  const [selected, setSelected] = useState<Set<string>>(() => clearAll());
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const ids = items.map((e) => e.id);
+  const all = allSelected(selected, ids);
+  const some = selected.size > 0 && !all;
+
+  const headerBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerBox.current) headerBox.current.indeterminate = some;
+  }, [some]);
+
+  const del = useDeleteFlow({
+    endpoint: "/api/monitoring/alerts/events",
+    kind: "alert",
+    onDone: () => {
+      setItems((prev) => prev.filter((e) => !pendingIds.includes(e.id)));
+      setSelected(clearAll());
+      setPendingIds([]);
+    },
+  });
+  const barVisible = selected.size > 0;
+
+  function deleteIds(idsToDelete: string[]) {
+    setPendingIds(idsToDelete);
+    del.confirm(idsToDelete);
+  }
+
+  // When the rows change (filter, "Mehr laden", a completed delete), drop
+  // selected ids that are no longer shown.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const present = new Set(ids);
+      const next = new Set([...prev].filter((id) => present.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids.join("|")]);
+
   async function loadMore() {
     if (!cursor) return;
     setLoading(true);
@@ -250,7 +335,8 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
   }
 
   return (
-    <div className="space-y-4">
+    // Bottom padding while the sticky delete bar is shown, so it never covers the last rows.
+    <div className={`space-y-4 ${barVisible ? "pb-24" : ""}`}>
       <form method="get" action="/monitoring/alerts" className={`${CARD} flex flex-wrap items-end gap-3 p-4`} aria-label="Alarme filtern">
         <input type="hidden" name="tab" value="feed" />
         <FilterSelect name="kind" label="Art" value={kind}>
@@ -269,7 +355,26 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
         <button className={BTN_PRIMARY}>Filtern</button>
       </form>
 
-      <Card title="Ereignisse" kicker="Neueste zuerst" actions={<span className="text-xs text-(--fg-muted)">{items.length} angezeigt</span>} bodyClassName="p-0">
+      <Card
+        title="Ereignisse"
+        kicker="Neueste zuerst"
+        actions={
+          <span className="flex items-center gap-2 text-xs text-(--fg-muted)">
+            {items.length > 0 && (
+              <input
+                ref={headerBox}
+                type="checkbox"
+                className="h-4 w-4 cursor-pointer accent-(--brand-green)"
+                aria-label="Alle angezeigten Meldungen auswählen"
+                checked={all}
+                onChange={() => setSelected(all ? clearAll() : selectAll(selected, ids))}
+              />
+            )}
+            {items.length} angezeigt
+          </span>
+        }
+        bodyClassName="p-0"
+      >
         {items.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-4 py-12 text-center">
             <Inbox className="h-6 w-6 text-(--fg-subtle)" aria-hidden />
@@ -278,7 +383,14 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
         ) : (
           <ul className="divide-y divide-(--border)">
             {items.map((e) => (
-              <EventRow key={e.id} e={e} />
+              <EventRow
+                key={e.id}
+                e={e}
+                selected={selected.has(e.id)}
+                onToggleSelect={() => setSelected(toggle(selected, e.id))}
+                onDelete={() => deleteIds([e.id])}
+                deleteBusy={del.busy}
+              />
             ))}
           </ul>
         )}
@@ -290,6 +402,8 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
           </div>
         )}
       </Card>
+      <DeleteBar count={selected.size} busy={del.busy} onClear={() => setSelected(clearAll())} onDelete={() => deleteIds([...selected])} />
+      {del.dialog}
     </div>
   );
 }
