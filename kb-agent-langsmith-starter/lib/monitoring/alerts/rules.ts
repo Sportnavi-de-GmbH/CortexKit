@@ -66,6 +66,8 @@ export function evaluateRule(rule: AlertRule, m: MetricsInput): Observation[] {
         const last24 = num(w.cost_usd, 0);
         const multiplier = base > 0 ? last24 / base : (last24 > 0 ? Infinity : 0);
         const breached = last24 > minAbs && multiplier > rule.threshold;
+        // 999 is the "baseline was zero" sentinel: Infinity is not JSON-serialisable (it would
+        // land as null in the event row and in the Teams card), so it never leaves this file.
         out.push(obs(rule, agent, { status: breached ? "breached" : "ok", observed: Number.isFinite(multiplier) ? multiplier : 999, samples: 0, threshold: rule.threshold, note: `24h ${last24.toFixed(2)} $ vs Basis ${base.toFixed(2)} $/Tag` }));
         break;
       }

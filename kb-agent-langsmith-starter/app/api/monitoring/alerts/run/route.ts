@@ -10,6 +10,11 @@ export const maxDuration = 60;
 export async function POST(req: Request): Promise<Response> {
   if (!dashboardEnabled()) return new Response(null, { status: 404 });
   const body = (await req.json().catch(() => ({}))) as { dryRun?: boolean };
-  const r = await runEvaluation({ slot: "manual", dryRun: Boolean(body.dryRun) });
-  return r ? Response.json(r) : Response.json({ detail: "Unavailable" }, { status: 503 });
+  try {
+    const r = await runEvaluation({ slot: "manual", dryRun: Boolean(body.dryRun) });
+    return r ? Response.json(r) : Response.json({ detail: "Unavailable" }, { status: 503 });
+  } catch (e) {
+    console.error("[alerts:run] failed", { error: e instanceof Error ? e.message : "unknown" });
+    return Response.json({ ok: false, detail: "evaluation failed" }, { status: 500 });
+  }
 }

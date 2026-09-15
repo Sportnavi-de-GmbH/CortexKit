@@ -45,7 +45,7 @@ async function cleanup() {
   await db!.from("traces").delete().eq("session_id", SESSION);
   await db!.from("agent_sessions").delete().eq("id", SESSION);
   const { data } = await db!.from("alert_rules").select("id").eq("key", "failure_rate").eq("agent", "all").maybeSingle();
-  if (data) await db!.from("alert_state").delete().eq("rule_id", (data as { id: string }).id);
+  if (data) await db!.from("alert_state").delete().eq("rule_id", (data as { id: string }).id).eq("agent", "faq");
 }
 
 (async () => {

@@ -47,12 +47,12 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   for (const r of rules) {
     const costRule = r.key === "cost_daily" || r.key === "cost_spike";
     const missingWindow = !windows[r.window_hours] && r.key !== "cost_daily";
-    if ((costRule && !costDay) || missingWindow) { if (!errored.includes(r.key)) errored.push(r.key); continue; }
+    if ((costRule && !costDay) || missingWindow) { const k = `${r.key}·${r.agent}`; if (!errored.includes(k)) errored.push(k); continue; }
     evaluable.push(r);
   }
   const metrics: MetricsInput = { windows, costDay: costDay ?? { today: { faq: 0, partner: 0, total: 0 }, baseline_days: 0, baseline_avg: { faq: 0, partner: 0, total: 0 } } };
   const observations: Observation[] = evaluateAll(evaluable, metrics);
-  const { transitions, next } = diffStates(prevStates, observations, nowIso);
+  const { transitions, next } = diffStates(prevStates, observations, nowIso, evaluable);
 
   // Narrate first (needed for both dry-run preview and real events).
   const narrated = await Promise.all(transitions.map(async (t) => ({ t, n: await narrateTransition(t, deps.narrate) })));
@@ -68,19 +68,39 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   if (opts.dryRun) return result;
 
   await repo.saveStates(next);
+  await repo.deleteStatesForRules(allRules.filter((r) => r.enabled === false).map((r) => r.id));
   const recipients = settings.email_recipients;
   const windowFrom = (t: Transition) => new Date(now.getTime() - t.obs.rule.window_hours * 3_600_000).toISOString();
 
-  for (const [i, { t, n }] of narrated.entries()) {
-    const ins = await repo.insertEvent({
-      kind: t.kind, rule_key: t.obs.rule.key, agent: t.obs.agent, subkey: t.obs.subkey, severity: t.obs.rule.severity,
-      observed: t.obs.observed, threshold: t.obs.threshold, samples: t.obs.samples, window_hours: t.obs.rule.window_hours,
-      window_from: windowFrom(t), window_to: nowIso, narrative: n.text, narrative_source: n.source, run_slot: slot,
-    });
-    const d = await deliver(transitionMessage(t, n.text, url), { teams: true, email: true }, { ...deps.deliver, recipients });
-    result.transitions[i].delivery = d;
-    if (ins.id) await repo.updateEventDelivery(ins.id, d);
-  }
+  // State is already persisted; delivery must never undo that, so each transition runs in its
+  // own try/catch, all of them in parallel, under one soft deadline (spec section 5).
+  const deadlineMs = Number(process.env.ALERT_DELIVERY_DEADLINE_MS ?? "") || 40_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"deadline">((resolve) => { timer = setTimeout(() => resolve("deadline"), deadlineMs); });
+
+  const deliverTransition = async (t: Transition, n: { text: string; source: "llm" | "template" }, i: number): Promise<void> => {
+    try {
+      const ins = await repo.insertEvent({
+        kind: t.kind, rule_key: t.obs.rule.key, agent: t.obs.agent, subkey: t.obs.subkey, severity: t.obs.rule.severity,
+        observed: t.obs.observed, threshold: t.obs.threshold, samples: t.obs.samples, window_hours: t.obs.rule.window_hours,
+        window_from: windowFrom(t), window_to: nowIso, narrative: n.text, narrative_source: n.source, run_slot: slot,
+      });
+      const d = await deliver(transitionMessage(t, n.text, url), { teams: true, email: true }, { ...deps.deliver, recipients });
+      result.transitions[i].delivery = d;
+      if (ins.id) await repo.updateEventDelivery(ins.id, d);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "unknown";
+      result.transitions[i].delivery = { teams: `failed: ${message}`, email: `failed: ${message}` };
+      console.error("[alerts:evaluate] transition event failed", { kind: t.kind, rule_key: t.obs.rule.key, agent: t.obs.agent, error: message });
+    }
+  };
+
+  await Promise.allSettled(narrated.map(async ({ t, n }, i) => {
+    // The losing side of the race may still finish in the background; that is acceptable.
+    const outcome = await Promise.race([deliverTransition(t, n, i), deadline]);
+    if (outcome === "deadline") result.transitions[i].delivery = { teams: "skipped: deadline", email: "skipped: deadline" };
+  }));
+  if (timer) clearTimeout(timer);
 
   const ins = await repo.insertEvent({ kind: "digest", narrative: digestNarr.text, narrative_source: digestNarr.source, run_slot: slot });
   if (ins.inserted && settings.digest_enabled && opts.slot === "scheduled") {

@@ -59,5 +59,6 @@ describe("monitoring auth", () => {
     expect(isProtectedPath("/api/monitoring/alerts/evaluate")).toBe(false);
     expect(isProtectedPath("/api/monitoring/alerts/faq")).toBe(false);
     expect(isProtectedPath("/api/monitoring/alerts/partner")).toBe(false);
+    expect(isProtectedPath("/api/monitoring/alerts/orchestrator")).toBe(false);
   });
 });

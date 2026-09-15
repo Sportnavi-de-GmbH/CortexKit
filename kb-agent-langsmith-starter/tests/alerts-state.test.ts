@@ -37,6 +37,31 @@ describe("diffStates", () => {
     const p = { ...prev("ok"), last_transition_at: "2026-09-01T00:00:00Z" };
     expect(diffStates([p], [o("ok")], NOW).next[0].last_transition_at).toBe("2026-09-01T00:00:00Z");
   });
+  it("error + breached fires; error + ok does not transition", () => {
+    const r1 = diffStates([prev("error")], [o("breached")], NOW);
+    expect(r1.transitions.map((t) => t.kind)).toEqual(["fired"]);
+    expect(r1.next[0].status).toBe("breached");
+    const r2 = diffStates([prev("error")], [o("ok")], NOW);
+    expect(r2.transitions).toHaveLength(0);
+    expect(r2.next[0].status).toBe("ok");
+  });
+  it("a breached row of an evaluated rule with no observation recovers", () => {
+    const r = diffStates([prev("breached", "total", "azure_429")], [], NOW, [rule]);
+    expect(r.transitions).toHaveLength(1);
+    expect(r.transitions[0].kind).toBe("recovered");
+    expect(r.transitions[0].obs).toMatchObject({ agent: "total", subkey: "azure_429", status: "ok", observed: 0, samples: 0, threshold: rule.threshold, note: "im Fenster nicht mehr aufgetreten" });
+    expect(r.next[0]).toMatchObject({ status: "ok", observed: null, samples: null, last_evaluated_at: NOW, last_transition_at: NOW });
+  });
+  it("an ok row with no observation stays ok and does not transition", () => {
+    const r = diffStates([prev("ok", "total", "azure_429")], [], NOW, [rule]);
+    expect(r.transitions).toHaveLength(0);
+    expect(r.next[0]).toMatchObject({ status: "ok", observed: null, samples: null, last_evaluated_at: NOW });
+  });
+  it("rows of rules that were not evaluated are left alone", () => {
+    const r = diffStates([prev("breached", "total", "azure_429")], [], NOW);
+    expect(r.transitions).toHaveLength(0);
+    expect(r.next).toHaveLength(0);
+  });
 });
 
 describe("runSlot", () => {

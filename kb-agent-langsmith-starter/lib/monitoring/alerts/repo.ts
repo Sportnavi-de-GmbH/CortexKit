@@ -18,6 +18,8 @@ export interface AlertRepo {
   window(env: string, hours: number): Promise<WindowMetrics>;
   costDay(env: string, tz: string, baselineDays: number): Promise<CostDay>;
   saveStates(rows: AlertStateRow[]): Promise<void>;
+  /** Drops every alert_state row of the given rules (used for rules disabled in the UI). */
+  deleteStatesForRules(ruleIds: string[]): Promise<void>;
   insertEvent(e: NewEvent): Promise<{ inserted: boolean; id?: string }>;
   updateEventDelivery(id: string, delivery: Delivery): Promise<void>;
 }
@@ -64,6 +66,7 @@ export function supabaseAlertRepo(): AlertRepo | undefined {
       return { today: { faq: n(t.faq), partner: n(t.partner), total: n(t.total) }, baseline_days: n(d.baseline_days), baseline_avg: { faq: n(b.faq), partner: n(b.partner), total: n(b.total) } };
     },
     saveStates: async (rows) => { if (rows.length) await must(db.from("alert_state").upsert(rows, { onConflict: "rule_id,agent,subkey" })); },
+    deleteStatesForRules: async (ruleIds) => { if (ruleIds.length) await must(db.from("alert_state").delete().in("rule_id", ruleIds)); },
     insertEvent: async (e) => {
       const q = db.from("alert_events").insert(e).select("id").maybeSingle();
       const { data, error } = await q;

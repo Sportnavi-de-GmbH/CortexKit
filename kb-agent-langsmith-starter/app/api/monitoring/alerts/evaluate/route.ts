@@ -9,9 +9,15 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function authorized(req: Request, secret: string): boolean {
-  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (!given || given.length !== secret.length) return false;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+  try {
+    const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+    // timingSafeEqual throws RangeError on unequal buffer LENGTHS, and a multibyte character
+    // is longer in bytes than in JS string units — so compare byte lengths, not string lengths.
+    if (!given || Buffer.byteLength(given) !== Buffer.byteLength(secret)) return false;
+    return timingSafeEqual(Buffer.from(given), Buffer.from(secret));
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(req: Request): Promise<Response> {

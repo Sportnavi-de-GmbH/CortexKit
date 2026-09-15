@@ -1,15 +1,29 @@
 // lib/monitoring/alerts/state.ts — PURE transition logic + run-slot naming (spec §5).
-import type { AlertStateRow, Observation, Transition } from "./types";
+import type { AlertRule, AlertStateRow, Observation, Transition } from "./types";
 
 const keyOf = (ruleId: string, agent: string, subkey: string) => `${ruleId}|${agent}|${subkey}`;
 
-export function diffStates(prev: AlertStateRow[], obs: Observation[], nowIso: string): { transitions: Transition[]; next: AlertStateRow[] } {
+/**
+ * Diff the freshly observed state against what is stored.
+ *
+ * `evaluatedRules` are the rules this run actually evaluated. A stored row that belongs to one
+ * of them but received NO observation this run (an `error_repeat` subkey whose error type has
+ * stopped occurring, say) is treated as `ok`; if it was `breached` that is a `recovered`
+ * transition. Without this, such a row would stay `breached` forever — no recovery message, a
+ * permanent banner, and the rule could never fire for that key again (spec section 5).
+ * Rows of rules that were not evaluated are left untouched here (disabled rules are deleted by
+ * the caller).
+ */
+export function diffStates(prev: AlertStateRow[], obs: Observation[], nowIso: string, evaluatedRules: AlertRule[] = []): { transitions: Transition[]; next: AlertStateRow[] } {
   const before = new Map(prev.map((p) => [keyOf(p.rule_id, p.agent, p.subkey), p]));
   const transitions: Transition[] = [];
   const next: AlertStateRow[] = [];
+  const seen = new Set<string>();
+  const rulesById = new Map(evaluatedRules.map((r) => [r.id, r]));
 
   for (const o of obs) {
     const k = keyOf(o.rule.id, o.agent, o.subkey);
+    seen.add(k);
     const p = before.get(k);
     const wasBreached = p?.status === "breached";
     let status: AlertStateRow["status"] = o.status === "skipped" ? (p?.status ?? "ok") : o.status;
@@ -23,6 +37,27 @@ export function diffStates(prev: AlertStateRow[], obs: Observation[], nowIso: st
       observed: o.status === "skipped" ? (p?.observed ?? null) : o.observed,
       samples: o.status === "skipped" ? (p?.samples ?? null) : o.samples,
       last_evaluated_at: nowIso, last_transition_at: transitionAt,
+    });
+  }
+
+  // Reconcile rows whose observation vanished this run.
+  for (const p of prev) {
+    const k = keyOf(p.rule_id, p.agent, p.subkey);
+    if (seen.has(k)) continue;
+    const rule = rulesById.get(p.rule_id);
+    if (!rule) continue;
+    const wasBreached = p.status === "breached";
+    if (wasBreached) {
+      const obsOut: Observation = {
+        rule, agent: p.agent as Observation["agent"], subkey: p.subkey, status: "ok",
+        observed: 0, samples: 0, threshold: rule.threshold, note: "im Fenster nicht mehr aufgetreten",
+      };
+      transitions.push({ kind: "recovered", obs: obsOut });
+    }
+    next.push({
+      rule_id: p.rule_id, agent: p.agent, subkey: p.subkey, status: "ok",
+      observed: null, samples: null,
+      last_evaluated_at: nowIso, last_transition_at: wasBreached ? nowIso : p.last_transition_at,
     });
   }
   return { transitions, next };

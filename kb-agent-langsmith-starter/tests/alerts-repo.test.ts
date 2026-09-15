@@ -16,6 +16,7 @@ type Resp = { data: unknown; error: { message: string; code?: string } | null };
  *  from(table).insert(row).select(cols).maybeSingle()
  *  from(table).upsert(rows, opts)
  *  from(table).update(patch).eq(col, val)
+ *  from(table).delete().in(col, vals)
  *  rpc(name, args)
  * Canned responses are keyed by "<table>.<op>" or "rpc.<name>"; a missing key
  * yields { data: null, error: null }. Every terminal call is recorded.
@@ -41,6 +42,9 @@ function makeStub(responses: Record<string, Resp> = {}) {
     upsert: (rows: unknown[], opts: unknown) => terminal(`${table}.upsert`, { rows, opts }),
     update: (patch: unknown) => ({
       eq: (col: string, val: unknown) => terminal(`${table}.update.eq`, { patch, col, val }),
+    }),
+    delete: () => ({
+      in: (col: string, vals: unknown) => terminal(`${table}.delete.in`, { col, vals }),
     }),
   });
   const rpc = (name: string, args: unknown) => terminal(`rpc.${name}`, args);
@@ -178,6 +182,22 @@ describe("supabaseAlertRepo", () => {
       expect(stub.calls).toHaveLength(1);
       expect(stub.calls[0].key).toBe("alert_state.upsert");
       expect(stub.calls[0].args).toMatchObject({ rows, opts: { onConflict: "rule_id,agent,subkey" } });
+    });
+  });
+
+  describe("deleteStatesForRules", () => {
+    it("makes no call for an empty id list", async () => {
+      const stub = makeStub();
+      admin.mockReturnValue(stub as unknown as ReturnType<typeof supabaseAdmin>);
+      await supabaseAlertRepo()!.deleteStatesForRules([]);
+      expect(stub.calls).toHaveLength(0);
+    });
+
+    it("deletes every alert_state row of the given rules", async () => {
+      const stub = makeStub({ "alert_state.delete.in": { data: null, error: null } });
+      admin.mockReturnValue(stub as unknown as ReturnType<typeof supabaseAdmin>);
+      await supabaseAlertRepo()!.deleteStatesForRules(["r1", "r2"]);
+      expect(stub.calls).toEqual([{ key: "alert_state.delete.in", args: { col: "rule_id", vals: ["r1", "r2"] } }]);
     });
   });
 });
