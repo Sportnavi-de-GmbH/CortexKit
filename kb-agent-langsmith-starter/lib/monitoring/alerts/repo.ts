@@ -67,7 +67,11 @@ export function supabaseAlertRepo(): AlertRepo | undefined {
     insertEvent: async (e) => {
       const q = db.from("alert_events").insert(e).select("id").maybeSingle();
       const { data, error } = await q;
-      if (error) { if (e.kind === "digest" && /duplicate key|alert_events_digest_slot_idx/i.test(error.message)) return { inserted: false }; throw new Error(error.message); }
+      if (error) {
+        const dup = error.code === "23505" || /duplicate key|alert_events_digest_slot_idx/i.test(error.message);
+        if (e.kind === "digest" && dup) return { inserted: false };
+        throw new Error(error.message);
+      }
       return { inserted: true, id: data ? String((data as { id: string }).id) : undefined };
     },
     updateEventDelivery: async (id, delivery) => { await must(db.from("alert_events").update({ delivery }).eq("id", id)); },

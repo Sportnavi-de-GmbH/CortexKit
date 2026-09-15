@@ -52,12 +52,7 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   }
   const metrics: MetricsInput = { windows, costDay: costDay ?? { today: { faq: 0, partner: 0, total: 0 }, baseline_days: 0, baseline_avg: { faq: 0, partner: 0, total: 0 } } };
   const observations: Observation[] = evaluateAll(evaluable, metrics);
-  const { transitions, next: evaluatedNext } = diffStates(prevStates, observations, nowIso);
-  // Rows for rules that errored this run (or otherwise weren't evaluated) are left untouched:
-  // merge them back in so saveStates sees the full, unchanged state rather than dropping them.
-  const touchedKeys = new Set(evaluatedNext.map((s) => `${s.rule_id}|${s.agent}|${s.subkey}`));
-  const untouched = prevStates.filter((s) => !touchedKeys.has(`${s.rule_id}|${s.agent}|${s.subkey}`));
-  const next = [...evaluatedNext, ...untouched];
+  const { transitions, next } = diffStates(prevStates, observations, nowIso);
 
   // Narrate first (needed for both dry-run preview and real events).
   const narrated = await Promise.all(transitions.map(async (t) => ({ t, n: await narrateTransition(t, deps.narrate) })));

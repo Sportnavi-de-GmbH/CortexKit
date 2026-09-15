@@ -15,7 +15,14 @@ function memRepo(opts: { rules?: AlertRule[]; states?: AlertStateRow[]; faq?: Pa
     settings: async () => ({ email_recipients: opts.recipients ?? [], digest_enabled: opts.digest ?? true }),
     window: async () => { if (opts.windowThrows) throw new Error("db down"); return { faq: agg(opts.faq), partner: agg(), total: agg(opts.faq) }; },
     costDay: async () => ({ today: { faq: 0, partner: 0, total: 0 }, baseline_days: 0, baseline_avg: { faq: 0, partner: 0, total: 0 } }),
-    saveStates: async (rows) => { states = rows; },
+    saveStates: async (rows) => {
+      // Mirror the real repo's upsert on (rule_id, agent, subkey): merge incoming rows into
+      // the existing set by key, leaving rows not mentioned untouched.
+      const keyOf = (s: AlertStateRow) => `${s.rule_id}|${s.agent}|${s.subkey}`;
+      const merged = new Map(states.map((s) => [keyOf(s), s]));
+      for (const row of rows) merged.set(keyOf(row), row);
+      states = [...merged.values()];
+    },
     insertEvent: async (e) => { if (e.kind === "digest" && events.some((x) => x.kind === "digest" && x.run_slot === e.run_slot)) return { inserted: false }; const id = `e${events.length + 1}`; events.push({ ...e, id }); return { inserted: true, id }; },
     updateEventDelivery: async (id, delivery) => { const e = events.find((x) => x.id === id); if (e) e.delivery = delivery; },
   };
