@@ -90,10 +90,13 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
 1. **Supabase:** create a new project; apply `supabase/migrations/20260914000100_monitoring_schema.sql`,
    then `…000200_monitoring_rpc.sql`, then `…20260915000100_alerting_schema.sql`, then
    `…20260915000200_alerting_cron.sql` (needs the two Vault secrets first — see
-   `MONITORING-ALERTING.md` § Supabase rules), only after the widget is deployed with the
-   feature, `…20260915000300_alerting_cron_production.sql`, then
-   `…20260915000400_monitoring_delete.sql` (Supabase MCP `apply_migration`, or the
-   SQL editor). Tables have RLS on with no policies: only the service-role key can read or write.
+   `MONITORING-ALERTING.md` § Supabase rules), and — only after the widget is deployed with the
+   feature — `…20260915000300_alerting_cron_production.sql`. Independently of the cron pair, apply
+   the delete RPCs: `…20260915000400_monitoring_delete.sql`, then
+   `…20260915000500_monitoring_delete_session_events.sql` (replaces `monitoring_delete_traces` so a
+   deleted session also takes its session-scoped `events` and unlinked `feedback` rows with it).
+   All via Supabase MCP `apply_migration` or the SQL editor. Tables have RLS on with no policies:
+   only the service-role key can read or write.
 2. **Env** (`.env.local` locally, Vercel project `navio-widget` for preview + production, then redeploy):
 
    | Variable | Required | Notes |
@@ -146,12 +149,17 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
   bar; one confirm dialog names what goes and there is no undo. Deleting a trace cascades to its
   `trace_steps` and `errors` (FK) and explicitly removes its `feedback` and `events` rows; the
   owning session's `turn_count`/`last_seen_at` is recomputed and the session itself is deleted if
-  that was its last trace. Deleting an alert event removes only that row — `alert_state` (the
-  current breach/ok truth) is left untouched, since the event is history, not state. After any
-  delete the dashboard re-renders (`router.refresh()` + a `navio:refresh` event so the header's
-  breach indicator updates) and the route kicks off a background alert re-evaluation
-  (`runEvaluation({ slot: "manual", writeDigest: false })`, capped at 5 s) so a delete that
-  resolves a breach reflects immediately — this never writes a status report or sends a digest.
+  that was its last trace — together with its session-scoped `events` and any unlinked `feedback`
+  (votes that never found their trace). A trace that is still `running` may be re-created by the
+  agent's next write; delete it once it is completed or abandoned. Deleting an alert event removes
+  only that row — `alert_state` (the current breach/ok truth) is left untouched, since the event is
+  history, not state. After any delete the dashboard re-renders (`router.refresh()` + a
+  `navio:refresh` event so the header's breach indicator updates) and the route kicks off a
+  background alert re-evaluation (`runEvaluation({ slot: "manual", writeDigest: false })`, capped
+  at 5 s; the evaluation persists `alert_state` before narrating, so the state is current within
+  seconds) so a delete that resolves a breach reflects within seconds; a second refresh follows
+  automatically when the evaluation is still running (`reevaluate: "pending"`). This never writes
+  a status report or sends a digest.
 
 ---
 
@@ -170,7 +178,7 @@ has no V3 counterpart; its failure is now an `events` row `feedback.partner_forw
 
 | Command | Purpose |
 |---|---|
-| `npm run monitoring:verify` | one FAQ + one partner turn through the running widget, a vote on each, then reads Supabase back (23 checks), then the delete section below (24 checks); `--expect-failure` for the error path; `--only delete` runs just the delete section (no FAQ/partner turns needed) |
+| `npm run monitoring:verify` | one FAQ + one partner turn through the running widget, a vote on each, then reads Supabase back (23 checks), then the delete section below (28 checks); `--expect-failure` for the error path; `--only delete` runs just the delete section (no FAQ/partner turns needed); `--allow-skipped` accepts `reevaluate: "skipped"`. **Side effect:** `monitoring:verify` runs one real alert evaluation (production scope) as a side effect of the delete section — it can write alert state and, if a breach flips, send a Teams/email transition. |
 | `npm run monitoring:reconcile` | marks `running` > 5 min as abandoned (+ event), links leftover votes, refreshes `feedback_thumb`; idempotent, schedule it |
 | `npm run alerts:verify` | against a running widget + the real monitoring Supabase: seeds a failure-rate breach, evaluates, asserts `fired` + a Teams send, clears it, asserts `recovered`, asserts a third run is a no-op and never re-sends the digest, cleans up its rows. Posts one real red + one real green card to the Navio Alerts Teams channel — see `docs/MONITORING-ALERTING.md` § "Supabase rules" |
 | `npm test` / `npm run typecheck` | 15 monitoring test files are part of the suite |
@@ -187,8 +195,15 @@ of the dashboard API):
 
 400 on invalid/empty/too-many ids, 404 when the dashboard is disabled, 503 when Supabase is
 unconfigured, 500 with `{ detail }` on an RPC error. Backed by `monitoring_delete_traces` /
-`monitoring_delete_alert_events` (`supabase/migrations/20260915000400_monitoring_delete.sql`) and
-`lib/monitoring/delete.ts`.
+`monitoring_delete_alert_events` (`supabase/migrations/20260915000400_monitoring_delete.sql`, the
+former replaced by `…000500_monitoring_delete_session_events.sql`) and `lib/monitoring/delete.ts`.
+Both trace DELETE routes export `maxDuration = 60` so the re-evaluation can continue via `after()`.
+
+`reevaluate` states:
+- `started` — the post-delete alert evaluation finished within the 5 s cap; `alert_state` is final.
+- `pending` — it was still running at response time; it continues in the background (`after()`), and the dashboard refreshes itself once more after 8 s.
+- `skipped` — alerting is not configured (no monitoring Supabase repo); nothing was evaluated.
+- `failed` — the evaluation threw; the delete itself succeeded. The error name + message (≤200 chars) is in the Vercel log line `[monitoring] delete: reevaluate failed`.
 
 **Alert scheduler (Supabase `pg_cron`)** — full detail in `docs/MONITORING-ALERTING.md` §
 "Supabase rules": `select jobname from cron.job;` lists the active jobs. To unschedule/reschedule

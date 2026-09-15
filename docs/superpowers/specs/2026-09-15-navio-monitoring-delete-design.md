@@ -52,7 +52,7 @@ revoke all on function monitoring_delete_alert_events(uuid[]) from public, anon,
 
 | Route | Body | Response |
 |---|---|---|
-| `DELETE /api/monitoring/traces` | `{ ids: uuid[] }` 1–200 | `{ deleted: n, feedback, events, sessions_deleted, reevaluate: "started" \| "skipped" }` |
+| `DELETE /api/monitoring/traces` | `{ ids: uuid[] }` 1–200 | `{ deleted: n, feedback, events, sessions_deleted, reevaluate: "started" \| "pending" \| "skipped" \| "failed" }` |
 | `DELETE /api/monitoring/traces/:id` | — | same shape, `deleted` 0 or 1 |
 | `DELETE /api/monitoring/alerts/events` | `{ ids: uuid[] }` 1–200 | `{ deleted: n }` |
 | `DELETE /api/monitoring/alerts/events/:id` | — | `{ deleted: 0 \| 1 }` |
@@ -64,8 +64,12 @@ covered).
 
 Re-evaluation: `lib/monitoring/delete.ts` `deleteTraces(ids)` calls the RPC, then starts
 `runEvaluation({ slot: "manual" })` without awaiting beyond a 5 s cap (`Promise.race`); failures
-are logged shape-only and never fail the delete. `ALERT_EVALUATE_SECRET` is not needed (in-process
-call). When the Supabase alert repo is unconfigured the result says `reevaluate: "skipped"`.
+are logged (error name + message ≤200 chars — infra, not visitor text) and never fail the delete.
+`ALERT_EVALUATE_SECRET` is not needed (in-process call). `reevaluate` is `started` (finished within
+the cap), `pending` (still running past the cap, kept alive with Next's `after()`; the UI refreshes
+once more after 8 s), `skipped` (Supabase alert repo unconfigured) or `failed` (it threw). The
+evaluation persists `alert_state` before narrating, so the breach truth is current within seconds
+regardless of narration/delivery time.
 
 ## 5. UI
 
