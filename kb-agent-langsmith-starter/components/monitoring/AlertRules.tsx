@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronDown } from "lucide-react";
 import type { AlertSettings } from "@/lib/monitoring/alerts/repo";
 import type { AlertRule } from "@/lib/monitoring/alerts/types";
-import { fmtRuleValue, ruleLabel } from "./alerts-format";
+import { fmtRuleValue, ruleLabel, ruleScopeLabel } from "./alerts-format";
 import { BTN_PRIMARY, BTN_SECONDARY, Card, INPUT, SELECT } from "./ui";
 
 interface RunResult {
@@ -20,6 +20,13 @@ interface RunResult {
   observations?: { rule_key: string; agent: string; subkey: string; status: string; observed: number | null; threshold: number; samples: number; note?: string }[];
   errored?: string[];
   detail?: string;
+}
+
+/** Parses a draft numeric field; blank or non-finite ⇒ null so an emptied input is never saved as 0. */
+function numOrNull(s: string): number | null {
+  if (s.trim() === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Sensible input step per rule key — rates and dollars in cents, latency in 100 ms. */
@@ -227,7 +234,16 @@ function RuleRow({ rule }: { rule: AlertRule }) {
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const isRate = rule.key === "failure_rate" || rule.key === "negative_feedback";
 
+  const threshold = numOrNull(draft.threshold);
+  const windowHours = numOrNull(draft.window_hours);
+  const minSamples = numOrNull(draft.min_samples);
+  const invalid = threshold === null || windowHours === null || minSamples === null;
+
   async function save() {
+    if (invalid) {
+      setState("error");
+      return;
+    }
     setState("saving");
     try {
       const r = await fetch(`/api/monitoring/alerts/rules/${rule.id}`, {
@@ -236,9 +252,9 @@ function RuleRow({ rule }: { rule: AlertRule }) {
         body: JSON.stringify({
           enabled: draft.enabled,
           severity: draft.severity,
-          threshold: Number(draft.threshold),
-          window_hours: Number(draft.window_hours),
-          min_samples: Number(draft.min_samples),
+          threshold,
+          window_hours: windowHours,
+          min_samples: minSamples,
         }),
       });
       if (!r.ok) {
@@ -253,10 +269,11 @@ function RuleRow({ rule }: { rule: AlertRule }) {
   }
 
   const id = (f: string) => `rule-${rule.id}-${f}`;
+  const label = ruleScopeLabel(rule.key, rule.agent);
   return (
     <tr className="border-t border-(--border) align-top">
       <td className="py-3 pr-3">
-        <div className="font-display text-sm font-semibold text-(--fg)">{ruleLabel(rule.key, rule.agent === "all" ? null : rule.agent, "")}</div>
+        <div className="font-display text-sm font-semibold text-(--fg)">{label}</div>
         {rule.description && <div className="mt-0.5 max-w-[22rem] text-xs text-(--fg-muted)">{rule.description}</div>}
       </td>
       <td className="py-3 pr-3">
@@ -266,7 +283,7 @@ function RuleRow({ rule }: { rule: AlertRule }) {
             checked={draft.enabled}
             onChange={(ev) => setDraft({ ...draft, enabled: ev.target.checked })}
             className="h-4 w-4 accent-(--brand-green)"
-            aria-label={`Regel aktiv: ${ruleLabel(rule.key, rule.agent === "all" ? null : rule.agent, "")}`}
+            aria-label={`Regel aktiv: ${label}`}
           />
         </label>
       </td>
@@ -328,11 +345,12 @@ function RuleRow({ rule }: { rule: AlertRule }) {
       </td>
       <td className="py-3">
         <div className="flex items-center gap-2">
-          <button type="button" className={BTN_SECONDARY} disabled={state === "saving"} onClick={() => void save()}>
+          <button type="button" className={BTN_SECONDARY} disabled={state === "saving" || invalid} onClick={() => void save()}>
             {state === "saving" ? "Speichert …" : "Speichern"}
           </button>
           {state === "saved" && <Check className="h-4 w-4 text-(--brand-green)" aria-label="Gespeichert" />}
-          {state === "error" && <span className="text-xs text-(--red)">Fehler</span>}
+          {invalid && <span className="text-xs text-(--red)">Bitte gültige Zahlen eingeben</span>}
+          {!invalid && state === "error" && <span className="text-xs text-(--red)">Fehler</span>}
         </div>
       </td>
     </tr>

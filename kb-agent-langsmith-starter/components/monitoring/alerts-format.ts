@@ -8,7 +8,7 @@ export function fmtRuleValue(key: string, v: number | string | null): string {
   if (v === null || v === undefined || v === "") return "—";
   const n = typeof v === "string" ? Number(v) : v;
   if (!Number.isFinite(n)) return "—";
-  return fmtValue(key as RuleKey, n);
+  return fmtValue(key as RuleKey, n) ?? "—";
 }
 export function kindLabel(kind: string): string {
   return kind === "fired" ? "Alarm" : kind === "recovered" ? "Entwarnung" : kind === "digest" ? "Digest" : "Test";
@@ -20,4 +20,14 @@ export function severityTone(kind: string, severity: string | null): "red" | "wa
 }
 export function ruleLabel(key: string, agent: string | null, subkey: string): string {
   return ruleTitle(key as RuleKey, (agent ?? "total") as ObsAgent, subkey);
+}
+
+/**
+ * Label for a rule as configured, honouring `agent: "all"` (evaluated for
+ * FAQ, Partner AND Gesamt) instead of mislabelling it "· Gesamt".
+ */
+export function ruleScopeLabel(key: string, agent: string): string {
+  if (agent === "faq" || agent === "partner") return ruleLabel(key, agent, "");
+  const base = ruleTitle(key as RuleKey, "total", "").replace(/ · Gesamt$/, "");
+  return `${base} · Alle Agenten`;
 }

@@ -87,6 +87,7 @@ function EventRow({ e }: { e: AlertEventRow }) {
   const [ackBy, setAckBy] = useState<string | null>(e.acknowledged_by);
   const [ackAt, setAckAt] = useState<string | null>(e.acknowledged_at);
   const [busy, setBusy] = useState(false);
+  const [ackError, setAckError] = useState(false);
   const tone = severityTone(e.kind, e.severity);
   const isTransition = e.kind === "fired" || e.kind === "recovered";
   // Digest / test rows carry no rule, so the pill already says everything a
@@ -101,6 +102,7 @@ function EventRow({ e }: { e: AlertEventRow }) {
     const by = ackName();
     if (!by) return;
     setBusy(true);
+    setAckError(false);
     try {
       const r = await fetch("/api/monitoring/alerts/ack", {
         method: "POST",
@@ -110,9 +112,11 @@ function EventRow({ e }: { e: AlertEventRow }) {
       if (r.ok) {
         setAckBy(by);
         setAckAt(new Date().toISOString());
+      } else {
+        setAckError(true);
       }
     } catch {
-      /* the row simply stays unacknowledged */
+      setAckError(true);
     } finally {
       setBusy(false);
     }
@@ -152,9 +156,12 @@ function EventRow({ e }: { e: AlertEventRow }) {
             {ackAt ? ` · ${fmtTime(ackAt)}` : ""}
           </span>
         ) : (
-          <button type="button" onClick={acknowledge} disabled={busy} className={BTN_SECONDARY}>
-            Bestätigen
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <button type="button" onClick={acknowledge} disabled={busy} className={BTN_SECONDARY}>
+              Bestätigen
+            </button>
+            {ackError && <span className="text-xs text-(--red)">Bestätigen fehlgeschlagen</span>}
+          </div>
         )}
       </div>
     </li>

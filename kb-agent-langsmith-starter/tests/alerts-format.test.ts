@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtRuleValue, kindLabel, severityTone, ruleLabel } from "../components/monitoring/alerts-format";
+import { fmtRuleValue, kindLabel, severityTone, ruleLabel, ruleScopeLabel } from "../components/monitoring/alerts-format";
 
 describe("alerts dashboard formatters", () => {
   it("values", () => {
@@ -8,6 +8,7 @@ describe("alerts dashboard formatters", () => {
     expect(fmtRuleValue("cost_daily", "1.6")).toBe("1,60 $");
     expect(fmtRuleValue("error_repeat", 6)).toBe("6×");
     expect(fmtRuleValue("failure_rate", null)).toBe("—");
+    expect(fmtRuleValue("unknown_key", 1)).toBe("—");
   });
   it("labels and tones", () => {
     expect(kindLabel("fired")).toBe("Alarm");
@@ -16,5 +17,9 @@ describe("alerts dashboard formatters", () => {
     expect(severityTone("recovered", "alert")).toBe("green");
     expect(severityTone("digest", null)).toBe("muted");
     expect(ruleLabel("error_repeat", "total", "azure_429")).toBe("Wiederholter Fehler azure_429 · Gesamt");
+  });
+  it("scope labels", () => {
+    expect(ruleScopeLabel("failure_rate", "all")).toBe("Fehlerrate · Alle Agenten");
+    expect(ruleScopeLabel("latency_p95", "faq")).toBe("Antwortzeit p95 · FAQ");
   });
 });
