@@ -6,7 +6,17 @@ import { deliver, digestMessage, transitionMessage, type DeliverDeps, type Deliv
 import { supabaseAlertRepo, type AlertRepo } from "./repo";
 import type { AlertRule, MetricsInput, Observation, Transition, WindowMetrics } from "./types";
 
-export interface EvaluateOptions { slot: "scheduled" | "test" | "manual"; dryRun?: boolean; now?: Date; env?: string; dashboardUrl?: string; tz?: string }
+export interface EvaluateOptions {
+  slot: "scheduled" | "test" | "manual";
+  dryRun?: boolean;
+  now?: Date;
+  env?: string;
+  dashboardUrl?: string;
+  tz?: string;
+  /** Write the digest event row (default true). Resync runs after a deletion pass false so the
+   *  feed is not littered with one "Statusbericht" per deleted item; transitions still fire. */
+  writeDigest?: boolean;
+}
 export interface EvaluateDeps { repo?: AlertRepo; narrate?: NarrateDeps; deliver?: DeliverDeps }
 export interface EvaluateResult {
   ok: boolean; slot: string; dryRun: boolean;
@@ -102,6 +112,7 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   }));
   if (timer) clearTimeout(timer);
 
+  if (opts.writeDigest === false) return result;
   const ins = await repo.insertEvent({ kind: "digest", narrative: digestNarr.text, narrative_source: digestNarr.source, run_slot: slot });
   if (ins.inserted && settings.digest_enabled && opts.slot === "scheduled") {
     const d = await deliver(digestMessage(observations, errored, digestNarr.text, url), { teams: true, email: false }, { ...deps.deliver, recipients });

@@ -49,7 +49,7 @@ async function runReevaluate(deps: DeleteDeps): Promise<"started" | "skipped" | 
     deps.reevaluate ??
     (async () => {
       const { runEvaluation } = await import("./alerts/evaluate");
-      return runEvaluation({ slot: "manual" });
+      return runEvaluation({ slot: "manual", writeDigest: false });
     });
   try {
     const result = await Promise.race([reevaluate(), timeout(deps.reevaluateCapMs ?? 5000)]);

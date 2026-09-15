@@ -63,6 +63,13 @@ describe("runEvaluation", () => {
     const r = await runEvaluation({ slot: "manual", now: NOW }, deps(m2.repo));
     expect(r?.transitions[0].kind).toBe("recovered");
   });
+  it("writeDigest:false (resync after a deletion) writes no digest row but still fires transitions", async () => {
+    const m = memRepo({ faq: { traces: 20, failed: 4 } });
+    const r = await runEvaluation({ slot: "manual", now: NOW, writeDigest: false }, deps(m.repo));
+    expect(r?.transitions).toHaveLength(1);
+    expect(m.events.map((e) => e.kind)).toEqual(["fired"]);
+    expect(r?.digest.sent).toBe(false);
+  });
   it("test slot writes a digest event but does not send it", async () => {
     const m = memRepo({});
     const fetchImpl = vi.fn(async () => new Response("1", { status: 200 })) as unknown as typeof fetch;
