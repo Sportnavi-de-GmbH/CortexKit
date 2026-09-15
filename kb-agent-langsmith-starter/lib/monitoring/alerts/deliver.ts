@@ -6,7 +6,7 @@ import { HUMAN_SEVERITY, type AlertMessage } from "../format-alert";
 import { sendTeamsAlert, teamsEnabled } from "../teams";
 import { sendAlertEmail, graphMailEnabled } from "../graph-mail";
 import { fmtObserved, fmtThreshold, humanHeadline, humanRuleName } from "./narrate";
-import { humanErrored, humanNote, humanThreshold, humanValue } from "./copy";
+import { humanDigestValue, humanErrored } from "./copy";
 import type { Observation, Transition } from "./types";
 
 export const PROJECT_LABEL = "Navio Monitoring";
@@ -45,19 +45,21 @@ export function digestMessage(obs: Observation[], errored: string[], narrative: 
   const title = breached > 0 ? `Statusbericht: ${breached} Problem${breached === 1 ? "" : "e"}` : "Statusbericht: alles in Ordnung";
   const m = base(breached > 0 ? "ALERT" : "OK", title, narrative, dashboardUrl);
   m.window = "Statusbericht";
-  m.facts = obs.map((o) => {
-    const note = humanNote(o);
-    return {
-      title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${humanRuleName(o.rule.key, o.agent, o.subkey)}`,
-      value: `${humanValue(o)} (erlaubt bis ${humanThreshold(o)})${note ? ` – ${note}` : ""}`,
-    };
-  });
+  // A status report is not an alarm unless something is actually breached.
+  if (breached === 0) m.humanSeverity = "Statusbericht";
+  m.facts = obs.map((o) => ({
+    title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${humanRuleName(o.rule.key, o.agent, o.subkey)}`,
+    value: humanDigestValue(o),
+  }));
   if (errored.length) m.facts.push({ title: "⚪ Nicht prüfbar", value: `${errored.map(humanErrored).join(", ")} (die Daten konnten nicht geladen werden)` });
   return m;
 }
 
 export function testMessage(dashboardUrl: string): AlertMessage {
-  return base("OK", "Testalarm", "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig.", dashboardUrl);
+  const m = base("OK", "Testalarm", "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig.", dashboardUrl);
+  // "Entwarnung / alles in Ordnung" would read as a real all-clear for a rule nobody breached.
+  m.humanSeverity = "Test";
+  return m;
 }
 
 export async function deliver(msg: AlertMessage, channels: { teams: boolean; email: boolean }, deps: DeliverDeps = {}): Promise<Delivery> {

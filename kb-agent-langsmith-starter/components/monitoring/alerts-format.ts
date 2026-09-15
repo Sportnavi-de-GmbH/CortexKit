@@ -2,7 +2,7 @@
 // formatting so the dashboard and the messages can never disagree on a number.
 // Relative (not "@/"): this is a RUNTIME import and vitest has no path alias configured.
 import { fmtValue, ruleTitle } from "../../lib/monitoring/alerts/narrate";
-import { humanErrored, humanRuleName } from "../../lib/monitoring/alerts/copy";
+import { humanErrored, humanLimit, humanNoteText, humanNumber, humanRuleName } from "../../lib/monitoring/alerts/copy";
 import type { ObsAgent, RuleKey } from "@/lib/monitoring/alerts/types";
 
 export function fmtRuleValue(key: string, v: number | string | null): string {
@@ -36,6 +36,33 @@ export function ruleScopeLabel(key: string, agent: string): string {
 /** "Fehlerrate des FAQ-Assistenten" — what the feed and the run report show a human. */
 export function humanRuleLabel(key: string, agent: string | null, subkey: string): string {
   return humanRuleName(key, agent ?? "total", subkey);
+}
+
+/** Number as text, or "—" when there is none / the key is unknown. */
+function num(v: number | string | null | undefined): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "string" ? Number(v) : v;
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The observed value as the team reads it in the run report — never "3,2× Basis", never the
+ * 999 sentinel, never "7×". The raw value stays available for the per-row technical toggle.
+ */
+export function humanRuleValue(key: string, observed: number | string | null | undefined): string {
+  const n = num(observed);
+  if (n === null) return "—";
+  return humanNumber(key as RuleKey, n) ?? "—";
+}
+/** The same for the configured limit. */
+export function humanRuleThreshold(key: string, threshold: number | string | null | undefined): string {
+  const n = num(threshold);
+  if (n === null) return "—";
+  return humanLimit(key as RuleKey, n) ?? "—";
+}
+/** An engineer note in plain words; null when it is not one we can translate (so it is dropped). */
+export function humanRuleNote(note: string | null | undefined): string | null {
+  return humanNoteText(note);
 }
 
 /** "failure_rate<dot>faq" (a rule that could not be evaluated) in plain words. */

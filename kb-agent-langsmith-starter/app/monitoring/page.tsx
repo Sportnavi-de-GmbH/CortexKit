@@ -39,7 +39,8 @@ export default async function OverviewPage({
         description={`What the Navio agents did in the ${RANGE_LABEL[range]} — ${agentLabel}. Click an execution to see every step.`}
       />
 
-      {/* Streams in: a slow or failing alert-state query must not hold up the KPIs. */}
+      {/* Streams in: a slow alert-state query must not hold up the KPIs. Suspense covers the
+          pending case only — a failing query is swallowed inside breachedStates(). */}
       <Suspense fallback={null}>
         <BreachBanner />
       </Suspense>

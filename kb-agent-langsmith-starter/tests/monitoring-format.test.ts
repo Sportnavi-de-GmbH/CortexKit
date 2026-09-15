@@ -89,6 +89,15 @@ describe("cross-channel consistency", () => {
     expect(subject).toContain(msg.severityLabel);
   });
 
+  it("keeps the English relay chrome: ISO footer last, no technical block", () => {
+    const card = formatTeamsCard(msg) as { attachments: { content: { body: { type: string; text?: string }[] } }[] };
+    const body = card.attachments[0].content.body;
+    const last = body[body.length - 1];
+    expect(last.text).toBe(`${msg.timestampIso} · window ${msg.window}`);
+    expect(body.some((b) => b.text === "Für das Technik-Team")).toBe(false);
+    expect(formatEmailText(msg)).not.toContain("Für das Technik-Team");
+  });
+
   it("HTML output escapes untrusted text from the Langfuse payload", () => {
     const hostile = toAlertMessage(
       LangfuseWebhookSchema.parse({

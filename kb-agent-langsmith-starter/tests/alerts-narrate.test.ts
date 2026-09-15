@@ -32,7 +32,7 @@ describe("human names", () => {
   });
   it("turns an errored entry into words", () => {
     expect(humanErrored("failure_rate·faq")).toBe("Fehlerrate (FAQ-Assistent)");
-    expect(humanErrored("cost_spike·all")).toBe("Kostenanstieg (alle Assistenten)");
+    expect(humanErrored("cost_spike·all")).toBe("Kostenanstieg (beide Assistenten)");
     expect(humanErrored("nonsense")).toBe("nonsense");
   });
 });
@@ -98,6 +98,7 @@ describe("plain-German notes", () => {
     expect(n("zu wenig Daten (0 < 10)")).toBe("Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen");
     expect(n("Fenster nicht geladen")).toBe("Die Daten konnten nicht geladen werden");
     expect(n("24h 3.20 $ vs Basis 1.00 $/Tag", "cost_spike")).toBe("Heute 3,20 $, an einem normalen Tag 1,00 $");
+    expect(n("im Fenster nicht mehr aufgetreten", "error_repeat")).toBe("Im Zeitraum nicht mehr aufgetreten");
     expect(n("etwas ganz anderes")).toBeNull();
     expect(humanNote(obs({}))).toBeNull();
   });
@@ -179,14 +180,68 @@ describe("guard against technical model output", () => {
   });
 });
 
+describe("what the model is allowed to see and to write", () => {
+  it("gets human numbers, never the technical multiplier", async () => {
+    let user = "";
+    await narrateTransition(
+      { kind: "fired", obs: obs({ rule: rule({ key: "cost_spike", threshold: 3 }), observed: 3.2, threshold: 3 }) },
+      { generate: async (p) => { user = p.user; return "x"; } },
+    );
+    expect(user).not.toMatch(/× Basis/);
+    const parsed = JSON.parse(user);
+    expect(parsed.observed).toBe("3,2-mal so hoch wie an einem normalen Tag");
+    expect(parsed.threshold).toBe("3-mal so hoch wie an einem normalen Tag");
+  });
+  it("falls back to the template when the model writes a multiplier or the sentinel", async () => {
+    const a = await narrateTransition(fired, { generate: async () => "Die Kosten waren 3,2× Basis." });
+    expect(a.source).toBe("template");
+    const b = await narrateTransition(fired, { generate: async () => "Der Wert liegt bei 999 und damit sehr hoch." });
+    expect(b.source).toBe("template");
+  });
+});
+
+describe("counts in human sentences", () => {
+  it("reads '7-mal' and 'ab 5-mal', never '7×'", () => {
+    const t = templateTransition({ kind: "fired", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), subkey: "azure_429", observed: 7, threshold: 5 }) });
+    expect(t).toContain("7-mal");
+    expect(t).toContain("ab 5-mal");
+    expect(t).not.toMatch(/\d×/);
+    // the technical view keeps the compact form
+    expect(fmtObserved(obs({ rule: rule({ key: "error_repeat" }), observed: 6 }))).toBe("6×");
+  });
+});
+
+describe("honest recoveries", () => {
+  it("the repeated error states the count and the limit", () => {
+    const r = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), subkey: "azure_429", status: "ok", observed: 4, threshold: 5 }) });
+    expect(r).toContain("Der wiederholte Fehler beim FAQ-Assistenten ist in den letzten 24 Stunden nur noch 4-mal aufgetreten und liegt damit wieder unter der Meldegrenze von 5-mal.");
+    expect(r).not.toMatch(/tritt nicht mehr auf/);
+    const zero = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), status: "ok", observed: 0, threshold: 5 }) });
+    expect(zero).toContain("Der wiederholte Fehler beim FAQ-Assistenten ist in den letzten 24 Stunden nicht mehr aufgetreten.");
+  });
+  it("the partner recovery says how often it was unreachable", () => {
+    const r = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "partner_upstream", threshold: 3 }), agent: "partner", status: "ok", observed: 2, threshold: 3 }) });
+    expect(r).toContain("nur noch 2-mal nicht erreichbar");
+    expect(r).toContain("Meldegrenze von 3-mal");
+    const zero = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "partner_upstream", threshold: 3 }), agent: "partner", status: "ok", observed: 0, threshold: 3 }) });
+    expect(zero).toContain("durchgehend erreichbar");
+  });
+});
+
 describe("narrateDigest", () => {
+  it("a skipped rule shows no allowance, only what could not be measured", () => {
+    const warm = obs({ rule: rule({ key: "cost_spike", threshold: 3 }), status: "skipped", observed: null, note: "Aufwärmphase (warmup): 0/7 Tage Basis" });
+    const t = templateDigest([warm], []);
+    expect(t).toContain("nicht gemessen – Noch nicht genug Vergleichstage gesammelt (0 von 7)");
+    expect(t).not.toMatch(/erlaubt bis/);
+  });
   it("template opens with the overall state, then one human line per rule", async () => {
     const n = await narrateDigest([obs({}), obs({ status: "ok", agent: "partner", observed: 0.01 })], ["cost_spike·all"], { generate: async () => { throw new Error("x"); } });
     expect(n.source).toBe("template");
     expect(n.text).toMatch(/^Achtung: 1 Problem/);
     expect(n.text).toContain("Fehlerrate des FAQ-Assistenten");
     expect(n.text).toContain("Fehlerrate der Partner-Suche");
-    expect(n.text).toContain("Nicht prüfbar: Kostenanstieg (alle Assistenten) (die Daten konnten nicht geladen werden)");
+    expect(n.text).toContain("Nicht prüfbar: Kostenanstieg (beide Assistenten) (die Daten konnten nicht geladen werden)");
     expect(n.text).not.toMatch(/cost_spike·all|·faq/);
   });
   it("an all-clear digest says so in plain words", () => {

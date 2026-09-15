@@ -3,12 +3,12 @@
 // Rules tab: manual evaluation actions, the recipient list, and the editable
 // rule table. Every write goes through the cookie-gated /api/monitoring/alerts/*
 // endpoints; nothing here talks to Supabase directly.
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ChevronDown } from "lucide-react";
 import type { AlertSettings } from "@/lib/monitoring/alerts/repo";
 import type { AlertRule } from "@/lib/monitoring/alerts/types";
-import { fmtRuleValue, humanDelivery, humanErroredLabel, humanRuleLabel, ruleScopeLabel } from "./alerts-format";
+import { fmtRuleValue, humanDelivery, humanErroredLabel, humanRuleLabel, humanRuleNote, humanRuleThreshold, humanRuleValue, ruleScopeLabel } from "./alerts-format";
 import { BTN_PRIMARY, BTN_SECONDARY, Card, INPUT, SELECT } from "./ui";
 
 interface RunResult {
@@ -70,6 +70,39 @@ function StatusChip({ status }: { status: string }) {
   );
 }
 
+type RunObservation = NonNullable<RunResult["observations"]>[number];
+
+/**
+ * Everything technical about one evaluated rule — the rule key, the agent id, the raw value
+ * and limit, the engineer note — behind a toggle, the way the feed hides it. The visible row
+ * stays a sentence a non-technical reader can act on.
+ */
+function RowTechnicalDetails({ o }: { o: RunObservation }) {
+  const rows: [string, string][] = [
+    ["Regel", `${o.rule_key}${o.agent ? `·${o.agent}` : ""}${o.subkey ? `·${o.subkey}` : ""}`],
+    ["Agent", o.agent || "—"],
+    ["Wert", fmtRuleValue(o.rule_key, o.observed)],
+    ["Grenze", fmtRuleValue(o.rule_key, o.threshold)],
+    ["Turns", String(o.samples ?? 0)],
+  ];
+  if (o.note) rows.push(["Hinweis", o.note]);
+  return (
+    <details className="mt-1 min-w-0">
+      <summary className="cursor-pointer list-none text-[11px] font-medium text-(--fg-muted) underline underline-offset-2 hover:text-(--fg)">
+        Technische Details
+      </summary>
+      <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-xl bg-(--surface-muted) px-3 py-2 text-[11px]">
+        {rows.map(([k, v]) => (
+          <Fragment key={k}>
+            <dt className="text-(--fg-subtle)">{k}</dt>
+            <dd className="tabular break-words text-(--fg)">{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
 function RunReport({ result }: { result: RunResult }) {
   if (result.detail) {
     return (
@@ -115,9 +148,12 @@ function RunReport({ result }: { result: RunResult }) {
                 <tr key={i} className="border-t border-(--border)">
                   <td className="py-2 pr-3 text-(--fg)">{humanRuleLabel(o.rule_key, o.agent, o.subkey)}</td>
                   <td className="py-2 pr-3"><StatusChip status={o.status} /></td>
-                  <td className="tabular py-2 pr-3 text-right">{fmtRuleValue(o.rule_key, o.observed)}</td>
-                  <td className="tabular py-2 pr-3 text-right text-(--fg-muted)">{fmtRuleValue(o.rule_key, o.threshold)}</td>
-                  <td className="py-2 text-xs text-(--fg-muted)">{o.note ?? ""}</td>
+                  <td className="py-2 pr-3 text-right">{humanRuleValue(o.rule_key, o.observed)}</td>
+                  <td className="py-2 pr-3 text-right text-(--fg-muted)">{humanRuleThreshold(o.rule_key, o.threshold)}</td>
+                  <td className="py-2 text-xs text-(--fg-muted)">
+                    <span className="block">{humanRuleNote(o.note) ?? ""}</span>
+                    <RowTechnicalDetails o={o} />
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -257,7 +257,7 @@ export function AlertFeed({ initial, params }: { initial: { items: AlertEventRow
           <option value="">Alle</option>
           <option value="fired">Alarm</option>
           <option value="recovered">Entwarnung</option>
-          <option value="digest">Digest</option>
+          <option value="digest">Statusbericht</option>
           <option value="test">Test</option>
         </FilterSelect>
         <FilterSelect name="agent" label="Agent" value={agent}>

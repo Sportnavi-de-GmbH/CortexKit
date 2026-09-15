@@ -76,11 +76,18 @@ describe("messages", () => {
     const hot = digestMessage([{ ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, observed: 3.2, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }], [], "Lage.", URL);
     expect(hot.facts?.[0].value).toContain("3,2-mal so hoch wie an einem normalen Tag");
     expect(hot.facts?.[0].value).not.toMatch(/× Basis/);
+    expect(m.facts?.[0].value).not.toMatch(/erlaubt bis/);
+    expect(m.facts?.[0].value.startsWith("nicht gemessen")).toBe(true);
   });
   it("test message reassures instead of alarming", () => {
     const m = testMessage(URL);
     expect(m.title).toMatch(/Testalarm/);
     expect(m.detail).toBe("Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig.");
+    expect(m.humanSeverity).toBe("Test");
+  });
+  it("a digest is a status report unless something is breached", () => {
+    expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], [], "Lage.", URL).humanSeverity).toBe("Statusbericht");
+    expect(digestMessage([obs], [], "Lage.", URL).humanSeverity).toBe("Alarm");
   });
 });
 

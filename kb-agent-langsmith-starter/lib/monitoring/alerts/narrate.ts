@@ -5,7 +5,7 @@
 import type { LanguageModel } from "ai";
 import type { Observation, ObsAgent, RuleKey, Transition } from "./types";
 import { fmtValue } from "./format";
-import { AGENT_HUMAN, HUMAN, NO_ACTION, humanErrored, humanHeadline, humanNote, humanRuleName, humanThreshold, humanValue, windowPhrase } from "./copy";
+import { AGENT_HUMAN, HUMAN, NO_ACTION, humanDigestValue, humanErrored, humanHeadline, humanNote, humanRuleName, humanThreshold, humanValue, windowPhrase } from "./copy";
 
 export interface NarrateDeps {
   generate?: (prompt: { system: string; user: string }) => Promise<string>;
@@ -48,8 +48,7 @@ export function templateTransition(t: Transition): string {
 
 export function digestLine(o: Observation): string {
   const mark = o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢";
-  const note = humanNote(o);
-  return `${mark} ${humanRuleName(o.rule.key, o.agent, o.subkey)}: ${humanValue(o)} (erlaubt bis ${humanThreshold(o)})${note ? ` – ${note}` : ""}`;
+  return `${mark} ${humanRuleName(o.rule.key, o.agent, o.subkey)}: ${humanDigestValue(o)}`;
 }
 
 export function templateDigest(obs: Observation[], errored: string[]): string {
@@ -100,7 +99,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * Last line of defence: the model is told not to use identifiers, but a prompt is not a
  * guarantee. If jargon reaches the text, the deterministic template is used instead.
  */
-const TECHNICAL_LEAK = /[a-z_]+·(faq|partner|total)|failure_rate|latency_p95|cost_(daily|spike)|error_repeat|partner_upstream|HTTP \d|\bp95\b|warmup|\d+ ?< ?\d+/i;
+const TECHNICAL_LEAK = /[a-z_]+·(faq|partner|total)|failure_rate|latency_p95|cost_(daily|spike)|error_repeat|partner_upstream|HTTP \d|\bp95\b|warmup|\d+ ?< ?\d+|×\s?Basis|\b999\b/i;
 
 async function run(user: Record<string, unknown>, fallback: string, deps: NarrateDeps): Promise<Narrative> {
   const generate = deps.generate ?? defaultGenerate;
@@ -121,7 +120,8 @@ export function narrateTransition(t: Transition, deps: NarrateDeps = {}): Promis
     headline: humanHeadline(t.kind, o),
     metric: humanRuleName(o.rule.key, o.agent, o.subkey),
     agent: AGENT_HUMAN[o.agent],
-    observed: fmtObserved(o), threshold: fmtThreshold(o),
+    // The model must never see "3,2× Basis" or the 999 sentinel — it would copy them.
+    observed: humanValue(o), threshold: humanThreshold(o),
     samples: o.samples, window: windowPhrase(o),
     note: humanNote(o),
     draft: draftTransition(t),

@@ -62,8 +62,13 @@ const Window = (o: Observation) => { const w = windowPhrase(o); return w.charAt(
 const de1 = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const de2 = (n: number) => n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const val = (o: Observation) => fmtValue(o.rule.key, o.observed);
-const lim = (o: Observation) => fmtValue(o.rule.key, o.threshold);
+const val = (o: Observation) => humanValue(o);
+const lim = (o: Observation) => humanThreshold(o);
+
+/** "3" for a whole multiplier, "3,2" otherwise — a forced ",0" reads like false precision. */
+const factor = (n: number) => (Number.isInteger(n) ? n.toLocaleString("de-DE") : de1(n));
+/** Counts are spoken, not multiplied: "7-mal", never "7×" (that stays in the technical view). */
+const mal = (n: number) => `${n}-mal`;
 
 /**
  * The cost spike is a multiplier; "3,2× Basis" is jargon, "3,2-mal so hoch wie an einem
@@ -72,21 +77,46 @@ const lim = (o: Observation) => fmtValue(o.rule.key, o.threshold);
  */
 export function times(v: number | null): string {
   if (v === null || !Number.isFinite(v) || v >= 999) return "deutlich mehr als an einem normalen Tag";
-  return `${de1(v)}-mal so hoch wie an einem normalen Tag`;
+  return `${factor(v)}-mal so hoch wie an einem normalen Tag`;
 }
 
-/** The observed value as a human reads it (the technical view keeps `fmtValue`). */
-export function humanValue(o: Observation): string {
+/**
+ * One number as a human reads it, by rule key — the shared primitive behind `humanValue`,
+ * `humanThreshold` and the dashboard's run report (the technical view keeps `fmtValue`).
+ */
+export function humanNumber(key: RuleKey, v: number | null): string {
   // A skipped rule has no measurement at all; saying "deutlich mehr" there would be a claim
   // the data does not make.
-  if (o.observed === null) return "nicht gemessen";
-  if (o.rule.key === "cost_spike") return times(o.observed);
-  return fmtValue(o.rule.key, o.observed);
+  if (v === null) return "nicht gemessen";
+  if (key === "cost_spike") return times(v);
+  if (key === "error_repeat" || key === "partner_upstream") return mal(v);
+  return fmtValue(key, v);
+}
+/** The same for a limit — a spike limit is a comparison, not a bare multiplier. */
+export function humanLimit(key: RuleKey, v: number | null): string {
+  if (v === null) return "nicht gemessen";
+  if (key === "cost_spike") return `${factor(v)}-mal so hoch wie an einem normalen Tag`;
+  if (key === "error_repeat" || key === "partner_upstream") return mal(v);
+  return fmtValue(key, v);
+}
+
+/** The observed value as a human reads it. */
+export function humanValue(o: Observation): string {
+  return humanNumber(o.rule.key, o.observed);
 }
 /** The threshold as a human reads it. */
 export function humanThreshold(o: Observation): string {
-  if (o.rule.key === "cost_spike") return `${de1(o.threshold)}-mal`;
-  return fmtValue(o.rule.key, o.threshold);
+  return humanLimit(o.rule.key, o.threshold);
+}
+
+/**
+ * One digest row's value. A skipped rule was never measured, so "(erlaubt bis …)" would
+ * suggest a comparison that did not happen — the reason takes its place.
+ */
+export function humanDigestValue(o: Observation): string {
+  const note = humanNote(o);
+  const head = o.observed === null ? humanValue(o) : `${humanValue(o)} (erlaubt bis ${humanThreshold(o)})`;
+  return `${head}${note ? ` – ${note}` : ""}`;
 }
 
 /**
@@ -95,12 +125,19 @@ export function humanThreshold(o: Observation): string {
  * anything it does not recognise, so an unknown note is dropped rather than leaked.
  */
 export function humanNote(o: Observation): string | null {
-  const note = (o.note ?? "").trim();
+  return humanNoteText(o.note);
+}
+
+/** Same translation from the raw note string — the dashboard has no `Observation` at hand. */
+export function humanNoteText(raw: string | null | undefined): string | null {
+  const note = (raw ?? "").trim();
   if (!note) return null;
   const warm = /^Aufwärmphase \(warmup\):\s*(\d+)\s*\/\s*(\d+)\s*Tage Basis$/.exec(note);
   if (warm) return `Noch nicht genug Vergleichstage gesammelt (${warm[1]} von ${warm[2]})`;
   if (/^zu wenig Daten \(\d+\s*<\s*\d+\)$/.test(note)) return "Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen";
   if (note === "Fenster nicht geladen") return "Die Daten konnten nicht geladen werden";
+  // state.ts writes this when a breached rule has no observation at all this run.
+  if (note === "im Fenster nicht mehr aufgetreten") return "Im Zeitraum nicht mehr aufgetreten";
   const spike = /^24h\s+([\d.]+)\s*\$\s*vs\s*Basis\s+([\d.]+)\s*\$/.exec(note);
   if (spike) {
     const today = Number(spike[1]);
@@ -194,7 +231,15 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
     why: (o) => causeOfErrorType(o.subkey, o.agent) ?? UNKNOWN_CAUSE,
     impact: () => "Betroffene Nutzer haben statt einer Antwort eine Fehlermeldung gesehen.",
     next: () => ERRORS_NEXT,
-    recovered: (o) => `Der wiederholte Fehler ${AGENT_AT[o.agent]} tritt nicht mehr auf. Die Nutzer bekommen wieder ihre Antworten.`,
+    // "tritt nicht mehr auf" claimed more than the data says: the rule only fell back under its
+    // reporting limit, and it may still have happened a few times.
+    recovered: (o) => {
+      const gone = o.observed === null || o.observed === 0;
+      const body = gone
+        ? `${windowPhrase(o)} nicht mehr aufgetreten.`
+        : `${windowPhrase(o)} nur noch ${val(o)} aufgetreten und liegt damit wieder unter der Meldegrenze von ${lim(o)}.`;
+      return `Der wiederholte Fehler ${AGENT_AT[o.agent]} ist ${body} Die Nutzer bekommen wieder ihre Antworten.`;
+    },
   },
   partner_upstream: {
     title: () => "Partner-Suche: zeitweise nicht erreichbar",
@@ -203,7 +248,14 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
     why: () => "Der Dienst hinter der Partner-Suche hat in dieser Zeit nicht geantwortet.",
     impact: () => "Betroffene Nutzer haben auf die Frage nach Studios oder Kursen keine Ergebnisse bekommen.",
     next: () => "Bitte das Technik-Team informieren, damit es die Partner-Suche prüft.",
-    recovered: () => "Die Partner-Suche ist wieder erreichbar. Nutzer bekommen wieder Studios und Kurse angezeigt.",
+    // Same honesty problem as the repeated error: "wieder erreichbar" hid how often it still was not.
+    recovered: (o) => {
+      const gone = o.observed === null || o.observed === 0;
+      const body = gone
+        ? `war ${windowPhrase(o)} durchgehend erreichbar.`
+        : `war ${windowPhrase(o)} nur noch ${val(o)} nicht erreichbar und liegt damit wieder unter der Meldegrenze von ${lim(o)}.`;
+      return `Die Partner-Suche ${body} Nutzer bekommen wieder Studios und Kurse angezeigt.`;
+    },
   },
 };
 
@@ -220,7 +272,7 @@ export function humanErrored(entry: string): string {
   const [key, agent] = String(entry).split("·");
   const metric = METRIC_HUMAN[key as RuleKey];
   if (!metric) return String(entry);
-  const who = agent === "faq" ? "FAQ-Assistent" : agent === "partner" ? "Partner-Suche" : "alle Assistenten";
+  const who = AGENT_HUMAN[agent === "faq" || agent === "partner" ? agent : "total"];
   return `${metric} (${who})`;
 }
 
