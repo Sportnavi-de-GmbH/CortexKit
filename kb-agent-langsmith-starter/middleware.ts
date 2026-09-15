@@ -15,6 +15,14 @@ export const config = {
     "/api/monitoring/traces/:path*",
     "/api/monitoring/stats",
     "/api/monitoring/sessions/:path*",
+    "/api/monitoring/alerts/events",
+    "/api/monitoring/alerts/rules",
+    "/api/monitoring/alerts/rules/:path*",
+    "/api/monitoring/alerts/settings",
+    "/api/monitoring/alerts/ack",
+    "/api/monitoring/alerts/test",
+    "/api/monitoring/alerts/run",
+    "/api/monitoring/alerts/status",
   ],
 };
 

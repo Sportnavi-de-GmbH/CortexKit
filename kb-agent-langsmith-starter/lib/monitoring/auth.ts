@@ -70,5 +70,7 @@ export function cookieHeader(token: string, secure: boolean): string {
 export function isProtectedPath(pathname: string): boolean {
   if (pathname === "/monitoring/login") return false;
   if (pathname === "/monitoring" || pathname.startsWith("/monitoring/")) return true;
-  return /^\/api\/monitoring\/(traces|stats|sessions)(\/|$)/.test(pathname);
+  if (/^\/api\/monitoring\/(traces|stats|sessions)(\/|$)/.test(pathname)) return true;
+  // Alert dashboard API — but NOT the machine endpoints: evaluate (bearer) and the Langfuse relay (HMAC).
+  return /^\/api\/monitoring\/alerts\/(events|rules|settings|ack|test|run|status)(\/|$)/.test(pathname);
 }

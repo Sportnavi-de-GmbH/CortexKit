@@ -52,4 +52,12 @@ describe("monitoring auth", () => {
     expect(isProtectedPath("/api/monitoring/alerts/faq")).toBe(false);
     expect(isProtectedPath("/api/monitoring/auth")).toBe(false);
   });
+  it("alert data routes are protected; evaluate and the Langfuse relay are not", () => {
+    expect(isProtectedPath("/api/monitoring/alerts/events")).toBe(true);
+    expect(isProtectedPath("/api/monitoring/alerts/rules/abc")).toBe(true);
+    expect(isProtectedPath("/api/monitoring/alerts/status")).toBe(true);
+    expect(isProtectedPath("/api/monitoring/alerts/evaluate")).toBe(false);
+    expect(isProtectedPath("/api/monitoring/alerts/faq")).toBe(false);
+    expect(isProtectedPath("/api/monitoring/alerts/partner")).toBe(false);
+  });
 });
