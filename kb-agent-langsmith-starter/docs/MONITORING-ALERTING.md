@@ -384,8 +384,9 @@ otherwise stay breached forever once that error stops occurring — no recovery 
 permanent banner, and the rule could never fire for that type again. Every row belonging to a
 rule that was evaluated this run but received no observation is therefore written back as `ok`
 (with `observed`/`samples` cleared), and a `recovered` transition is emitted if it had been
-breached. Rows of rules **disabled** in the Regeln tab are deleted outright, so a disabled rule
-leaves neither a banner nor a stale row behind.
+breached. Rows of rules **disabled** in the Regeln tab are deleted on the next evaluation run
+(the PATCH only flips `enabled`), so a disabled rule's banner clears at the next scheduled or
+manual run, not instantly.
 
 **Delivery cannot undo a state write.** State is saved first; the transitions are then
 narrated, inserted and delivered in parallel, each inside its own `try/catch`, so one failing
@@ -476,6 +477,7 @@ didn't raise.
 | `MS_GRAPH_*` | existing (shared, `navio-chatbot` app, `Mail.Send`) | unset ⇒ email skipped; this is Microsoft Graph `sendMail`, **not Resend, not SMTP** |
 | `ALERT_EMAIL_TO` | existing | fallback recipients when `alert_settings.email_recipients` is empty |
 | `AZURE_AI_CHATBOT_*` | existing | narration model; unset/timeout/failure ⇒ template fallback, never a thrown error |
+| `ALERT_DELIVERY_DEADLINE_MS` | optional | soft cap for the delivery phase of one run (default 40000); a transition still in flight at the deadline is recorded as `skipped: deadline` |
 
 ### Go-live checklist
 
