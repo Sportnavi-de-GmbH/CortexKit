@@ -1,0 +1,38 @@
+/* Dashboard-only rules that Tailwind utilities express poorly. Scoped to
+   #monitoring-root so nothing leaks into the widget or the dev console. */
+
+/* Native controls (selects, scrollbars, dialog backdrop) follow the dashboard
+   theme; the global `html { color-scheme: light }` is for the light-only console. */
+#monitoring-root.theme-dark {
+  color-scheme: dark;
+}
+
+/* Sticky table header inside the scroll container. */
+#monitoring-root .mon-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+/* Native <dialog> reset: the browser default adds its own border/padding. */
+#monitoring-root dialog {
+  border: none;
+  padding: 0;
+}
+
+/* Numbers in tables and stat tiles must line up. */
+#monitoring-root .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Details disclosure: hide the default marker, we draw our own chevron. */
+#monitoring-root details > summary {
+  list-style: none;
+}
+#monitoring-root details > summary::-webkit-details-marker {
+  display: none;
+}
+#monitoring-root details[open] > summary .mon-chevron {
+  transform: rotate(90deg);
+}

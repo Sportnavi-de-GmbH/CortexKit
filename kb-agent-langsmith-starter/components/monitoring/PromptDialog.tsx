@@ -4,6 +4,7 @@
 // replays on every FAQ turn, so the page never ships it by default).
 import { useRef, useState } from "react";
 import { FileText, X } from "lucide-react";
+import { BTN_SECONDARY, ICON_BTN } from "./ui";
 
 export function PromptDialog({ traceId, sizeChars }: { traceId: string; sizeChars: number }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -25,17 +26,24 @@ export function PromptDialog({ traceId, sizeChars }: { traceId: string; sizeChar
   }
   return (
     <>
-      <button type="button" onClick={openDialog} className="inline-flex items-center gap-1 text-xs font-medium text-(--brand-green) hover:underline">
-        <FileText className="h-3.5 w-3.5" /> Open full prompt ({Math.round(sizeChars / 1024)} KB)
+      <button type="button" onClick={openDialog} className={`${BTN_SECONDARY} mt-2 w-full`}>
+        <FileText className="h-3.5 w-3.5" aria-hidden /> Open full prompt ({Math.round(sizeChars / 1024)} KB)
       </button>
-      <dialog ref={ref} className="m-auto w-[min(90vw,900px)] rounded-2xl border border-(--border) bg-(--surface) p-0 text-(--fg) backdrop:bg-black/40">
-        <div className="flex items-center justify-between border-b border-(--border) px-4 py-2">
-          <span className="font-display text-sm font-semibold">System prompt</span>
-          <button type="button" onClick={() => ref.current?.close()} aria-label="Close" className="rounded-full p-1 hover:bg-(--surface-muted)">
+      <dialog
+        ref={ref}
+        aria-label="System prompt"
+        className="m-auto w-[min(92vw,960px)] rounded-2xl border border-(--border) bg-(--surface) p-0 text-(--fg) soft-shadow-lg backdrop:bg-(--ink)/50 backdrop:backdrop-blur-sm"
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-(--border) px-5 py-3">
+          <div>
+            <div className="font-display text-[15px] font-semibold">System prompt</div>
+            <div className="text-xs text-(--fg-muted)">The exact knowledge base the model saw on this turn.</div>
+          </div>
+          <button type="button" onClick={() => ref.current?.close()} aria-label="Close" className={ICON_BTN}>
             <X className="h-4 w-4" />
           </button>
         </div>
-        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-4 font-mono text-xs">{busy ? "Loading…" : content}</pre>
+        <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap p-5 font-mono text-xs leading-relaxed">{busy ? "Loading…" : content}</pre>
       </dialog>
     </>
   );

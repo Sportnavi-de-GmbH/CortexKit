@@ -1,82 +1,87 @@
-// Sticky right rail of the trace detail: prompt version, models, tokens, cost,
-// session link, feedback history, Langfuse id, build version.
+// Sticky right rail of the trace detail: prompt version, models & cost,
+// session, feedback history, build version. Server component; the prompt
+// dialog is the only client island.
 import Link from "next/link";
+import { ArrowUpRight, MessageSquareText } from "lucide-react";
 import type { FeedbackRow, PromptRow, TraceRow } from "@/lib/monitoring/query";
 import { PromptDialog } from "./PromptDialog";
-import { Thumb, fmtInt, fmtTime, fmtUsd } from "./ui";
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-(--border) bg-(--surface) p-3">
-      <h3 className="mb-2 font-display text-xs font-semibold uppercase tracking-wide text-(--fg-subtle)">{title}</h3>
-      <div className="space-y-1 text-sm">{children}</div>
-    </section>
-  );
-}
-
-const Row = ({ k, v }: { k: string; v: React.ReactNode }) => (
-  <div className="flex justify-between gap-3">
-    <span className="text-(--fg-muted)">{k}</span>
-    <span className="text-right font-medium">{v}</span>
-  </div>
-);
+import { Card, KV, Thumb, fmtInt, fmtTime, fmtUsd } from "./ui";
 
 export function TraceSidebar({ trace, prompt, feedback }: { trace: TraceRow; prompt: PromptRow | null; feedback: FeedbackRow[] }) {
   const meta = trace.metadata ?? {};
   const langfuse = typeof meta.langfuse_session_id === "string" ? meta.langfuse_session_id : null;
+  const body = "px-5 py-3";
   return (
-    <aside className="space-y-3 lg:sticky lg:top-20 lg:self-start">
+    <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start" aria-label="Trace context">
       {trace.agent === "faq" && (
-        <Card title="Prompt version">
+        <Card title="Knowledge base" kicker="Prompt version" bodyClassName={body}>
           {prompt ? (
-            <>
-              <Row k="Fingerprint" v={<span className="font-mono text-xs">{prompt.sha256.slice(0, 12)}</span>} />
-              <Row k="Size" v={`${fmtInt(prompt.size_chars)} chars · ~${fmtInt(prompt.approx_tokens)} tokens`} />
-              <div className="text-xs text-(--fg-muted)">{prompt.sections.join(" · ")}</div>
+            <dl>
+              <KV k="Fingerprint" v={prompt.sha256.slice(0, 12)} mono />
+              <KV k="Size" v={`${fmtInt(prompt.size_chars)} chars`} />
+              <KV k="≈ Tokens" v={fmtInt(prompt.approx_tokens)} />
+              <dd className="mt-1 text-xs leading-relaxed text-(--fg-muted)">{prompt.sections.join(" · ")}</dd>
               <PromptDialog traceId={trace.id} sizeChars={prompt.size_chars} />
-            </>
+            </dl>
           ) : (
-            <span className="text-xs text-(--fg-subtle)">Not captured for this turn.</span>
+            <p className="text-xs text-(--fg-subtle)">Not captured for this turn.</p>
           )}
         </Card>
       )}
-      <Card title="Models & cost">
-        <Row k="Models" v={trace.models.length ? trace.models.join(", ") : "—"} />
-        <Row k="Tokens in / out" v={`${fmtInt(trace.tokens_input)} / ${fmtInt(trace.tokens_output)}`} />
-        <Row k="Cached" v={fmtInt(trace.tokens_cached)} />
-        <Row k="Cost" v={fmtUsd(trace.cost_estimate_usd)} />
-        {trace.first_token_ms !== null && <Row k="First token" v={`${trace.first_token_ms} ms`} />}
+
+      <Card title="Models & cost" bodyClassName={body}>
+        <dl>
+          <KV k="Model" v={trace.models.length ? trace.models.join(", ") : "—"} />
+          <KV k="Tokens in / out" v={`${fmtInt(trace.tokens_input)} / ${fmtInt(trace.tokens_output)}`} />
+          <KV k="Cached tokens" v={fmtInt(trace.tokens_cached)} />
+          <KV k="Estimated cost" v={fmtUsd(trace.cost_estimate_usd)} />
+          {trace.first_token_ms !== null && <KV k="First token" v={`${trace.first_token_ms} ms`} />}
+        </dl>
       </Card>
-      <Card title="Session">
-        <Link href={`/monitoring/sessions/${encodeURIComponent(trace.session_id)}`} className="block truncate font-mono text-xs text-(--brand-green) hover:underline">
-          {trace.session_id}
+
+      <Card title="Session" bodyClassName={body}>
+        <dl>
+          <KV k="Turn" v={trace.turn_id} mono />
+          {langfuse && <KV k="Langfuse session" v={langfuse} mono />}
+        </dl>
+        <Link
+          href={`/monitoring/sessions/${encodeURIComponent(trace.session_id)}`}
+          className="group mt-2 flex items-center justify-between gap-2 rounded-xl border border-(--border) px-3 py-2 text-xs transition-colors duration-150 hover:border-(--border-strong) hover:bg-(--surface-muted)"
+        >
+          <span className="min-w-0">
+            <span className="block font-medium text-(--fg)">Open conversation</span>
+            <span className="block truncate font-mono text-[11px] text-(--fg-subtle)">{trace.session_id}</span>
+          </span>
+          <ArrowUpRight className="h-4 w-4 shrink-0 text-(--fg-subtle) transition-colors group-hover:text-(--fg)" aria-hidden />
         </Link>
-        <Row k="Turn" v={trace.turn_id} />
-        {langfuse && <Row k="Langfuse session" v={<span className="font-mono text-xs">{langfuse}</span>} />}
       </Card>
-      <Card title="Feedback history">
+
+      <Card title="Feedback" kicker={feedback.length ? `${feedback.length} event${feedback.length === 1 ? "" : "s"}` : "No votes yet"} bodyClassName={body}>
         {feedback.length === 0 ? (
-          <span className="text-xs text-(--fg-subtle)">No votes yet.</span>
+          <p className="flex items-center gap-2 text-xs text-(--fg-subtle)"><MessageSquareText className="h-4 w-4" aria-hidden /> The visitor has not rated this answer.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-3">
             {feedback.map((f) => (
               <li key={f.id} className="text-xs">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Thumb thumb={f.thumb} />
-                  <span className="text-(--fg-muted)">{fmtTime(f.created_at)}</span>
-                  {f.thumb === null && <span className="text-(--fg-subtle)">retracted</span>}
-                  {f.reason && <span className="rounded-md bg-(--surface-muted) px-1.5 py-0.5">{f.reason}</span>}
+                  <span className="tabular text-(--fg-muted)">{fmtTime(f.created_at)}</span>
+                  {f.thumb === null && <span className="rounded-md bg-(--surface-muted) px-1.5 py-0.5 text-(--fg-subtle)">retracted</span>}
+                  {f.reason && <span className="rounded-md bg-(--surface-muted) px-1.5 py-0.5 font-mono text-[11px] text-(--fg-muted)">{f.reason}</span>}
                 </div>
-                {f.comment && <div className="mt-1 whitespace-pre-wrap rounded-lg bg-(--surface-muted) p-2">{f.comment}</div>}
+                {f.comment && <blockquote className="mt-1.5 whitespace-pre-wrap rounded-xl border-l-2 border-(--brand-green) bg-(--surface-muted) px-3 py-2 text-[13px] leading-relaxed text-(--fg)">{f.comment}</blockquote>}
               </li>
             ))}
           </ul>
         )}
       </Card>
-      <Card title="Version">
-        <Row k="Widget build" v={<span className="font-mono text-xs">{trace.agent_version ?? "—"}</span>} />
-        <Row k="Environment" v={typeof meta.env === "string" ? meta.env : "—"} />
-        {typeof meta.run_id === "string" && <Row k="V3 run" v={<span className="font-mono text-xs">{meta.run_id.slice(0, 8)}</span>} />}
+
+      <Card title="Version" bodyClassName={body}>
+        <dl>
+          <KV k="Widget build" v={trace.agent_version ?? "—"} mono />
+          <KV k="Environment" v={typeof meta.env === "string" ? meta.env : "—"} />
+          {typeof meta.run_id === "string" && <KV k="V3 run" v={meta.run_id.slice(0, 8)} mono />}
+        </dl>
       </Card>
     </aside>
   );
