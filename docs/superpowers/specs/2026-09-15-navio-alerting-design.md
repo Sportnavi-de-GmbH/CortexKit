@@ -181,6 +181,12 @@ Flow (`lib/monitoring/alerts/evaluate.ts`):
 3. Diff against `alert_state` → list of transitions: `fired` (ok/absent → breached),
    `recovered` (breached → ok). `error` never transitions and never notifies; it shows in the
    digest.
+   **A state row that belongs to an evaluated (enabled) rule but received no observation this
+   run is treated as `ok`; if it was `breached` that is a `recovered` transition. State rows of
+   disabled rules are deleted.** (Without this, an `error_repeat` subkey whose error type stops
+   occurring stays breached forever, and the rule can never fire for that key again.)
+   On the first run every currently breached rule fires; this is intended — it is the initial
+   inventory.
 4. Build the digest (every rule: status, observed, threshold, samples).
 5. `narrate()` (§6) for each transition and for the digest.
 6. Unless `dryRun`: write `alert_state`, insert `alert_events`, then deliver (§6). Delivery results

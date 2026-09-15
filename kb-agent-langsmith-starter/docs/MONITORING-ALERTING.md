@@ -378,10 +378,29 @@ crosses `ok → breached`, and again the moment it crosses `breached → ok` (`r
 it stays breached across runs, nothing is sent again — `alert_state` is the memory that makes
 this idempotent; only `state.ts`'s diff decides whether an observation is a transition.
 
+**A state row whose observation disappears is treated as `ok`.** `error_repeat` emits one
+observation per error type actually present in the window, so a breached `azure_429` row would
+otherwise stay breached forever once that error stops occurring — no recovery message, a
+permanent banner, and the rule could never fire for that type again. Every row belonging to a
+rule that was evaluated this run but received no observation is therefore written back as `ok`
+(with `observed`/`samples` cleared), and a `recovered` transition is emitted if it had been
+breached. Rows of rules **disabled** in the Regeln tab are deleted outright, so a disabled rule
+leaves neither a banner nor a stale row behind.
+
+**Delivery cannot undo a state write.** State is saved first; the transitions are then
+narrated, inserted and delivered in parallel, each inside its own `try/catch`, so one failing
+Teams/Graph call or one failing `alert_events` insert only marks that transition
+`failed: …` in the run report. The whole delivery phase runs under a soft deadline
+(`ALERT_DELIVERY_DEADLINE_MS`, default 40 s, inside the route's `maxDuration = 60`); a
+transition still outstanding when it expires is reported as `skipped: deadline`.
+
 **The digest is written on every run, sent to Teams only on scheduled + enabled.** Every
 evaluation — `scheduled`, `test`, or `manual` (a Regeln-tab "Jetzt auswerten" click) — inserts
 one `alert_events` row of `kind = 'digest'` summarising every rule's status, keyed by
-`run_slot` (`on conflict do nothing`, so a slot is written at most once). It is only actually
+`run_slot` — at most one digest per slot, enforced by the partial unique index
+`alert_events_digest_slot_idx` (`kind = 'digest'`): a second digest insert for the same slot is
+rejected by Postgres, and `repo.ts` reads error code `23505` as "already sent" rather than as a
+failure. It is only actually
 **delivered** to Teams when `slot = 'scheduled'` **and** `alert_settings.digest_enabled` is
 true — so the 5-minute test cadence, a manual "Jetzt auswerten", or a preview never floods the
 channel, but every run still leaves a row in the Feed tab. The digest never goes to email.
@@ -469,6 +488,11 @@ none of it was executed as part of this task**, per its scope limits (write the 
 migration, do not apply it; do not unschedule the test job; no Vercel/Vault/Supabase state
 changes).
 
+0. **Before merging**, stop the 5-minute test cadence so that the first unattended production
+   evaluation is the deliberate one in step 2:
+   ```sql
+   select cron.unschedule('navio-alerts-test');
+   ```
 1. Confirm `ALERT_EVALUATE_SECRET` is set on Vercel `navio-widget` for **both** production and
    preview (sensitive, write-only — rotate rather than "find" it if in doubt), and that it
    equals the Supabase Vault secret `alert_evaluate_secret`.
@@ -480,12 +504,13 @@ changes).
      -d '{"slot":"manual","dryRun":true}'
    ```
    expect `ok:true` in the response.
-3. Confirm the existing `navio-alerts-test` cron job is actually reaching that deployment —
-   `net._http_response` shows `status_code = 200` for a recent call (see the queries above).
+3. Confirm the cron path itself reaches that deployment — with the test job unscheduled, call
+   it by hand once: `select monitoring_call_evaluate('test');` then read `net._http_response`
+   and expect `status_code = 200` for that call (see the queries above).
 4. Apply `supabase/migrations/20260915000300_alerting_cron_production.sql` (schedules
-   `navio-alerts-morning` / `navio-alerts-afternoon`, unschedules `navio-alerts-test`).
-   Confirm: `select jobname from cron.job;` lists exactly the morning and afternoon jobs, no
-   test job.
+   `navio-alerts-morning` / `navio-alerts-afternoon`; its `unschedule` of `navio-alerts-test`
+   is then a no-op, which is fine). Confirm: `select jobname from cron.job;` lists exactly the
+   morning and afternoon jobs, no test job.
 5. Set real recipients in the dashboard: `/monitoring/alerts` → Regeln → Empfänger.
 6. Next morning: confirm the 07:00 digest landed in the Navio Alerts Teams channel and shows
    in the Feed tab with `run_slot` matching `<date>T07`.
