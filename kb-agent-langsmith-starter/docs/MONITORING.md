@@ -123,6 +123,16 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
   prompt"), models & cost, session link, feedback history with comments, build version.
   Keyboard: `j`/`k` next/previous step, `Enter`/`Space` toggle, `e` expand all, `c` collapse all.
 - **Session view:** all turns of one conversation as a thread, each linking to its trace.
+- **Alerts page** (`/monitoring/alerts`, added 2026-09-15 — see `docs/MONITORING-ALERTING.md` §
+  "Supabase rules"): **Feed** tab lists `alert_events` newest first (fired/recovered/digest/test),
+  each row showing severity, rule, agent, observed vs. threshold, window and delivery status per
+  channel; unresolved breaches get a **"Bestätigen"** (acknowledge) button that records who and
+  when. **Regeln** tab is the `alert_rules` table with inline editing (enabled, severity,
+  threshold, window, min samples) plus recipients and the digest toggle, and three action
+  buttons: **"Vorschau auswerten"** (dry run — narrates but never writes state or sends
+  anything), **"Jetzt auswerten"** (a real `slot: "manual"` evaluation), and **"Testalarm
+  senden"** (one test card + one test email, no rule evaluation). The overview page shows a red
+  banner and `HeaderNav` a red dot when any rule is currently breached.
 - **Theme:** 🌙/☀️ in the header (remembered per browser). Works at 400 px width.
 
 ---
@@ -144,10 +154,23 @@ has no V3 counterpart; its failure is now an `events` row `feedback.partner_forw
 |---|---|
 | `npm run monitoring:verify` | one FAQ + one partner turn through the running widget, a vote on each, then reads Supabase back (23 checks); `--expect-failure` for the error path |
 | `npm run monitoring:reconcile` | marks `running` > 5 min as abandoned (+ event), links leftover votes, refreshes `feedback_thumb`; idempotent, schedule it |
+| `npm run alerts:verify` | against a running widget + the real monitoring Supabase: seeds a failure-rate breach, evaluates, asserts `fired` + a Teams send, clears it, asserts `recovered`, asserts a third run is a no-op and never re-sends the digest, cleans up its rows. Posts one real red + one real green card to the Navio Alerts Teams channel — see `docs/MONITORING-ALERTING.md` § "Supabase rules" |
 | `npm test` / `npm run typecheck` | 15 monitoring test files are part of the suite |
 
+**Alert scheduler (Supabase `pg_cron`)** — full detail in `docs/MONITORING-ALERTING.md` §
+"Supabase rules": `select jobname from cron.job;` lists the active jobs. To unschedule/reschedule
+by hand:
+
+```sql
+select cron.unschedule('navio-alerts-test');                                         -- test cadence off
+select cron.schedule('navio-alerts-test', '*/5 * * * *',
+  $$select monitoring_call_evaluate('test')$$);                                      -- test cadence back on
+select cron.unschedule('navio-alerts-morning'); select cron.unschedule('navio-alerts-afternoon'); -- production off
+```
+
 Log lines to grep on Vercel: `[monitoring]` (writer/capture failures, shape-only), `MONITORING
-feedback:` (one per vote, `linked: true|false`), `[partner-workflow] observer failed`.
+feedback:` (one per vote, `linked: true|false`), `[partner-workflow] observer failed`,
+`[alerts:evaluate] failed` (evaluate route threw).
 
 **Invariants** (mirroring the Langfuse layer): no credentials ⇒ silent no-op · monitoring never throws
 into an agent or route · a write never delays a visitor's answer by more than the 5 s cap and never
