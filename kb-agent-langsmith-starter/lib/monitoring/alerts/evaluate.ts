@@ -66,7 +66,10 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
 
   // Narrate first (needed for both dry-run preview and real events).
   const narrated = await Promise.all(transitions.map(async (t) => ({ t, n: await narrateTransition(t, deps.narrate) })));
-  const digestNarr = await narrateDigest(observations, errored, deps.narrate);
+  // No digest row ⇒ no digest narration either (one LLM call and seconds saved on a resync).
+  const digestNarr = opts.writeDigest === false
+    ? { text: "", source: "template" as const }
+    : await narrateDigest(observations, errored, deps.narrate);
 
   const result: EvaluateResult = {
     ok: true, slot, dryRun: Boolean(opts.dryRun),

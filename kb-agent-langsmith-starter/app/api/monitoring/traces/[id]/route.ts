@@ -1,5 +1,6 @@
 // GET /api/monitoring/traces/:id[?prompt=1] — trace + step tree + errors + feedback (+ full prompt on demand)
 // DELETE /api/monitoring/traces/:id — single-trace delete (spec §4).
+import { after } from "next/server";
 import { dashboardEnabled } from "@/lib/monitoring/env";
 import { getTrace } from "@/lib/monitoring/query";
 import { deleteTraces, parseIds } from "@/lib/monitoring/delete";
@@ -20,7 +21,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const ids = parseIds({ ids: [id] });
   if (!ids) return Response.json({ detail: "invalid ids" }, { status: 400 });
   try {
-    const result = await deleteTraces(ids);
+    const result = await deleteTraces(ids, { keepAlive: (p) => after(() => p) });
     if (!result) return Response.json({ detail: "Unavailable" }, { status: 503 });
     return Response.json(result);
   } catch (e) {

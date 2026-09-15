@@ -104,8 +104,8 @@ async function runDeleteSection(): Promise<void> {
     check("delete: single trace deleted:1", del1Body.deleted === 1, JSON.stringify(del1Body));
     check("delete: single trace feedback:1", del1Body.feedback === 1, JSON.stringify(del1Body));
     check(
-      "delete: single trace reevaluate started|skipped|failed",
-      del1Body.reevaluate === "started" || del1Body.reevaluate === "skipped" || del1Body.reevaluate === "failed",
+      "delete: single trace reevaluate started|pending|skipped|failed",
+      del1Body.reevaluate === "started" || del1Body.reevaluate === "pending" || del1Body.reevaluate === "skipped" || del1Body.reevaluate === "failed",
       String(del1Body.reevaluate),
     );
 

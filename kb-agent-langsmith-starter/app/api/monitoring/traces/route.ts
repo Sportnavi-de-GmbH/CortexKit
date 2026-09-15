@@ -1,6 +1,7 @@
 // GET /api/monitoring/traces?agent&status&thumb&q&from&to&cursor&limit
 // DELETE /api/monitoring/traces { ids: uuid[] } — bulk delete (spec §4).
 // Guarded by middleware.ts (cookie) — the 404 below is belt to its braces.
+import { after } from "next/server";
 import { dashboardEnabled } from "@/lib/monitoring/env";
 import { listTraces, parseTraceFilters } from "@/lib/monitoring/query";
 import { deleteTraces, parseIds } from "@/lib/monitoring/delete";
@@ -18,7 +19,7 @@ export async function DELETE(req: Request): Promise<Response> {
   const ids = parseIds(await req.json().catch(() => null));
   if (!ids) return Response.json({ detail: "invalid ids" }, { status: 400 });
   try {
-    const result = await deleteTraces(ids);
+    const result = await deleteTraces(ids, { keepAlive: (p) => after(() => p) });
     if (!result) return Response.json({ detail: "Unavailable" }, { status: 503 });
     return Response.json(result);
   } catch (e) {

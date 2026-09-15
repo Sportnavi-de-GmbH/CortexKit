@@ -69,13 +69,26 @@ describe("deleteTraces", () => {
     expect(result?.reevaluate).toBe("skipped");
   });
 
-  it("reports failed when reevaluate hangs past the cap", async () => {
+  it("reports pending (not failed) when reevaluate outlives the cap, and hands the promise to keepAlive", async () => {
     const client = makeClient({ traces: 1, feedback: 0, events: 0, sessions_deleted: 0 });
     const log = vi.fn();
+    const keepAlive = vi.fn();
     const reevaluate = vi.fn(() => new Promise(() => {})); // never resolves
+    const result = await deleteTraces([UUID_A], { client, reevaluate, reevaluateCapMs: 20, log, keepAlive });
+    expect(result?.reevaluate).toBe("pending");
+    expect(keepAlive).toHaveBeenCalledTimes(1);
+    expect(log).not.toHaveBeenCalled();
+  });
+  it("a rejection after the cap is logged, never unhandled", async () => {
+    const client = makeClient({ traces: 1, feedback: 0, events: 0, sessions_deleted: 0 });
+    const log = vi.fn();
+    let reject!: (e: Error) => void;
+    const reevaluate = vi.fn(() => new Promise((_r, rj) => { reject = rj; }));
     const result = await deleteTraces([UUID_A], { client, reevaluate, reevaluateCapMs: 20, log });
-    expect(result?.reevaluate).toBe("failed");
-    expect(log).toHaveBeenCalled();
+    expect(result?.reevaluate).toBe("pending");
+    reject(new Error("late"));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(log).toHaveBeenCalledTimes(1);
   });
 
   it("throws on an RPC error", async () => {

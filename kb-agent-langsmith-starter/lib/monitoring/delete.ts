@@ -26,6 +26,9 @@ export interface DeleteDeps {
   client?: RpcClient;
   reevaluate?: () => Promise<unknown>;
   reevaluateCapMs?: number;
+  /** Called with the still-running evaluation when the cap is hit, so a serverless route can
+   *  keep the instance alive for it (Next's `after()`); omitted ⇒ it just continues. */
+  keepAlive?: (pending: Promise<unknown>) => void;
   log?: Log;
 }
 
@@ -34,16 +37,14 @@ export interface DeleteTracesResult {
   feedback: number;
   events: number;
   sessions_deleted: number;
-  reevaluate: "started" | "skipped" | "failed";
+  /** started = finished within the cap · pending = still running in the background ·
+   *  skipped = alerting not configured · failed = it threw */
+  reevaluate: "started" | "pending" | "skipped" | "failed";
 }
 
-function timeout(ms: number): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    setTimeout(() => reject(new Error("reevaluate timed out")), ms);
-  });
-}
-
-async function runReevaluate(deps: DeleteDeps): Promise<"started" | "skipped" | "failed"> {
+const CAP = Symbol("cap");
+const CAP_FAILED = Symbol("failed");
+async function runReevaluate(deps: DeleteDeps): Promise<DeleteTracesResult["reevaluate"]> {
   const log = deps.log ?? defaultLog;
   const reevaluate =
     deps.reevaluate ??
@@ -51,12 +52,26 @@ async function runReevaluate(deps: DeleteDeps): Promise<"started" | "skipped" | 
       const { runEvaluation } = await import("./alerts/evaluate");
       return runEvaluation({ slot: "manual", writeDigest: false });
     });
-  try {
-    const result = await Promise.race([reevaluate(), timeout(deps.reevaluateCapMs ?? 5000)]);
-    return result === undefined ? "skipped" : "started";
-  } catch (e) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cap = new Promise<typeof CAP>((resolve) => {
+    timer = setTimeout(() => resolve(CAP), deps.reevaluateCapMs ?? 5000);
+  });
+  // The evaluation keeps running past the cap; log its eventual failure instead of leaving an
+  // unhandled rejection behind.
+  const work = reevaluate().catch((e) => {
     log("[monitoring] delete: reevaluate failed", { error: e instanceof Error ? e.name : "unknown" });
-    return "failed";
+    return CAP_FAILED;
+  });
+  try {
+    const result = await Promise.race([work, cap]);
+    if (result === CAP) {
+      deps.keepAlive?.(work);
+      return "pending";
+    }
+    if (result === CAP_FAILED) return "failed";
+    return result === undefined ? "skipped" : "started";
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

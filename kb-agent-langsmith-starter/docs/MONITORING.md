@@ -180,7 +180,7 @@ of the dashboard API):
 
 | Route | Body | Response |
 |---|---|---|
-| `DELETE /api/monitoring/traces` | `{ ids: uuid[] }` (1–200) | `{ deleted, feedback, events, sessions_deleted, reevaluate: "started" \| "skipped" \| "failed" }` |
+| `DELETE /api/monitoring/traces` | `{ ids: uuid[] }` (1–200) | `{ deleted, feedback, events, sessions_deleted, reevaluate: "started" \| "pending" \| "skipped" \| "failed" }` |
 | `DELETE /api/monitoring/traces/:id` | — | same shape, `deleted` is 0 or 1 |
 | `DELETE /api/monitoring/alerts/events` | `{ ids: uuid[] }` (1–200) | `{ deleted }` |
 | `DELETE /api/monitoring/alerts/events/:id` | — | `{ deleted: 0 \| 1 }` |
