@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { AlertTriangle, CircleCheck } from "lucide-react";
 import { getStats, listTraces, parseTraceFilters, rangeHours, type StatsRange } from "@/lib/monitoring/query";
+import { BreachBanner } from "@/components/monitoring/BreachBanner";
 import { KpiTiles } from "@/components/monitoring/KpiTiles";
 import { PageHeader } from "@/components/monitoring/PageHeader";
 import { PerDayBars } from "@/components/monitoring/PerDayBars";
@@ -37,6 +38,8 @@ export default async function OverviewPage({
         title="Overview"
         description={`What the Navio agents did in the ${RANGE_LABEL[range]} — ${agentLabel}. Click an execution to see every step.`}
       />
+
+      <BreachBanner />
 
       <Suspense fallback={null}>
         <TraceFilters />
