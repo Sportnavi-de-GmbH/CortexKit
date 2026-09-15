@@ -1,12 +1,16 @@
 // lib/monitoring/alerts/deliver.ts — builds AlertMessages for the monitoring rules and
 // sends them through the EXISTING channels (teams.ts, graph-mail.ts). Never throws.
+// Title and body are the human story; every identifier, raw value and threshold goes into the
+// separate "Für das Technik-Team" block so the readable part stays readable.
 import type { AlertMessage } from "../format-alert";
 import { sendTeamsAlert, teamsEnabled } from "../teams";
 import { sendAlertEmail, graphMailEnabled } from "../graph-mail";
-import { fmtObserved, fmtThreshold, ruleTitle } from "./narrate";
+import { fmtObserved, fmtThreshold, humanHeadline, humanRuleName } from "./narrate";
+import { humanErrored } from "./copy";
 import type { Observation, Transition } from "./types";
 
 export const PROJECT_LABEL = "Navio Monitoring";
+export const TECH_LABEL = "Für das Technik-Team";
 const LINK_LABEL = "Dashboard öffnen";
 
 export interface DeliverDeps { fetchImpl?: typeof fetch; env?: NodeJS.ProcessEnv; recipients?: string[] }
@@ -17,13 +21,17 @@ function base(severity: AlertMessage["severity"], title: string, detail: string,
   return { title, detail, severity, severityEmoji: SEV[severity], severityLabel: severity, projectLabel: PROJECT_LABEL, window: "", permalink: url, linkLabel: LINK_LABEL, timestampIso: new Date().toISOString() };
 }
 const windowOf = (o: Observation) => (o.rule.key === "cost_daily" ? "heute (Berlin)" : `${o.rule.window_hours} h`);
+const ruleRef = (o: Observation) => `${o.rule.key}·${o.agent}${o.subkey ? `·${o.subkey}` : ""}`;
 
 export function transitionMessage(t: Transition, narrative: string, dashboardUrl: string): AlertMessage {
   const o = t.obs;
   const severity: AlertMessage["severity"] = t.kind === "recovered" ? "OK" : o.rule.severity === "alert" ? "ALERT" : "WARNING";
-  const m = base(severity, ruleTitle(o.rule.key, o.agent, o.subkey), narrative, dashboardUrl);
+  const m = base(severity, humanHeadline(t.kind, o), narrative, dashboardUrl);
   m.window = windowOf(o);
-  m.facts = [
+  m.techLabel = TECH_LABEL;
+  m.techFacts = [
+    { title: "Regel", value: ruleRef(o) },
+    { title: "Agent", value: o.agent },
     { title: "Wert", value: fmtObserved(o) },
     { title: "Grenze", value: fmtThreshold(o) },
     { title: "Fenster", value: windowOf(o) },
@@ -34,18 +42,18 @@ export function transitionMessage(t: Transition, narrative: string, dashboardUrl
 
 export function digestMessage(obs: Observation[], errored: string[], narrative: string, dashboardUrl: string): AlertMessage {
   const breached = obs.filter((o) => o.status === "breached").length;
-  const m = base(breached > 0 ? "ALERT" : "OK", breached > 0 ? `Status: ${breached} Regel(n) verletzt` : "Status: alles im grünen Bereich", narrative, dashboardUrl);
-  m.window = "Digest";
+  const m = base(breached > 0 ? "ALERT" : "OK", breached > 0 ? `Statusbericht: ${breached} Problem(e)` : "Statusbericht: alles in Ordnung", narrative, dashboardUrl);
+  m.window = "Statusbericht";
   m.facts = obs.map((o) => ({
-    title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${ruleTitle(o.rule.key, o.agent, o.subkey)}`,
-    value: `${fmtObserved(o)} / ${fmtThreshold(o)}${o.note ? ` – ${o.note}` : ""}`,
+    title: `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${humanRuleName(o.rule.key, o.agent, o.subkey)}`,
+    value: `${fmtObserved(o)} (erlaubt bis ${fmtThreshold(o)})${o.note ? ` – ${o.note}` : ""}`,
   }));
-  if (errored.length) m.facts.push({ title: "⚠️ Nicht auswertbar", value: errored.join(", ") });
+  if (errored.length) m.facts.push({ title: "⚪ Nicht prüfbar", value: `${errored.map(humanErrored).join(", ")} (die Daten konnten nicht geladen werden)` });
   return m;
 }
 
 export function testMessage(dashboardUrl: string): AlertMessage {
-  return base("WARNING", "Testalarm", "Dies ist ein Testalarm aus dem Navio-Monitoring. Keine Aktion nötig.", dashboardUrl);
+  return base("OK", "Testalarm", "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig.", dashboardUrl);
 }
 
 export async function deliver(msg: AlertMessage, channels: { teams: boolean; email: boolean }, deps: DeliverDeps = {}): Promise<Delivery> {

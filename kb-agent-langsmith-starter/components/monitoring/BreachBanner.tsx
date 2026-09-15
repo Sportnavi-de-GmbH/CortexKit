@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { breachedStates } from "@/lib/monitoring/alerts/query";
-import { ruleLabel } from "./alerts-format";
+import { humanRuleLabel } from "./alerts-format";
 
 export async function BreachBanner() {
   const breached = await breachedStates();
@@ -17,11 +17,11 @@ export async function BreachBanner() {
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-(--red)" aria-hidden />
       <span>
         <span className="font-display font-semibold">
-          {breached.length} Regel{breached.length === 1 ? "" : "n"} verletzt
+          {breached.length} Problem{breached.length === 1 ? "" : "e"} gemeldet
         </span>
         <span className="text-(--fg-muted)">
           {" "}
-          — {breached.slice(0, 3).map((b) => ruleLabel(b.rule_key, b.agent, b.subkey)).join(", ")}
+          — {breached.slice(0, 3).map((b) => humanRuleLabel(b.rule_key, b.agent, b.subkey)).join(", ")}
           {breached.length > 3 ? " …" : ""}
         </span>
       </span>

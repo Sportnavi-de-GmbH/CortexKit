@@ -1,8 +1,11 @@
 // lib/monitoring/alerts/narrate.ts — the LLM phrases; rules decided (spec §6).
-// Every number the model may use is pre-formatted here and passed as JSON; the
-// fixed system prompt forbids inventing others. Any failure ⇒ template.
+// Every number the model may use is pre-formatted here and passed as JSON, together with a
+// ready-made German draft (copy.ts) that it may only rephrase; the fixed system prompt forbids
+// inventing numbers or using technical identifiers. Any failure ⇒ the template is used as is.
 import type { LanguageModel } from "ai";
 import type { Observation, ObsAgent, RuleKey, Transition } from "./types";
+import { fmtValue } from "./format";
+import { AGENT_HUMAN, HUMAN, NO_ACTION, humanErrored, humanHeadline, humanRuleName, windowPhrase } from "./copy";
 
 export interface NarrateDeps {
   generate?: (prompt: { system: string; user: string }) => Promise<string>;
@@ -11,32 +14,15 @@ export interface NarrateDeps {
 export interface Narrative { text: string; source: "llm" | "template" }
 
 const AGENT_LABEL: Record<ObsAgent, string> = { faq: "FAQ", partner: "Partner", total: "Gesamt" };
+/** Technical labels — the "Für das Technik-Team" block and the rule editor only. */
 const RULE_LABEL: Record<RuleKey, string> = {
   cost_daily: "Tageskosten", cost_spike: "Kostenanstieg", failure_rate: "Fehlerrate", latency_p95: "Antwortzeit p95",
   negative_feedback: "Negatives Feedback", error_repeat: "Wiederholter Fehler", partner_upstream: "Partner-Agent nicht erreichbar",
 };
-const FIRST_CHECK: Record<RuleKey, string> = {
-  cost_daily: "Die teuersten Traces des Tages unter /monitoring nach Kosten prüfen.",
-  cost_spike: "Prüfen, ob Traffic oder Antwortlänge gestiegen ist (Traces der letzten 24 h).",
-  failure_rate: "Die neuesten Fehler unter /monitoring prüfen (Azure 429, Timeouts).",
-  latency_p95: "Langsame Traces öffnen und den langsamsten Schritt prüfen (Modell oder Partner-Suche).",
-  negative_feedback: "Die 👎-Antworten in der Review-Queue lesen.",
-  error_repeat: "Die Fehlermeldung in den neuesten Traces öffnen.",
-  partner_upstream: "Deployment und PARTNER_AGENT_HOST des Partner-Agents prüfen.",
-};
 
-const de = (n: number, digits: number) => n.toLocaleString("de-DE", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+export { fmtValue };
+export { humanErrored, humanHeadline, humanRuleName } from "./copy";
 
-export function fmtValue(key: RuleKey, v: number | null): string {
-  if (v === null) return "—";
-  switch (key) {
-    case "failure_rate": case "negative_feedback": return `${Math.round(v * 100)} %`;
-    case "latency_p95": return `${de(v / 1000, 1)} s`;
-    case "cost_daily": return `${de(v, 2)} $`;
-    case "cost_spike": return `${de(v, 1)}× Basis`;
-    case "error_repeat": case "partner_upstream": return `${v}×`;
-  }
-}
 export const fmtObserved = (o: Observation) => fmtValue(o.rule.key, o.observed);
 export const fmtThreshold = (o: Observation) => fmtValue(o.rule.key, o.threshold);
 
@@ -45,31 +31,46 @@ export function ruleTitle(key: RuleKey, agent: ObsAgent, subkey: string): string
   return `${base} · ${AGENT_LABEL[agent]}`;
 }
 
-export function templateTransition(t: Transition): string {
+/** what · why · impact · next — the four parts every human alert must state, in that order. */
+export interface Draft { what: string; why?: string; impact?: string; next: string }
+
+export function draftTransition(t: Transition): Draft {
   const o = t.obs;
-  const title = ruleTitle(o.rule.key, o.agent, o.subkey);
-  const win = o.rule.key === "cost_daily" ? "heute" : `${o.rule.window_hours} h`;
-  if (t.kind === "recovered") return `${title} ist wieder im grünen Bereich: ${fmtObserved(o)} (Grenze ${fmtThreshold(o)}, Fenster ${win}).`;
-  const samples = o.samples ? ` bei ${o.samples} Turns` : "";
-  return `${title}: ${fmtObserved(o)}${samples} in den letzten ${win}, Grenze ${fmtThreshold(o)}. ${FIRST_CHECK[o.rule.key]}`;
+  const h = HUMAN[o.rule.key];
+  if (t.kind === "recovered") return { what: h.recovered(o), next: NO_ACTION };
+  return { what: h.what(o), why: h.why(o), impact: h.impact(o), next: h.next(o) };
+}
+
+export function templateTransition(t: Transition): string {
+  const d = draftTransition(t);
+  return [d.what, d.why, d.impact, d.next].filter(Boolean).join(" ");
 }
 
 export function templateDigest(obs: Observation[], errored: string[]): string {
-  const breached = obs.filter((o) => o.status === "breached");
-  const head = breached.length === 0 ? "Alles im grünen Bereich." : `${breached.length} Regel(n) verletzt.`;
-  const lines = obs.map((o) => `${o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢"} ${ruleTitle(o.rule.key, o.agent, o.subkey)}: ${fmtObserved(o)} (Grenze ${fmtThreshold(o)})${o.note ? ` – ${o.note}` : ""}`);
-  const err = errored.length ? `\n⚠️ Nicht auswertbar: ${errored.join(", ")}` : "";
-  return `${head}\n${lines.join("\n")}${err}`;
+  const breached = obs.filter((o) => o.status === "breached").length;
+  const head = breached === 0
+    ? "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen."
+    : `Achtung: ${breached} Problem${breached === 1 ? "" : "e"} gefunden.`;
+  const lines = obs.map((o) => {
+    const mark = o.status === "breached" ? "🔴" : o.status === "skipped" ? "⚪" : "🟢";
+    return `${mark} ${humanRuleName(o.rule.key, o.agent, o.subkey)}: ${fmtObserved(o)} (erlaubt bis ${fmtThreshold(o)})${o.note ? ` – ${o.note}` : ""}`;
+  });
+  const err = errored.map((e) => `Nicht prüfbar: ${humanErrored(e)} (die Daten konnten nicht geladen werden)`);
+  return [head, ...lines, ...err].join("\n");
 }
 
 const SYSTEM = [
-  "Du schreibst kurze Statusmeldungen für das Team, das den Navio-Chatbot betreibt.",
-  "Sprache: Deutsch, einfache Sätze, kein Markdown, keine Überschriften, keine Entschuldigungen.",
-  "Benutze ausschließlich die Zahlen und Bezeichnungen aus dem JSON. Erfinde keine weiteren Zahlen.",
-  "Bei einem Alarm: nenne Agent, Metrik, beobachteten Wert, Grenze und Zeitfenster; schließe mit genau einem konkreten ersten Prüfschritt (aus first_check).",
-  "Bei einer Entwarnung: ein Satz, dass der Wert wieder unter der Grenze liegt.",
-  "Beim Digest: zwei bis vier Sätze Gesamtlage, verletzte Regeln zuerst; wenn alles ok ist, sag das knapp.",
-  "Maximal 120 Wörter.",
+  "Du schreibst kurze Statusmeldungen für das Team von Sportnavi, das den Navio-Chatbot betreut.",
+  "Die Leser sind keine Technikerinnen und Techniker.",
+  "Sprache: Deutsch, einfache kurze Sätze, kein Markdown, keine Aufzählungszeichen, keine Überschriften, keine Entschuldigungen.",
+  "Schreibe bei einem Alarm genau vier Teile in dieser Reihenfolge, ohne Beschriftungen: erstens was passiert ist, zweitens warum (nur wenn der Entwurf eine Ursache nennt, sonst dass die Ursache noch nicht bekannt ist), drittens was das für die Nutzer bedeutet, viertens was jetzt zu tun ist.",
+  "Der letzte Satz ist immer der Handlungsschritt aus dem Entwurf.",
+  "Formuliere den Entwurf im Feld draft nur um; erfinde nichts dazu und lass nichts weg.",
+  "Verwende ausschließlich die Zahlen aus dem JSON, keine weiteren.",
+  "Keine technischen Bezeichnungen, keine Fehlercodes, keine Abkürzungen, keine Regelnamen, keine Kennungen.",
+  "Ein Alarm hat 60 bis 120 Wörter.",
+  "Eine Entwarnung sind zwei bis drei Sätze und endet mit dem Satz: Keine Aktion nötig.",
+  "Beim Statusbericht: zuerst ein Satz zur Gesamtlage, dann je eine kurze Zeile pro Regel in einfachen Worten, höchstens 120 Wörter.",
 ].join(" ");
 
 async function defaultGenerate(p: { system: string; user: string }): Promise<string> {
@@ -105,17 +106,21 @@ export function narrateTransition(t: Transition, deps: NarrateDeps = {}): Promis
   return run({
     kind: t.kind === "fired" ? "alarm" : "entwarnung",
     severity: o.rule.severity,
-    metric: ruleTitle(o.rule.key, o.agent, o.subkey),
+    headline: humanHeadline(t.kind, o),
+    metric: humanRuleName(o.rule.key, o.agent, o.subkey),
+    agent: AGENT_HUMAN[o.agent],
     observed: fmtObserved(o), threshold: fmtThreshold(o),
-    samples: o.samples, window: o.rule.key === "cost_daily" ? "heute (Berlin)" : `${o.rule.window_hours} h`,
-    note: o.note ?? null, first_check: FIRST_CHECK[o.rule.key],
+    samples: o.samples, window: windowPhrase(o),
+    note: o.note ?? null,
+    draft: draftTransition(t),
   }, templateTransition(t), deps);
 }
 
 export function narrateDigest(obs: Observation[], errored: string[], deps: NarrateDeps = {}): Promise<Narrative> {
   return run({
-    kind: "digest",
-    rules: obs.map((o) => ({ metric: ruleTitle(o.rule.key, o.agent, o.subkey), status: o.status, observed: fmtObserved(o), threshold: fmtThreshold(o), note: o.note ?? null })),
-    not_evaluable: errored,
+    kind: "statusbericht",
+    rules: obs.map((o) => ({ metric: humanRuleName(o.rule.key, o.agent, o.subkey), status: o.status === "breached" ? "Problem" : o.status === "skipped" ? "nicht geprüft" : "in Ordnung", observed: fmtObserved(o), threshold: fmtThreshold(o), note: o.note ?? null })),
+    not_evaluable: errored.map(humanErrored),
+    draft: templateDigest(obs, errored),
   }, templateDigest(obs, errored), deps);
 }

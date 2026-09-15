@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtRuleValue, kindLabel, severityTone, ruleLabel, ruleScopeLabel } from "../components/monitoring/alerts-format";
+import { fmtRuleValue, kindLabel, severityTone, ruleLabel, ruleScopeLabel, humanRuleLabel, humanErroredLabel, humanDelivery } from "../components/monitoring/alerts-format";
 
 describe("alerts dashboard formatters", () => {
   it("values", () => {
@@ -21,5 +21,20 @@ describe("alerts dashboard formatters", () => {
   it("scope labels", () => {
     expect(ruleScopeLabel("failure_rate", "all")).toBe("Fehlerrate · Alle Agenten");
     expect(ruleScopeLabel("latency_p95", "faq")).toBe("Antwortzeit p95 · FAQ");
+  });
+  it("human labels for the feed and the run report", () => {
+    expect(humanRuleLabel("failure_rate", "faq", "")).toBe("Fehlerrate des FAQ-Assistenten");
+    expect(humanRuleLabel("latency_p95", null, "")).toBe("Antwortzeit beider Assistenten");
+    expect(humanErroredLabel("failure_rate·faq")).toBe("Fehlerrate (FAQ-Assistent)");
+  });
+});
+
+describe("humanDelivery", () => {
+  it("says what happened, keeping the raw status as a detail", () => {
+    expect(humanDelivery("sent")).toEqual({ text: "Zugestellt", tone: "good" });
+    expect(humanDelivery("skipped")).toEqual({ text: "Nicht gesendet (nicht eingerichtet)", tone: "muted" });
+    expect(humanDelivery("skipped: deadline")).toEqual({ text: "Nicht gesendet (Zeit abgelaufen)", tone: "muted", detail: "skipped: deadline" });
+    expect(humanDelivery("failed: HTTP 403: forbidden")).toEqual({ text: "Zustellung fehlgeschlagen", tone: "bad", detail: "failed: HTTP 403: forbidden" });
+    expect(humanDelivery("weird")).toEqual({ text: "Unbekannter Status", tone: "muted", detail: "weird" });
   });
 });

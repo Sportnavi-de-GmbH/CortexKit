@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 import { Check, ChevronDown } from "lucide-react";
 import type { AlertSettings } from "@/lib/monitoring/alerts/repo";
 import type { AlertRule } from "@/lib/monitoring/alerts/types";
-import { fmtRuleValue, ruleLabel, ruleScopeLabel } from "./alerts-format";
+import { fmtRuleValue, humanDelivery, humanErroredLabel, humanRuleLabel, ruleScopeLabel } from "./alerts-format";
 import { BTN_PRIMARY, BTN_SECONDARY, Card, INPUT, SELECT } from "./ui";
 
 interface RunResult {
@@ -19,7 +19,26 @@ interface RunResult {
   digest?: { sent: boolean; narrative: string };
   observations?: { rule_key: string; agent: string; subkey: string; status: string; observed: number | null; threshold: number; samples: number; note?: string }[];
   errored?: string[];
+  /** Human message shown when the run itself could not be started. */
   detail?: string;
+  /** Raw cause of that failure — collapsed, for the technical reader only. */
+  rawDetail?: string;
+}
+
+const RUN_FAILED = "Die Auswertung konnte nicht gestartet werden – bitte später erneut versuchen.";
+
+/** A raw error string, hidden behind a toggle so the visible text stays actionable. */
+function RawDetail({ detail }: { detail: string }) {
+  const [open, setOpen] = useState(false);
+  if (!detail) return null;
+  return (
+    <div>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="text-xs font-medium text-(--fg-muted) underline underline-offset-2 hover:text-(--fg)">
+        Technische Details
+      </button>
+      {open && <p className="mt-1 rounded-xl bg-(--surface-muted) px-3 py-2 text-[11px] break-words text-(--fg)">{detail}</p>}
+    </div>
+  );
 }
 
 /** Parses a draft numeric field; blank or non-finite ⇒ null so an emptied input is never saved as 0. */
@@ -52,21 +71,28 @@ function StatusChip({ status }: { status: string }) {
 }
 
 function RunReport({ result }: { result: RunResult }) {
-  if (result.detail) return <p className="text-sm text-(--red)">{result.detail}</p>;
+  if (result.detail) {
+    return (
+      <div className="space-y-1">
+        <p className="text-sm text-(--red)">{result.detail}</p>
+        {result.rawDetail && <RawDetail detail={result.rawDetail} />}
+      </div>
+    );
+  }
   const obs = result.observations ?? [];
   const transitions = result.transitions ?? [];
   return (
     <div className="space-y-3">
       <p className="text-xs text-(--fg-muted)">
         Slot {result.slot ?? "—"} {"·"} {result.dryRun ? "Vorschau (nichts gesendet)" : "ausgeführt"} {"·"} {transitions.length} Übergang(e)
-        {result.errored && result.errored.length > 0 ? ` · nicht auswertbar: ${result.errored.join(", ")}` : ""}
+        {result.errored && result.errored.length > 0 ? ` · nicht prüfbar: ${result.errored.map(humanErroredLabel).join(", ")}` : ""}
       </p>
       {transitions.length > 0 && (
         <ul className="space-y-1">
           {transitions.map((t, i) => (
             <li key={i} className="rounded-xl bg-(--surface-muted) px-3 py-2 text-[13px] break-words text-(--fg)">
               <span className="font-display font-semibold">{t.kind === "fired" ? "Alarm" : "Entwarnung"}</span> {"·"}{" "}
-              {ruleLabel(t.rule_key, t.agent, t.subkey)} — {t.narrative}
+              {humanRuleLabel(t.rule_key, t.agent, t.subkey)} — {t.narrative}
             </li>
           ))}
         </ul>
@@ -87,7 +113,7 @@ function RunReport({ result }: { result: RunResult }) {
             <tbody>
               {obs.map((o, i) => (
                 <tr key={i} className="border-t border-(--border)">
-                  <td className="py-2 pr-3 text-(--fg)">{ruleLabel(o.rule_key, o.agent, o.subkey)}</td>
+                  <td className="py-2 pr-3 text-(--fg)">{humanRuleLabel(o.rule_key, o.agent, o.subkey)}</td>
                   <td className="py-2 pr-3"><StatusChip status={o.status} /></td>
                   <td className="tabular py-2 pr-3 text-right">{fmtRuleValue(o.rule_key, o.observed)}</td>
                   <td className="tabular py-2 pr-3 text-right text-(--fg-muted)">{fmtRuleValue(o.rule_key, o.threshold)}</td>
@@ -117,10 +143,12 @@ function Actions() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dryRun }),
       });
-      setResult((await r.json()) as RunResult);
+      const body = (await r.json()) as RunResult;
+      if (!r.ok || body.ok !== true) setResult({ detail: RUN_FAILED, rawDetail: body.detail ?? `HTTP ${r.status}` });
+      else setResult(body);
       if (!dryRun) router.refresh();
-    } catch {
-      setResult({ detail: "Auswertung fehlgeschlagen." });
+    } catch (err) {
+      setResult({ detail: RUN_FAILED, rawDetail: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(null);
     }
@@ -132,9 +160,9 @@ function Actions() {
     try {
       const r = await fetch("/api/monitoring/alerts/test", { method: "POST" });
       const body = (await r.json()) as { delivery?: Record<string, string>; detail?: string };
-      setTest(body.delivery ? Object.entries(body.delivery).map(([k, v]) => `${k === "teams" ? "Teams" : "E-Mail"}: ${v}`).join(" · ") : (body.detail ?? "—"));
+      setTest(body.delivery ? Object.entries(body.delivery).map(([k, v]) => `${k === "teams" ? "Teams" : "E-Mail"}: ${humanDelivery(v).text}`).join(" · ") : (body.detail ?? "—"));
     } catch {
-      setTest("Senden fehlgeschlagen.");
+      setTest("Senden fehlgeschlagen – bitte erneut versuchen.");
     } finally {
       setBusy(null);
     }
@@ -176,14 +204,14 @@ function Recipients({ settings }: { settings: AlertSettings }) {
         body: JSON.stringify({ email_recipients: list, digest_enabled: digest }),
       });
       if (!r.ok) {
-        setError("Ungültige Adresse oder Speichern fehlgeschlagen.");
+        setError("Ungültige Adresse oder Speichern fehlgeschlagen – bitte prüfen und erneut versuchen.");
         setState("error");
         return;
       }
       setState("saved");
       setTimeout(() => setState("idle"), 2000);
     } catch {
-      setError("Speichern fehlgeschlagen.");
+      setError("Speichern fehlgeschlagen – bitte erneut versuchen.");
       setState("error");
     }
   }
@@ -350,7 +378,7 @@ function RuleRow({ rule }: { rule: AlertRule }) {
           </button>
           {state === "saved" && <Check className="h-4 w-4 text-(--brand-green)" aria-label="Gespeichert" />}
           {invalid && <span className="text-xs text-(--red)">Bitte gültige Zahlen eingeben</span>}
-          {!invalid && state === "error" && <span className="text-xs text-(--red)">Fehler</span>}
+          {!invalid && state === "error" && <span className="text-xs text-(--red)">Speichern fehlgeschlagen – bitte erneut versuchen.</span>}
         </div>
       </td>
     </tr>

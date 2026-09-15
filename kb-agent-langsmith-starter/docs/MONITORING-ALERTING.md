@@ -342,12 +342,67 @@ navio-widget (Vercel)
 **Rules decide, the LLM only phrases.** `rules.ts` is pure and untouched by the model; the
 honesty invariant that keeps the message text from ever inventing a number lives there, not
 in the prompt. `narrate.ts`'s system prompt explicitly forbids using any number not present in
-the JSON it's given, but the belt-and-braces guarantee is structural: the Adaptive Card's
-fact list (`Wert` / `Grenze` / `Fenster` / `Turns`) is built directly from the observation in
-`deliver.ts`, never from the narrative text — a bad sentence can never hide the real value.
-**A dry run (`dryRun:true`) still calls the LLM** — narration happens before the dry-run branch
-returns, so a `/monitoring/alerts` preview shows the real wording, not a placeholder; it just
-skips writing `alert_state`/`alert_events` and skips delivery.
+the JSON it's given, but the belt-and-braces guarantee is structural: the technical fact list
+(`Regel` / `Agent` / `Wert` / `Grenze` / `Fenster` / `Turns`) is built directly from the
+observation in `deliver.ts`, never from the narrative text — a bad sentence can never hide the
+real value. **A dry run (`dryRun:true`) still calls the LLM** — narration happens before the
+dry-run branch returns, so a `/monitoring/alerts` preview shows the real wording, not a
+placeholder; it just skips writing `alert_state`/`alert_events` and skips delivery.
+
+### What a message says — the 4-part contract (2026-09-15)
+
+The readers are the Sportnavi team, not engineers. **Every text a human reads — Teams card,
+email, feed row, run report — states four things in this order, in plain German, with no rule
+key, agent id, error code, stack trace or metric abbreviation:**
+
+1. **Was ist passiert** — what happened, with the numbers already formatted.
+2. **Warum** — only when the data supports it (`error_repeat` / `partner_upstream` translate
+   the error type: rate limit → "der KI-Anbieter hat Anfragen abgewiesen (Überlastung)",
+   timeout → "Antworten kamen zu spät", unavailable → "die Partner-Suche war nicht
+   erreichbar"). Otherwise the sentence is literally "Die Ursache ist noch nicht bekannt."
+3. **Was es für die Nutzer bedeutet** — or, for a recovery, that it works again.
+4. **Was jetzt zu tun ist** — one step a non-technical person can do, always the last
+   sentence; a recovery ends with "Keine Aktion nötig."
+
+The wording per rule lives in `lib/monitoring/alerts/copy.ts` (`HUMAN[key].what/why/impact/
+next/recovered` plus the card headlines); `narrate.ts` joins those four sentences into the
+deterministic template **and** hands them to the model as `draft`, so the LLM rephrases a
+correct text instead of inventing one. `humanRuleName()` gives "Fehlerrate des FAQ-Assistenten"
+and `humanErrored()` turns `failure_rate·faq` into "Fehlerrate (FAQ-Assistent)".
+
+**The technical detail is not deleted, it is moved.** The Teams card and the email carry a
+second FactSet under a small **"Für das Technik-Team"** label (`AlertMessage.techFacts` /
+`techLabel`, rendered by `lib/monitoring/format-alert.ts`) with rule key, agent, raw value,
+threshold, window and sample count. In the dashboard the same data sits behind a collapsed
+**"Technische Details"** toggle on each feed row (plus run slot, narrative source and the raw
+delivery strings such as `failed: HTTP 403: …`); the visible delivery chips say
+"Zugestellt" / "Nicht gesendet (nicht eingerichtet)" / "Nicht gesendet (Zeit abgelaufen)" /
+"Zustellung fehlgeschlagen" (`humanDelivery()` in `components/monitoring/alerts-format.ts`).
+The Regeln tab's observation table stays technical on purpose — it *is* the technical view —
+but its rows are labelled with the human rule name.
+
+One real card, `failure_rate` breaching for the FAQ agent (template wording; the LLM only
+rephrases it):
+
+> **FAQ-Assistent: viele Anfragen ohne Antwort**
+>
+> Der FAQ-Assistent hat in den letzten 24 Stunden bei 15 % der Anfragen keine Antwort
+> geliefert; normal wären höchstens 10 %. Die Ursache ist noch nicht bekannt. Betroffene
+> Nutzer haben eine Fehlermeldung statt einer Antwort gesehen. Bitte im Monitoring unter
+> 'Neueste Fehler' nachsehen und, falls es weiter auftritt, das Technik-Team informieren.
+>
+> *Für das Technik-Team* — Regel `failure_rate·faq` · Agent `faq` · Wert 15 % · Grenze 10 % ·
+> Fenster 24 h · Turns 20
+
+and its recovery: *"Entwarnung: FAQ-Assistent antwortet wieder"* — "Der FAQ-Assistent hat in
+den letzten 24 Stunden nur noch bei 2 % der Anfragen nicht geantwortet und liegt damit wieder
+im normalen Bereich. Die Nutzer bekommen wieder ihre Antworten. Keine Aktion nötig."
+
+The digest is titled "Statusbericht: alles in Ordnung" / "Statusbericht: N Problem(e)" and
+opens with "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen." or
+"Achtung: N Problem(e) gefunden.", then one plain line per rule, then any rule that could not
+be evaluated as "Nicht prüfbar: <human name> (die Daten konnten nicht geladen werden)".
+The test alarm reads "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig."
 
 ### The 7 rules
 

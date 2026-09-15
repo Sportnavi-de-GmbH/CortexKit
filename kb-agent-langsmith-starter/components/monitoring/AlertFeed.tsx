@@ -4,10 +4,10 @@
 // Filters are a plain GET form (same pattern as TraceFilters); "Mehr laden"
 // appends the next page client-side from the data API.
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Check, ChevronDown, Inbox } from "lucide-react";
 import type { AlertEventRow } from "@/lib/monitoring/alerts/query";
-import { fmtRuleValue, kindLabel, ruleLabel, severityTone } from "./alerts-format";
+import { fmtRuleValue, humanDelivery, humanRuleLabel, kindLabel, severityTone } from "./alerts-format";
 import { BTN_PRIMARY, BTN_SECONDARY, CARD, SELECT, Card, fmtTime } from "./ui";
 
 const NAME_KEY = "navio_monitoring_name";
@@ -51,15 +51,55 @@ function DeliveryChips({ delivery }: { delivery: Record<string, string> }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {entries.map(([ch, st]) => {
-        const ok = st === "sent" || st === "ok";
-        const bad = st.startsWith("failed") || st.startsWith("error");
-        const cls = ok ? "bg-(--accent-dim) text-(--fg)" : bad ? "bg-(--red)/12 text-(--red)" : "bg-(--surface-muted) text-(--fg-muted)";
+        const d = humanDelivery(st);
+        const cls = d.tone === "good" ? "bg-(--accent-dim) text-(--fg)" : d.tone === "bad" ? "bg-(--red)/12 text-(--red)" : "bg-(--surface-muted) text-(--fg-muted)";
         return (
           <span key={ch} className={`inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] break-words ${cls}`}>
-            {ch === "teams" ? "Teams" : ch === "email" ? "E-Mail" : ch}: {st}
+            {ch === "teams" ? "Teams" : ch === "email" ? "E-Mail" : ch}: {d.text}
           </span>
         );
       })}
+    </div>
+  );
+}
+
+/** Everything an engineer needs and nobody else should have to read: hidden until asked for. */
+function TechnicalDetails({ e }: { e: AlertEventRow }) {
+  const [open, setOpen] = useState(false);
+  const rows: [string, string][] = [];
+  if (e.rule_key) rows.push(["Regel", `${e.rule_key}${e.agent ? `·${e.agent}` : ""}${e.subkey ? `·${e.subkey}` : ""}`]);
+  if (e.agent) rows.push(["Agent", e.agent]);
+  if (e.rule_key) {
+    rows.push(["Wert", fmtRuleValue(e.rule_key, e.observed)]);
+    rows.push(["Grenze", fmtRuleValue(e.rule_key, e.threshold)]);
+    rows.push(["Fenster", `${e.window_hours ?? "—"} h`]);
+    rows.push(["Turns", String(e.samples ?? 0)]);
+  }
+  rows.push(["Lauf", e.run_slot || "—"]);
+  rows.push(["Text von", e.narrative_source === "llm" ? "llm" : "template"]);
+  for (const [ch, st] of Object.entries(e.delivery ?? {})) rows.push([`Zustellung ${ch}`, st]);
+
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-xs font-medium text-(--fg-muted) underline underline-offset-2 transition-colors hover:text-(--fg)"
+      >
+        Technische Details
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden />
+      </button>
+      {open && (
+        <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-xl bg-(--surface-muted) px-3 py-2 text-[11px]">
+          {rows.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt className="text-(--fg-subtle)">{k}</dt>
+              <dd className="tabular break-words text-(--fg)">{v}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }
@@ -92,7 +132,7 @@ function EventRow({ e }: { e: AlertEventRow }) {
   const isTransition = e.kind === "fired" || e.kind === "recovered";
   // Digest / test rows carry no rule, so the pill already says everything a
   // title would — don't repeat it.
-  const title = isTransition && e.rule_key ? ruleLabel(e.rule_key, e.agent, e.subkey ?? "") : null;
+  const title = isTransition && e.rule_key ? humanRuleLabel(e.rule_key, e.agent, e.subkey ?? "") : null;
   const tracesHref =
     (e.agent === "faq" || e.agent === "partner") && e.window_from
       ? `/monitoring?agent=${e.agent}&from=${encodeURIComponent(e.window_from)}${e.window_to ? `&to=${encodeURIComponent(e.window_to)}` : ""}`
@@ -130,15 +170,9 @@ function EventRow({ e }: { e: AlertEventRow }) {
           {title && <span className="min-w-0 break-words font-display text-sm font-semibold text-(--fg)">{title}</span>}
           <span className="tabular text-[11px] text-(--fg-subtle)">{fmtTime(e.created_at)}</span>
         </div>
-        {isTransition && (
-          <p className="text-xs text-(--fg-muted)">
-            Wert <span className="tabular font-medium text-(--fg)">{fmtRuleValue(e.rule_key ?? "", e.observed)}</span> {"·"} Grenze{" "}
-            <span className="tabular">{fmtRuleValue(e.rule_key ?? "", e.threshold)}</span> {"·"} Fenster{" "}
-            <span className="tabular">{e.window_hours ?? "—"} h</span> {"·"} Turns <span className="tabular">{e.samples ?? 0}</span>
-          </p>
-        )}
         <Narrative text={e.narrative} collapsible={e.kind === "digest"} />
         <DeliveryChips delivery={e.delivery} />
+        <TechnicalDetails e={e} />
         {tracesHref && (
           <Link
             href={tracesHref}
@@ -160,7 +194,7 @@ function EventRow({ e }: { e: AlertEventRow }) {
             <button type="button" onClick={acknowledge} disabled={busy} className={BTN_SECONDARY}>
               Bestätigen
             </button>
-            {ackError && <span className="text-xs text-(--red)">Bestätigen fehlgeschlagen</span>}
+            {ackError && <span className="max-w-[12rem] text-right text-xs text-(--red)">Bestätigen fehlgeschlagen – bitte erneut versuchen.</span>}
           </div>
         )}
       </div>
