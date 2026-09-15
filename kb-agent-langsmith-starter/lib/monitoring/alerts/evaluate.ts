@@ -64,7 +64,15 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   const observations: Observation[] = evaluateAll(evaluable, metrics);
   const { transitions, next } = diffStates(prevStates, observations, nowIso, evaluable);
 
-  // Narrate first (needed for both dry-run preview and real events).
+  // Persist state FIRST (dry-run excepted): narration and delivery can take longer than a
+  // caller's cap (the delete resync waits 5 s), and the banner/dot read alert_state — so it
+  // must be current before any LLM call, not after.
+  if (!opts.dryRun) {
+    await repo.saveStates(next);
+    await repo.deleteStatesForRules(allRules.filter((r) => r.enabled === false).map((r) => r.id));
+  }
+
+  // Narrate next (needed for both dry-run preview and real events).
   const narrated = await Promise.all(transitions.map(async (t) => ({ t, n: await narrateTransition(t, deps.narrate) })));
   // No digest row ⇒ no digest narration either (one LLM call and seconds saved on a resync).
   const digestNarr = opts.writeDigest === false
@@ -80,8 +88,6 @@ export async function runEvaluation(opts: EvaluateOptions, deps: EvaluateDeps = 
   };
   if (opts.dryRun) return result;
 
-  await repo.saveStates(next);
-  await repo.deleteStatesForRules(allRules.filter((r) => r.enabled === false).map((r) => r.id));
   const recipients = settings.email_recipients;
   const windowFrom = (t: Transition) => new Date(now.getTime() - t.obs.rule.window_hours * 3_600_000).toISOString();
 

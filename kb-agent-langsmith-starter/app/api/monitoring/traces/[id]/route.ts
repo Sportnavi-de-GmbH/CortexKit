@@ -7,6 +7,8 @@ import { deleteTraces, parseIds } from "@/lib/monitoring/delete";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The post-delete alert re-evaluation may continue past the response via `after()` — give it room.
+export const maxDuration = 60;
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }): Promise<Response> {
   if (!dashboardEnabled()) return new Response(null, { status: 404 });

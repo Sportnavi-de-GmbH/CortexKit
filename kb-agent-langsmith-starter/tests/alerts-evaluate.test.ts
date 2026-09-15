@@ -68,7 +68,20 @@ describe("runEvaluation", () => {
     const r = await runEvaluation({ slot: "manual", now: NOW, writeDigest: false }, deps(m.repo));
     expect(r?.transitions).toHaveLength(1);
     expect(m.events.map((e) => e.kind)).toEqual(["fired"]);
+    expect(m.states[0].status).toBe("breached");
     expect(r?.digest.sent).toBe(false);
+  });
+  it("persists alert_state BEFORE narration so the banner/dot are current even when narration outlives the cap", async () => {
+    const m = memRepo({ faq: { traces: 20, failed: 4 } });
+    const order: string[] = [];
+    const saveStates = m.repo.saveStates;
+    m.repo.saveStates = async (rows) => { order.push("saveStates"); await saveStates(rows); };
+    const d = deps(m.repo);
+    d.narrate = { generate: async () => { order.push("narrate"); return "LLM-Text."; } };
+    await runEvaluation({ slot: "manual", now: NOW, writeDigest: false }, d);
+    expect(order[0]).toBe("saveStates");
+    expect(order).toContain("narrate");
+    expect(m.states[0].status).toBe("breached");
   });
   it("test slot writes a digest event but does not send it", async () => {
     const m = memRepo({});

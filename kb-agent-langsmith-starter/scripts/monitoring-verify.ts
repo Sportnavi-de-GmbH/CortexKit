@@ -3,6 +3,10 @@
 //   npm run monitoring:verify                  # FAQ + partner turn, one vote each, read back from Supabase
 //   npm run monitoring:verify -- --expect-failure   # point EVE_HOST at a widget with a broken Azure key first
 //   npm run monitoring:verify -- --only delete       # skip the FAQ/partner turns; only the delete-cascade section
+//   npm run monitoring:verify -- --allow-skipped     # accept reevaluate:"skipped" (alerting Supabase not configured)
+//
+// The delete section runs ONE real alert evaluation (production scope) as a side effect: it can
+// write alert_state and, if a breach flips, send a Teams/email transition.
 //
 // Env: EVE_HOST (default http://127.0.0.1:3001), MONITORING_SUPABASE_URL/_SERVICE_ROLE_KEY,
 // MONITORING_PASSWORD (from .env.local). Exit 1 on any failed check. Mirrors scripts/verify-langfuse.ts:
@@ -18,6 +22,7 @@ const expectFailure = process.argv.includes("--expect-failure");
 const onlyIdx = process.argv.indexOf("--only");
 const only = onlyIdx !== -1 ? process.argv[onlyIdx + 1] : undefined;
 const runTurns = only !== "delete";
+const allowSkipped = process.argv.includes("--allow-skipped");
 const db = supabaseAdmin();
 if (!db) {
   console.error("MONITORING_SUPABASE_URL / MONITORING_SUPABASE_SERVICE_ROLE_KEY not set — nothing to verify against.");
@@ -85,6 +90,17 @@ async function runDeleteSection(): Promise<void> {
     });
     check("delete: seed 1 feedback", !fbErr, fbErr?.message ?? "");
 
+    // session-scoped leftovers (no trace_id): an unlinked vote and a session event — these must
+    // go when the session itself is deleted (migration …000500).
+    const { error: fbUnlinkedErr } = await db!.from("feedback").insert({
+      trace_id: null, session_id: sessionId, turn_id: "turn_9", agent: "faq", thumb: "down", epoch: 0,
+    });
+    check("delete: seed 1 unlinked feedback", !fbUnlinkedErr, fbUnlinkedErr?.message ?? "");
+    const { error: sessEvErr } = await db!.from("events").insert({
+      type: "verify.session", trace_id: null, session_id: sessionId, payload: { verify: true },
+    });
+    check("delete: seed 1 session event", !sessEvErr, sessEvErr?.message ?? "");
+
     // ---- log in to the dashboard API
     const password = process.env.MONITORING_PASSWORD ?? "";
     check("delete: MONITORING_PASSWORD set", password.length > 0);
@@ -103,10 +119,15 @@ async function runDeleteSection(): Promise<void> {
     check("delete: single trace 200", del1Res.ok, `HTTP ${del1Res.status}`);
     check("delete: single trace deleted:1", del1Body.deleted === 1, JSON.stringify(del1Body));
     check("delete: single trace feedback:1", del1Body.feedback === 1, JSON.stringify(del1Body));
+    // Alerting needs only the monitoring Supabase config, which this script already has — so the
+    // re-evaluation must actually run: started|pending. "skipped" passes only with --allow-skipped;
+    // "failed" always fails (the route response is printed so it can be diagnosed).
+    const reev = del1Body.reevaluate;
+    const reevOk = reev === "started" || reev === "pending" || (allowSkipped && reev === "skipped");
     check(
-      "delete: single trace reevaluate started|pending|skipped|failed",
-      del1Body.reevaluate === "started" || del1Body.reevaluate === "pending" || del1Body.reevaluate === "skipped" || del1Body.reevaluate === "failed",
-      String(del1Body.reevaluate),
+      `delete: single trace reevaluate started|pending${allowSkipped ? "|skipped" : ""}`,
+      reevOk,
+      reevOk ? String(reev) : `${String(reev)} — response: ${JSON.stringify(del1Body)}`,
     );
 
     await sleep(500);
@@ -130,6 +151,10 @@ async function runDeleteSection(): Promise<void> {
     await sleep(500);
     const { data: sessAfter2 } = await db!.from("agent_sessions").select("id").eq("id", sessionId).maybeSingle();
     check("delete: session gone after second delete", sessAfter2 === null || sessAfter2 === undefined);
+    const { data: fbSessAfter } = await db!.from("feedback").select("id").eq("session_id", sessionId);
+    check("delete: unlinked feedback gone with session", (fbSessAfter ?? []).length === 0, String((fbSessAfter ?? []).length));
+    const { data: evSessAfter } = await db!.from("events").select("id").eq("session_id", sessionId);
+    check("delete: session events gone with session", (evSessAfter ?? []).length === 0, String((evSessAfter ?? []).length));
 
     // ---- alert event: seed + delete
     const { error: aeErr } = await db!.from("alert_events").insert({
@@ -153,7 +178,8 @@ async function runDeleteSection(): Promise<void> {
     }
   } finally {
     // Never trust the checks above to have cleaned up — remove anything of ours that survived.
-    await db!.from("feedback").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
+    await db!.from("feedback").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2},session_id.eq.${sessionId}`);
+    await db!.from("events").delete().eq("session_id", sessionId);
     await db!.from("errors").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
     await db!.from("trace_steps").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
     await db!.from("traces").delete().in("id", [trace1, trace2]);

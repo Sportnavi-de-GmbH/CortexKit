@@ -3,7 +3,7 @@
 // components/monitoring/useDeleteFlow.tsx — shared delete flow for TraceList,
 // AlertFeed and the trace-detail page: owns the confirm dialog, calls the
 // DELETE endpoint, and refreshes the app after success (spec §5).
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { deleteBody } from "./selection";
@@ -33,6 +33,10 @@ export function useDeleteFlow(opts: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<string | null>(null);
+  // One extra refresh when the server's alert re-evaluation was still running at response
+  // time (`reevaluate: "pending"`), so the breach banner/dot catch up without a manual reload.
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (pendingTimer.current) clearTimeout(pendingTimer.current); }, []);
 
   const confirm = useCallback((newIds: string[]) => {
     setIds(newIds);
@@ -59,9 +63,18 @@ export function useDeleteFlow(opts: {
         body: JSON.stringify({ ids }),
       });
       if (r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { reevaluate?: string };
         setIds(null);
         if (opts.refresh !== false) router.refresh();
         window.dispatchEvent(new Event("navio:refresh"));
+        if (body.reevaluate === "pending") {
+          if (pendingTimer.current) clearTimeout(pendingTimer.current);
+          pendingTimer.current = setTimeout(() => {
+            pendingTimer.current = null;
+            if (opts.refresh !== false) router.refresh();
+            window.dispatchEvent(new Event("navio:refresh"));
+          }, 8000);
+        }
         opts.onDone?.();
       } else {
         const raw = await r.text().catch(() => "");

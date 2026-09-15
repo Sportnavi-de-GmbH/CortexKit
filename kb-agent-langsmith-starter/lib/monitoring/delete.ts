@@ -58,8 +58,12 @@ async function runReevaluate(deps: DeleteDeps): Promise<DeleteTracesResult["reev
   });
   // The evaluation keeps running past the cap; log its eventual failure instead of leaving an
   // unhandled rejection behind.
+  // Infra error, not visitor text — the message (truncated) is what makes a `failed` diagnosable.
   const work = reevaluate().catch((e) => {
-    log("[monitoring] delete: reevaluate failed", { error: e instanceof Error ? e.name : "unknown" });
+    log("[monitoring] delete: reevaluate failed", {
+      error: e instanceof Error ? e.name : "unknown",
+      message: (e instanceof Error ? e.message : String(e)).slice(0, 200),
+    });
     return CAP_FAILED;
   });
   try {

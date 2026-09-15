@@ -45,7 +45,13 @@ export function ConfirmDialog({
         e.preventDefault();
         onCancel();
       }}
-      onClose={onCancel}
+      onClose={() => {
+        // Chrome's close-watcher can close the dialog despite the preventDefault above
+        // (e.g. a second Escape). While a delete is in flight, re-open instead of losing
+        // the busy/error state; when idle, closing is just a cancel.
+        if (busy) ref.current?.showModal();
+        else onCancel();
+      }}
     >
       <div className="p-5">
         <h2 id={titleId} className="font-display text-[15px] font-semibold leading-tight text-(--fg)">

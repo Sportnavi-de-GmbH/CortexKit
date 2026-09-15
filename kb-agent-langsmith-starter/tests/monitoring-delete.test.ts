@@ -60,6 +60,18 @@ describe("deleteTraces", () => {
     const result = await deleteTraces([UUID_A], { client, reevaluate, log });
     expect(result?.reevaluate).toBe("failed");
     expect(log).toHaveBeenCalled();
+    // The failure is an infra error (never visitor text) — the message must be logged, truncated.
+    expect(log.mock.calls[0][1]).toMatchObject({ error: "Error", message: "boom" });
+  });
+
+  it("truncates the logged reevaluate failure message to 200 chars", async () => {
+    const client = makeClient({ traces: 1, feedback: 0, events: 0, sessions_deleted: 0 });
+    const log = vi.fn();
+    const reevaluate = vi.fn(async () => {
+      throw new Error("x".repeat(500));
+    });
+    await deleteTraces([UUID_A], { client, reevaluate, log });
+    expect((log.mock.calls[0][1] as { message: string }).message).toHaveLength(200);
   });
 
   it("reports skipped when reevaluate resolves undefined (no repo)", async () => {
