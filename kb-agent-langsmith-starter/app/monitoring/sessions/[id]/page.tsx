@@ -49,7 +49,8 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
                   >
                     Open trace <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                   </Link>
-                  <DeleteTraceButton id={t.id} size="sm" afterDelete="refresh" />
+                  {/* Deleting the last turn also deletes the session, so refreshing this route would 404. */}
+                  <DeleteTraceButton id={t.id} size="sm" afterDelete={turns === 1 ? "overview" : "refresh"} />
                 </div>
               </div>
             </li>

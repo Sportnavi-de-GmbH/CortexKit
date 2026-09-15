@@ -3,7 +3,7 @@
 // Shared confirm dialog for destructive actions (trace / alert delete).
 // Native <dialog> so focus-trap and Escape-to-close come for free; the
 // element is only ever shown via showModal()/close(), driven by `open`.
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { BTN_DANGER, BTN_SECONDARY } from "./ui";
 
 export function ConfirmDialog({
@@ -26,6 +26,7 @@ export function ConfirmDialog({
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId(); // several dialogs can mount on one page (session view)
 
   useEffect(() => {
     const el = ref.current;
@@ -37,7 +38,7 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
-      aria-labelledby="confirm-dialog-title"
+      aria-labelledby={titleId}
       className="m-auto w-[min(92vw,420px)] rounded-2xl border border-(--border) bg-(--surface) p-0 text-(--fg) soft-shadow-lg backdrop:bg-(--ink)/50 backdrop:backdrop-blur-sm"
       onCancel={(e) => {
         // native Escape handling — keep state in sync instead of preventing it
@@ -47,7 +48,7 @@ export function ConfirmDialog({
       onClose={onCancel}
     >
       <div className="p-5">
-        <h2 id="confirm-dialog-title" className="font-display text-[15px] font-semibold leading-tight text-(--fg)">
+        <h2 id={titleId} className="font-display text-[15px] font-semibold leading-tight text-(--fg)">
           {title}
         </h2>
         <p className="mt-2 text-sm text-(--fg-muted)">{body}</p>
