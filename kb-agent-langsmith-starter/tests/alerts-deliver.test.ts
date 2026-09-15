@@ -45,13 +45,18 @@ describe("messages", () => {
   });
   it("digest has a plain-words title, one human fact per observation, and a FactSet", () => {
     const m = digestMessage([obs, { ...obs, agent: "partner", status: "ok", observed: 0.01 }], [], "Lage.", URL);
-    expect(m.title).toBe("Statusbericht: 1 Problem");
+    expect(m.title).toBe("1 Problem"); // the severity word already prefixes header and subject
     expect(m.facts).toHaveLength(2);
     expect(m.facts?.[0].title).toContain("Fehlerrate des FAQ-Assistenten");
     const card = formatTeamsCard(m) as { attachments: { content: { body: { type: string }[] } }[] };
     expect(card.attachments[0].content.body.some((b) => b.type === "FactSet")).toBe(true);
-    expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], [], "Lage.", URL).title).toBe("Statusbericht: alles in Ordnung");
-    expect(digestMessage([obs, { ...obs, agent: "partner" }], [], "Lage.", URL).title).toBe("Statusbericht: 2 Probleme");
+    expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], [], "Lage.", URL).title).toBe("Alles in Ordnung");
+    expect(digestMessage([obs, { ...obs, agent: "partner" }], [], "Lage.", URL).title).toBe("2 Probleme");
+    // "Alles in Ordnung" is only claimed when every rule was measured.
+    expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }, { ...obs, agent: "partner", status: "skipped", observed: null }], [], "Lage.", URL).title).toBe("Keine Probleme gefunden");
+    expect(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], ["cost_spike·faq"], "Lage.", URL).title).toBe("Keine Probleme gefunden");
+    const subject = formatEmailSubject(digestMessage([{ ...obs, status: "ok", observed: 0.01 }], [], "Lage.", URL));
+    expect(subject).toBe("[Navio] Statusbericht: Alles in Ordnung");
   });
   it("the card chrome speaks German and keeps the ISO time in the technical block", () => {
     const m = transitionMessage(fired, "Text.", URL);
@@ -75,6 +80,8 @@ describe("messages", () => {
     expect(m.facts?.[0].value).not.toMatch(/warmup/);
     const hot = digestMessage([{ ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, observed: 3.2, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }], [], "Lage.", URL);
     expect(hot.facts?.[0].value).toContain("3,2-mal so hoch wie an einem normalen Tag");
+    expect(hot.facts?.[0].value).toContain("(erlaubt: bis 3-mal)"); // short limit: the value just set the unit
+    expect(hot.facts?.[0].value).not.toMatch(/erlaubt bis 3-mal so hoch/);
     expect(hot.facts?.[0].value).not.toMatch(/× Basis/);
     expect(m.facts?.[0].value).not.toMatch(/erlaubt bis/);
     expect(m.facts?.[0].value.startsWith("nicht gemessen")).toBe(true);

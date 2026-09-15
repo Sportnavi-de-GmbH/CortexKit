@@ -438,8 +438,10 @@ Its recovery, here for `agent: "total"` — *"Entwarnung: Beide Assistenten antw
 > geantwortet und liegen damit wieder im normalen Bereich. Die Nutzer bekommen wieder ihre
 > Antworten. Keine Aktion nötig.
 
-The digest is titled "Statusbericht: alles in Ordnung" / "Statusbericht: 1 Problem" /
-"Statusbericht: N Probleme" (no "(e)"). Its first line is "Achtung: 1 Problem gefunden." / "Achtung: N Probleme gefunden."
+The digest card header and email subject carry the severity word ("Statusbericht", or "Alarm"
+when something breached), so the title itself is just "Alles in Ordnung" / "Keine Probleme
+gefunden" (nothing breached, but a rule was skipped or could not be evaluated) / "1 Problem" /
+"N Probleme" (no "(e)"). Its first line is "Achtung: 1 Problem gefunden." / "Achtung: N Probleme gefunden."
 when something breached, "Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft
 werden." when nothing breached but a rule was skipped or could not be evaluated, and only
 otherwise "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen."
@@ -448,8 +450,12 @@ Then one plain line per rule, then any rule that could not be evaluated as "Nich
 
 > Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden.
 > 🟢 Fehlerrate des FAQ-Assistenten: 1 % (erlaubt bis 10 %)
-> ⚪ Kostenanstieg beider Assistenten: nicht gemessen (erlaubt bis 3,0-mal) – Noch nicht genug
-> Vergleichstage gesammelt (0 von 7)
+> ⚪ Kostenanstieg beider Assistenten: nicht gemessen – Noch nicht genug Vergleichstage
+> gesammelt (0 von 7)
+
+A measured cost spike reads "3,2-mal so hoch wie an einem normalen Tag (erlaubt: bis 3-mal)":
+the short limit form is used only there, because the value right before it already carries
+the unit; recoveries say "… nur noch 4-mal aufgetreten; gemeldet wird ab 5-mal."
 
 The test alarm reads "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig."
 

@@ -42,7 +42,15 @@ export function transitionMessage(t: Transition, narrative: string, dashboardUrl
 
 export function digestMessage(obs: Observation[], errored: string[], narrative: string, dashboardUrl: string): AlertMessage {
   const breached = obs.filter((o) => o.status === "breached").length;
-  const title = breached > 0 ? `Statusbericht: ${breached} Problem${breached === 1 ? "" : "e"}` : "Statusbericht: alles in Ordnung";
+  const unchecked = errored.length > 0 || obs.some((o) => o.status === "skipped");
+  // The severity word ("Statusbericht" / "Alarm") already prefixes the header and the email
+  // subject, so the title must not repeat it. "Alles in Ordnung" is only claimed when every
+  // rule was actually measured — mirrors templateDigest's headline.
+  const title = breached > 0
+    ? `${breached} Problem${breached === 1 ? "" : "e"}`
+    : unchecked
+      ? "Keine Probleme gefunden"
+      : "Alles in Ordnung";
   const m = base(breached > 0 ? "ALERT" : "OK", title, narrative, dashboardUrl);
   m.window = "Statusbericht";
   // A status report is not an alarm unless something is actually breached.

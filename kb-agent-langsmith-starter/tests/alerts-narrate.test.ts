@@ -214,7 +214,7 @@ describe("counts in human sentences", () => {
 describe("honest recoveries", () => {
   it("the repeated error states the count and the limit", () => {
     const r = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), subkey: "azure_429", status: "ok", observed: 4, threshold: 5 }) });
-    expect(r).toContain("Der wiederholte Fehler beim FAQ-Assistenten ist in den letzten 24 Stunden nur noch 4-mal aufgetreten und liegt damit wieder unter der Meldegrenze von 5-mal.");
+    expect(r).toContain("Der wiederholte Fehler beim FAQ-Assistenten ist in den letzten 24 Stunden nur noch 4-mal aufgetreten; gemeldet wird ab 5-mal.");
     expect(r).not.toMatch(/tritt nicht mehr auf/);
     const zero = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "error_repeat", threshold: 5 }), status: "ok", observed: 0, threshold: 5 }) });
     expect(zero).toContain("Der wiederholte Fehler beim FAQ-Assistenten ist in den letzten 24 Stunden nicht mehr aufgetreten.");
@@ -222,7 +222,7 @@ describe("honest recoveries", () => {
   it("the partner recovery says how often it was unreachable", () => {
     const r = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "partner_upstream", threshold: 3 }), agent: "partner", status: "ok", observed: 2, threshold: 3 }) });
     expect(r).toContain("nur noch 2-mal nicht erreichbar");
-    expect(r).toContain("Meldegrenze von 3-mal");
+    expect(r).toContain("gemeldet wird ab 3-mal");
     const zero = templateTransition({ kind: "recovered", obs: obs({ rule: rule({ key: "partner_upstream", threshold: 3 }), agent: "partner", status: "ok", observed: 0, threshold: 3 }) });
     expect(zero).toContain("durchgehend erreichbar");
   });

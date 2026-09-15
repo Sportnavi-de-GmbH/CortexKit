@@ -99,7 +99,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  * Last line of defence: the model is told not to use identifiers, but a prompt is not a
  * guarantee. If jargon reaches the text, the deterministic template is used instead.
  */
-const TECHNICAL_LEAK = /[a-z_]+·(faq|partner|total)|failure_rate|latency_p95|cost_(daily|spike)|error_repeat|partner_upstream|HTTP \d|\bp95\b|warmup|\d+ ?< ?\d+|×\s?Basis|\b999\b/i;
+const TECHNICAL_LEAK = /[a-z_]+·(faq|partner|total)|failure_rate|latency_p95|cost_(daily|spike)|error_repeat|partner_upstream|HTTP \d|\bp95\b|warmup|\d+ ?< ?\d+|\d+\s?×|(?<![\d,.])999(?![\d,.])/i;
 
 async function run(user: Record<string, unknown>, fallback: string, deps: NarrateDeps): Promise<Narrative> {
   const generate = deps.generate ?? defaultGenerate;

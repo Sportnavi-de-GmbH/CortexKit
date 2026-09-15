@@ -115,7 +115,12 @@ export function humanThreshold(o: Observation): string {
  */
 export function humanDigestValue(o: Observation): string {
   const note = humanNote(o);
-  const head = o.observed === null ? humanValue(o) : `${humanValue(o)} (erlaubt bis ${humanThreshold(o)})`;
+  // cost_spike's full limit phrase ("… so hoch wie an einem normalen Tag") would repeat the
+  // unit the value just established; the bare factor is unambiguous right after it.
+  const limit = o.rule.key === "cost_spike"
+    ? `(erlaubt: bis ${Number.isInteger(o.threshold) ? String(o.threshold) : o.threshold.toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}-mal)`
+    : `(erlaubt bis ${humanThreshold(o)})`;
+  const head = o.observed === null ? humanValue(o) : `${humanValue(o)} ${limit}`;
   return `${head}${note ? ` – ${note}` : ""}`;
 }
 
@@ -237,7 +242,7 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
       const gone = o.observed === null || o.observed === 0;
       const body = gone
         ? `${windowPhrase(o)} nicht mehr aufgetreten.`
-        : `${windowPhrase(o)} nur noch ${val(o)} aufgetreten und liegt damit wieder unter der Meldegrenze von ${lim(o)}.`;
+        : `${windowPhrase(o)} nur noch ${val(o)} aufgetreten; gemeldet wird ab ${lim(o)}.`;
       return `Der wiederholte Fehler ${AGENT_AT[o.agent]} ist ${body} Die Nutzer bekommen wieder ihre Antworten.`;
     },
   },
@@ -253,7 +258,7 @@ export const HUMAN: Record<RuleKey, HumanRule> = {
       const gone = o.observed === null || o.observed === 0;
       const body = gone
         ? `war ${windowPhrase(o)} durchgehend erreichbar.`
-        : `war ${windowPhrase(o)} nur noch ${val(o)} nicht erreichbar und liegt damit wieder unter der Meldegrenze von ${lim(o)}.`;
+        : `war ${windowPhrase(o)} nur noch ${val(o)} nicht erreichbar; gemeldet wird ab ${lim(o)}.`;
       return `Die Partner-Suche ${body} Nutzer bekommen wieder Studios und Kurse angezeigt.`;
     },
   },

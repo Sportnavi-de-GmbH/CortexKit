@@ -253,7 +253,7 @@ function Recipients({ settings }: { settings: AlertSettings }) {
   }
 
   return (
-    <Card title="Empfänger" kicker="E-Mail und Digest">
+    <Card title="Empfänger" kicker="E-Mail und Statusbericht">
       <div className="space-y-3">
         <label className="block text-xs font-medium text-(--fg-muted)" htmlFor="alert-recipients">
           E-Mail-Adressen (mit Komma getrennt)
@@ -269,7 +269,7 @@ function Recipients({ settings }: { settings: AlertSettings }) {
         <p className="text-xs text-(--fg-subtle)">Leer {"⇒"} Fallback ALERT_EMAIL_TO</p>
         <label className="flex items-center gap-2 text-sm text-(--fg)">
           <input type="checkbox" checked={digest} onChange={(ev) => setDigest(ev.target.checked)} className="h-4 w-4 accent-(--brand-green)" />
-          Digest an Teams
+          Statusbericht an Teams
         </label>
         <div className="flex items-center gap-2">
           <button type="button" className={BTN_PRIMARY} disabled={state === "saving"} onClick={() => void save()}>
