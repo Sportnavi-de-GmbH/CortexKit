@@ -154,10 +154,11 @@ export function buildStepTree(rows: StepRow[]): StepNode[] {
   return roots;
 }
 
-/** A trace still `running` after 5 minutes was never completed (invocation died). */
-export function traceIsAbandoned(t: { status: string; started_at: string }, now: number = Date.now()): boolean {
-  return t.status === "running" && now - Date.parse(t.started_at) > 5 * 60_000;
-}
+// traceIsAbandoned lives in components/monitoring/format.ts (client-safe: this
+// module pulls in the Supabase client and node:child_process via env.ts, which a
+// "use client" component such as TraceList must never import). Re-exported here
+// so server pages and tests keep their import.
+export { traceIsAbandoned } from "@/components/monitoring/format";
 
 const escapeLike = (s: string) => s.replace(/[%,()]/g, " ");
 

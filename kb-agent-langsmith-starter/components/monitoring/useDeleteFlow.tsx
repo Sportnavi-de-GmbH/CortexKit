@@ -1,11 +1,9 @@
 "use client";
 
-// components/monitoring/useDeleteFlow.ts — shared delete flow for TraceList,
+// components/monitoring/useDeleteFlow.tsx — shared delete flow for TraceList,
 // AlertFeed and the trace-detail page: owns the confirm dialog, calls the
 // DELETE endpoint, and refreshes the app after success (spec §5).
-// Plain .ts (not .tsx), so the dialog is built with createElement rather
-// than JSX syntax.
-import { createElement, useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { deleteBody } from "./selection";
@@ -15,7 +13,15 @@ const TITLE: Record<"trace" | "alert", string> = {
   alert: "Meldung löschen",
 };
 
-export function useDeleteFlow(opts: { endpoint: string; kind: "trace" | "alert"; onDone?: () => void }): {
+export function useDeleteFlow(opts: {
+  endpoint: string;
+  kind: "trace" | "alert";
+  onDone?: () => void;
+  /** Refresh the CURRENT route after success (default true). Pass false when the caller
+   *  navigates away in `onDone` — refreshing a route whose subject was just deleted renders
+   *  its not-found tree and swallows the push (measured on the trace detail page). */
+  refresh?: boolean;
+}): {
   busy: boolean;
   error: string | null;
   detail: string | null;
@@ -54,7 +60,7 @@ export function useDeleteFlow(opts: { endpoint: string; kind: "trace" | "alert";
       });
       if (r.ok) {
         setIds(null);
-        router.refresh();
+        if (opts.refresh !== false) router.refresh();
         window.dispatchEvent(new Event("navio:refresh"));
         opts.onDone?.();
       } else {
@@ -72,16 +78,18 @@ export function useDeleteFlow(opts: { endpoint: string; kind: "trace" | "alert";
   }, [ids, opts, router]);
 
   const n = ids?.length ?? 0;
-  const dialog: ReactNode = createElement(ConfirmDialog, {
-    open: ids !== null,
-    title: TITLE[opts.kind],
-    body: deleteBody(opts.kind, n),
-    busy,
-    error,
-    detail,
-    onConfirm: () => void run(),
-    onCancel: cancel,
-  });
+  const dialog: ReactNode = (
+    <ConfirmDialog
+      open={ids !== null}
+      title={TITLE[opts.kind]}
+      body={deleteBody(opts.kind, n)}
+      busy={busy}
+      error={error}
+      detail={detail}
+      onConfirm={() => void run()}
+      onCancel={cancel}
+    />
+  );
 
   return { busy, error, detail, confirm, dialog };
 }

@@ -91,7 +91,7 @@ export default async function OverviewPage({
         </div>
       )}
 
-      <TraceList items={list.items} nextCursor={list.nextCursor} params={sp} />
+      <TraceList items={list.items} nextCursor={list.nextCursor} params={sp.toString()} />
     </div>
   );
 }

@@ -40,6 +40,7 @@
   --accent-dim: #f4f9e6;
   --yellow: #ec6607;        /* === brand-orange */
   --red: #f43f5e;
+  --danger: #dc2640;        /* destructive BUTTON backgrounds only (white text >= 4.5:1); --red stays for icons/text/borders */
   --green: #95c11e;
   --shadow-card: 0 10px 40px rgba(26, 26, 26, 0.06);
   --shadow-card-hover: 0 24px 60px -20px rgba(26, 26, 26, 0.18);
@@ -74,6 +75,7 @@
   --text-dim: #b8b8c0;
   --text-faint: #8c8c94;
   --accent-dim: rgba(149, 193, 30, 0.16);
+  --danger: #e11d48;
 }
 
 /* The two named elevations from the design guidelines (§5) — soft, wide, low-opacity. */

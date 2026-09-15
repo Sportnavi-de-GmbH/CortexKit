@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { getSession, traceIsAbandoned } from "@/lib/monitoring/query";
 import { AnswerBox } from "@/components/monitoring/AnswerBox";
+import { DeleteTraceButton } from "@/components/monitoring/DeleteTraceButton";
 import { PageHeader } from "@/components/monitoring/PageHeader";
 import { AgentBadge, Card, KV, StatusPill, Thumb, fmtMs, fmtTime, fmtUsd } from "@/components/monitoring/ui";
 
@@ -48,6 +49,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
                   >
                     Open trace <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                   </Link>
+                  <DeleteTraceButton id={t.id} size="sm" afterDelete="refresh" />
                 </div>
               </div>
             </li>

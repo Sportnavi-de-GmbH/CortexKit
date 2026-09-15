@@ -24,3 +24,8 @@ export function fmtTime(iso: string): string {
 export function fmtInt(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : n.toLocaleString("en-US");
 }
+
+/** A trace still `running` after 5 minutes was never completed (invocation died). */
+export function traceIsAbandoned(t: { status: string; started_at: string }, now: number = Date.now()): boolean {
+  return t.status === "running" && now - Date.parse(t.started_at) > 5 * 60_000;
+}

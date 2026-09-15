@@ -4,9 +4,7 @@
 // Native <dialog> so focus-trap and Escape-to-close come for free; the
 // element is only ever shown via showModal()/close(), driven by `open`.
 import { useEffect, useRef } from "react";
-import { BTN_SECONDARY } from "./ui";
-
-const BTN_DANGER = "inline-flex h-10 items-center rounded-full bg-(--red) px-4 font-display text-sm font-semibold text-white";
+import { BTN_DANGER, BTN_SECONDARY } from "./ui";
 
 export function ConfirmDialog({
   open,

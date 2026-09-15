@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, Clock, DollarSign, ListOrdered, Wrench } from "lucide-react";
 import { getTrace, traceIsAbandoned } from "@/lib/monitoring/query";
 import { AnswerBox } from "@/components/monitoring/AnswerBox";
+import { DeleteTraceButton } from "@/components/monitoring/DeleteTraceButton";
 import { PageHeader } from "@/components/monitoring/PageHeader";
 import { Timeline } from "@/components/monitoring/Timeline";
 import { TraceSidebar } from "@/components/monitoring/TraceSidebar";
@@ -31,6 +32,7 @@ export default async function TracePage({ params }: { params: Promise<{ id: stri
           <>
             <AgentBadge agent={trace.agent} size="md" />
             <StatusPill status={trace.status} abandoned={traceIsAbandoned(trace)} size="md" />
+            <DeleteTraceButton id={trace.id} afterDelete="overview" />
           </>
         }
       />

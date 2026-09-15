@@ -18,6 +18,11 @@ export const BTN_PRIMARY =
   "inline-flex h-10 items-center justify-center gap-2 rounded-full bg-(--brand-green) px-5 font-display text-sm font-semibold text-(--ink) transition-transform duration-150 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100";
 export const BTN_SECONDARY =
   "inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-(--border) bg-(--surface) px-3.5 text-sm font-medium text-(--fg-muted) transition-colors duration-150 hover:border-(--border-strong) hover:text-(--fg)";
+/** Destructive actions — same shape as BTN_PRIMARY / a 36px sibling, on the --danger token. */
+export const BTN_DANGER =
+  "inline-flex h-10 items-center justify-center gap-2 rounded-full bg-(--danger) px-5 font-display text-sm font-semibold text-white transition-transform duration-150 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100";
+export const BTN_DANGER_SM =
+  "inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-(--danger) px-3.5 font-display text-sm font-semibold text-white transition-colors duration-150 hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60";
 export const BTN_GHOST =
   "inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-(--fg-muted) transition-colors duration-150 hover:bg-(--surface-muted) hover:text-(--fg)";
 /** Circular icon button, 36px visual / 44px hit area (touch rule). */

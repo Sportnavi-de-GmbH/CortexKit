@@ -2,10 +2,7 @@
 
 // Sticky bottom bar shown while at least one row is selected. Shared by
 // TraceList (trace rows) and AlertFeed (alert rows) — spec §5.
-import { BTN_GHOST, CARD } from "./ui";
-
-const BTN_DANGER_SM =
-  "inline-flex h-9 items-center gap-1.5 rounded-full bg-(--red) px-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60";
+import { BTN_DANGER_SM, BTN_GHOST, CARD } from "./ui";
 
 export function DeleteBar({
   count,
