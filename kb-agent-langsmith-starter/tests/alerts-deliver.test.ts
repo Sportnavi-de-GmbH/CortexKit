@@ -78,7 +78,7 @@ describe("messages", () => {
     const m = digestMessage([spike], [], "Lage.", URL);
     expect(m.facts?.[0].value).toContain("Noch nicht genug Vergleichstage gesammelt (0 von 7)");
     expect(m.facts?.[0].value).not.toMatch(/warmup/);
-    const hot = digestMessage([{ ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, observed: 3.2, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }], [], "Lage.", URL);
+    const hot = digestMessage([{ ...obs, rule: { ...rule, key: "cost_spike" as const, threshold: 3 }, observed: 3.2, threshold: 3, note: "24h 3.20 $ vs Basis 1.00 $/Tag" }], [], "Lage.", URL);
     expect(hot.facts?.[0].value).toContain("3,2-mal so hoch wie an einem normalen Tag");
     expect(hot.facts?.[0].value).toContain("(erlaubt: bis 3-mal)"); // short limit: the value just set the unit
     expect(hot.facts?.[0].value).not.toMatch(/erlaubt bis 3-mal so hoch/);
