@@ -39,7 +39,10 @@ export default async function OverviewPage({
         description={`What the Navio agents did in the ${RANGE_LABEL[range]} — ${agentLabel}. Click an execution to see every step.`}
       />
 
-      <BreachBanner />
+      {/* Streams in: a slow or failing alert-state query must not hold up the KPIs. */}
+      <Suspense fallback={null}>
+        <BreachBanner />
+      </Suspense>
 
       <Suspense fallback={null}>
         <TraceFilters />
