@@ -19,16 +19,23 @@ export function HeaderNav() {
   useEffect(() => {
     if (onLogin) return;
     let live = true;
-    fetch("/api/monitoring/alerts/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((b: { count?: number } | null) => {
-        if (live && b && typeof b.count === "number") setBreached(b.count);
-      })
-      .catch(() => {
-        /* the dot is a nicety; a failed status call must not break the header */
-      });
+    function refresh() {
+      fetch("/api/monitoring/alerts/status")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((b: { count?: number } | null) => {
+          if (live && b && typeof b.count === "number") setBreached(b.count);
+        })
+        .catch(() => {
+          /* the dot is a nicety; a failed status call must not break the header */
+        });
+    }
+    refresh();
+    // Delete flows dispatch this after router.refresh() so a removed alert
+    // clears the dot without waiting for the next navigation.
+    window.addEventListener("navio:refresh", refresh);
     return () => {
       live = false;
+      window.removeEventListener("navio:refresh", refresh);
     };
   }, [onLogin, pathname]);
 
