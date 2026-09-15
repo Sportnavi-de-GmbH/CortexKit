@@ -2,17 +2,22 @@
 //
 //   npm run monitoring:verify                  # FAQ + partner turn, one vote each, read back from Supabase
 //   npm run monitoring:verify -- --expect-failure   # point EVE_HOST at a widget with a broken Azure key first
+//   npm run monitoring:verify -- --only delete       # skip the FAQ/partner turns; only the delete-cascade section
 //
-// Env: EVE_HOST (default http://127.0.0.1:3001), MONITORING_SUPABASE_URL/_SERVICE_ROLE_KEY (from .env.local).
-// Exit 1 on any failed check. Mirrors scripts/verify-langfuse.ts: the only honest
-// check READS the rows back — a 2xx from the writer proves nothing.
+// Env: EVE_HOST (default http://127.0.0.1:3001), MONITORING_SUPABASE_URL/_SERVICE_ROLE_KEY,
+// MONITORING_PASSWORD (from .env.local). Exit 1 on any failed check. Mirrors scripts/verify-langfuse.ts:
+// the only honest check READS the rows back — a 2xx from the writer proves nothing.
 import "../lib/load-env.ts";
 
+import { randomUUID } from "node:crypto";
 import { Client } from "eve/client";
 import { supabaseAdmin } from "../lib/monitoring/store.ts";
 
 const host = process.env.EVE_HOST ?? "http://127.0.0.1:3001";
 const expectFailure = process.argv.includes("--expect-failure");
+const onlyIdx = process.argv.indexOf("--only");
+const only = onlyIdx !== -1 ? process.argv[onlyIdx + 1] : undefined;
+const runTurns = only !== "delete";
 const db = supabaseAdmin();
 if (!db) {
   console.error("MONITORING_SUPABASE_URL / MONITORING_SUPABASE_SERVICE_ROLE_KEY not set — nothing to verify against.");
@@ -26,6 +31,145 @@ function check(label: string, ok: boolean, detail = ""): void {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const headers = { "content-type": "application/json", origin: host };
+
+// ------------------------------------------------------------------ delete
+// Seeds a throwaway session + 2 traces (+ one step/error/feedback on the first),
+// logs into the dashboard API, deletes trace 1 singly then trace 2 in bulk,
+// asserts the cascade (steps/errors/feedback gone, session turn_count then gone
+// entirely), then seeds and deletes one alert_events row. Cleans up anything of
+// its own left behind, even on failure.
+async function runDeleteSection(): Promise<void> {
+  const sessionId = `verify-delete-${Date.now()}`;
+  const trace1 = randomUUID();
+  const trace2 = randomUUID();
+  const step1 = randomUUID();
+  const runSlot = `verify-delete:${Date.now()}`;
+  let alertEventId: string | undefined;
+  let cookie = "";
+
+  try {
+    // ---- seed
+    const { error: sessErr } = await db!
+      .from("agent_sessions")
+      .upsert({ id: sessionId, agent: "faq", turn_count: 2 });
+    check("delete: seed session", !sessErr, sessErr?.message ?? "");
+
+    const now = new Date().toISOString();
+    const { error: tracesErr } = await db!.from("traces").insert([
+      {
+        id: trace1, session_id: sessionId, agent: "faq", turn_id: "turn_0", turn_index: 0,
+        status: "completed", started_at: now, ended_at: now, duration_ms: 500,
+        user_input: "verify delete 1", final_output: "ok", metadata: { env: "development", verify: true },
+      },
+      {
+        id: trace2, session_id: sessionId, agent: "faq", turn_id: "turn_1", turn_index: 1,
+        status: "completed", started_at: now, ended_at: now, duration_ms: 500,
+        user_input: "verify delete 2", final_output: "ok", metadata: { env: "development", verify: true },
+      },
+    ]);
+    check("delete: seed 2 traces", !tracesErr, tracesErr?.message ?? "");
+
+    const { error: stepErr } = await db!.from("trace_steps").insert({
+      id: step1, trace_id: trace1, step_key: "verify-step", sequence: 0, kind: "response",
+      name: "verify-step", title: "Verify step", status: "ok", input: { a: 1 }, output: { b: 2 },
+    });
+    check("delete: seed 1 step", !stepErr, stepErr?.message ?? "");
+
+    const { error: errErr } = await db!.from("errors").insert({
+      trace_id: trace1, step_id: step1, level: "warning", type: "unclassified", message: "verify",
+    });
+    check("delete: seed 1 error", !errErr, errErr?.message ?? "");
+
+    const { error: fbErr } = await db!.from("feedback").insert({
+      trace_id: trace1, session_id: sessionId, turn_id: "turn_0", agent: "faq", thumb: "up", epoch: 0,
+    });
+    check("delete: seed 1 feedback", !fbErr, fbErr?.message ?? "");
+
+    // ---- log in to the dashboard API
+    const password = process.env.MONITORING_PASSWORD ?? "";
+    check("delete: MONITORING_PASSWORD set", password.length > 0);
+    const loginRes = await fetch(`${host}/api/monitoring/auth`, {
+      method: "POST", headers, body: JSON.stringify({ password }),
+    });
+    check("delete: login accepted", loginRes.ok, `HTTP ${loginRes.status}`);
+    const setCookie = loginRes.headers.get("set-cookie") ?? "";
+    cookie = setCookie.split(";")[0] ?? "";
+    check("delete: session cookie received", cookie.length > 0);
+    const authHeaders = { ...headers, cookie };
+
+    // ---- delete trace 1 singly
+    const del1Res = await fetch(`${host}/api/monitoring/traces/${trace1}`, { method: "DELETE", headers: authHeaders });
+    const del1Body = (await del1Res.json().catch(() => ({}))) as Record<string, unknown>;
+    check("delete: single trace 200", del1Res.ok, `HTTP ${del1Res.status}`);
+    check("delete: single trace deleted:1", del1Body.deleted === 1, JSON.stringify(del1Body));
+    check("delete: single trace feedback:1", del1Body.feedback === 1, JSON.stringify(del1Body));
+    check(
+      "delete: single trace reevaluate started|skipped|failed",
+      del1Body.reevaluate === "started" || del1Body.reevaluate === "skipped" || del1Body.reevaluate === "failed",
+      String(del1Body.reevaluate),
+    );
+
+    await sleep(500);
+    const { data: sessAfter1 } = await db!.from("agent_sessions").select("turn_count").eq("id", sessionId).maybeSingle();
+    check("delete: session turn_count 1 after first delete", sessAfter1?.turn_count === 1, String(sessAfter1?.turn_count));
+    const { data: stepsAfter1 } = await db!.from("trace_steps").select("id").eq("trace_id", trace1);
+    check("delete: steps gone for trace 1", (stepsAfter1 ?? []).length === 0);
+    const { data: errsAfter1 } = await db!.from("errors").select("id").eq("trace_id", trace1);
+    check("delete: errors gone for trace 1", (errsAfter1 ?? []).length === 0);
+    const { data: fbAfter1 } = await db!.from("feedback").select("id").eq("trace_id", trace1);
+    check("delete: feedback gone for trace 1", (fbAfter1 ?? []).length === 0);
+
+    // ---- delete trace 2 in bulk
+    const del2Res = await fetch(`${host}/api/monitoring/traces`, {
+      method: "DELETE", headers: authHeaders, body: JSON.stringify({ ids: [trace2] }),
+    });
+    const del2Body = (await del2Res.json().catch(() => ({}))) as Record<string, unknown>;
+    check("delete: bulk trace 200", del2Res.ok, `HTTP ${del2Res.status}`);
+    check("delete: bulk trace sessions_deleted:1", del2Body.sessions_deleted === 1, JSON.stringify(del2Body));
+
+    await sleep(500);
+    const { data: sessAfter2 } = await db!.from("agent_sessions").select("id").eq("id", sessionId).maybeSingle();
+    check("delete: session gone after second delete", sessAfter2 === null || sessAfter2 === undefined);
+
+    // ---- alert event: seed + delete
+    const { error: aeErr } = await db!.from("alert_events").insert({
+      kind: "test", rule_key: "failure_rate", agent: "faq", narrative: "verify", narrative_source: "template",
+      run_slot: runSlot,
+    });
+    check("delete: seed alert event", !aeErr, aeErr?.message ?? "");
+    const { data: aeRow } = await db!.from("alert_events").select("id").eq("run_slot", runSlot).maybeSingle();
+    alertEventId = (aeRow as { id: string } | null)?.id;
+    check("delete: alert event seeded and readable", Boolean(alertEventId));
+
+    if (alertEventId) {
+      const delAeRes = await fetch(`${host}/api/monitoring/alerts/events/${alertEventId}`, {
+        method: "DELETE", headers: authHeaders,
+      });
+      const delAeBody = (await delAeRes.json().catch(() => ({}))) as Record<string, unknown>;
+      check("delete: alert event 200", delAeRes.ok, `HTTP ${delAeRes.status}`);
+      check("delete: alert event deleted:1", delAeBody.deleted === 1, JSON.stringify(delAeBody));
+      const { data: aeAfter } = await db!.from("alert_events").select("id").eq("id", alertEventId).maybeSingle();
+      check("delete: alert event gone", aeAfter === null || aeAfter === undefined);
+    }
+  } finally {
+    // Never trust the checks above to have cleaned up — remove anything of ours that survived.
+    await db!.from("feedback").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
+    await db!.from("errors").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
+    await db!.from("trace_steps").delete().or(`trace_id.eq.${trace1},trace_id.eq.${trace2}`);
+    await db!.from("traces").delete().in("id", [trace1, trace2]);
+    await db!.from("agent_sessions").delete().eq("id", sessionId);
+    await db!.from("alert_events").delete().eq("run_slot", runSlot);
+    if (cookie) {
+      await fetch(`${host}/api/monitoring/auth`, { method: "DELETE", headers: { cookie } }).catch(() => undefined);
+    }
+  }
+}
+
+if (!runTurns) {
+  await runDeleteSection();
+  console.log(`\n${failures === 0 ? "all checks passed" : `${failures} check(s) failed`}`);
+  process.exit(failures ? 1 : 0);
+}
 
 interface TraceRow {
   id: string; status: string; step_count: number; duration_ms: number | null; final_output: string | null;
@@ -125,6 +269,9 @@ if (partner) {
   check("partner: final output linked", Boolean(partner.final_output && partner.final_output.length > 0));
   check("partner: feedback linked to the trace", partner.feedback_thumb === "up", String(partner.feedback_thumb));
 }
+
+// ------------------------------------------------------------------ delete
+await runDeleteSection();
 
 console.log(`\n${failures === 0 ? "all checks passed" : `${failures} check(s) failed`}`);
 process.exit(failures ? 1 : 0);

@@ -106,7 +106,10 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
 
    All blank ⇒ every monitoring surface is a silent no-op; a fresh clone runs credential-free.
 3. **V3** needs nothing new — the usage surfacing is part of its code.
-4. **Check:** with the widget (`:3001`) and V3 (`:3008`) running, `npm run monitoring:verify` → 23 ✓.
+4. **Check:** with the widget (`:3001`) and V3 (`:3008`) running, `npm run monitoring:verify` → 47 ✓
+   (23 turn/read-back checks + 24 delete-cascade checks). With only the widget up, or to check the
+   delete cascade on its own, `npm run monitoring:verify -- --only delete` skips the FAQ/partner
+   turns and runs just that section.
 
 ---
 
@@ -137,6 +140,18 @@ clarification; stage `warnings`, `error`, `config`, `counts`, `filters` are copi
   senden"** (one test card + one test email, no rule evaluation). The overview page shows a red
   banner and `HeaderNav` a red dot when any rule is currently breached.
 - **Theme:** 🌙/☀️ in the header (remembered per browser). Works at 400 px width.
+- **Deleting** (added 2026-09-15, spec `2026-09-15-navio-monitoring-delete-design.md`): a checkbox
+  column and per-row trash icon on the trace list, the session view and the alerts feed, plus a
+  "Löschen" button on the trace detail page. Selecting rows shows a sticky "N ausgewählt · Löschen"
+  bar; one confirm dialog names what goes and there is no undo. Deleting a trace cascades to its
+  `trace_steps` and `errors` (FK) and explicitly removes its `feedback` and `events` rows; the
+  owning session's `turn_count`/`last_seen_at` is recomputed and the session itself is deleted if
+  that was its last trace. Deleting an alert event removes only that row — `alert_state` (the
+  current breach/ok truth) is left untouched, since the event is history, not state. After any
+  delete the dashboard re-renders (`router.refresh()` + a `navio:refresh` event so the header's
+  breach indicator updates) and the route kicks off a background alert re-evaluation
+  (`runEvaluation({ slot: "manual", writeDigest: false })`, capped at 5 s) so a delete that
+  resolves a breach reflects immediately — this never writes a status report or sends a digest.
 
 ---
 
@@ -155,10 +170,25 @@ has no V3 counterpart; its failure is now an `events` row `feedback.partner_forw
 
 | Command | Purpose |
 |---|---|
-| `npm run monitoring:verify` | one FAQ + one partner turn through the running widget, a vote on each, then reads Supabase back (23 checks); `--expect-failure` for the error path |
+| `npm run monitoring:verify` | one FAQ + one partner turn through the running widget, a vote on each, then reads Supabase back (23 checks), then the delete section below (24 checks); `--expect-failure` for the error path; `--only delete` runs just the delete section (no FAQ/partner turns needed) |
 | `npm run monitoring:reconcile` | marks `running` > 5 min as abandoned (+ event), links leftover votes, refreshes `feedback_thumb`; idempotent, schedule it |
 | `npm run alerts:verify` | against a running widget + the real monitoring Supabase: seeds a failure-rate breach, evaluates, asserts `fired` + a Teams send, clears it, asserts `recovered`, asserts a third run is a no-op and never re-sends the digest, cleans up its rows. Posts one real red + one real green card to the Navio Alerts Teams channel — see `docs/MONITORING-ALERTING.md` § "Supabase rules" |
 | `npm test` / `npm run typecheck` | 15 monitoring test files are part of the suite |
+
+**Delete API** (spec `2026-09-15-navio-monitoring-delete-design.md` §4, cookie-gated like the rest
+of the dashboard API):
+
+| Route | Body | Response |
+|---|---|---|
+| `DELETE /api/monitoring/traces` | `{ ids: uuid[] }` (1–200) | `{ deleted, feedback, events, sessions_deleted, reevaluate: "started" \| "skipped" \| "failed" }` |
+| `DELETE /api/monitoring/traces/:id` | — | same shape, `deleted` is 0 or 1 |
+| `DELETE /api/monitoring/alerts/events` | `{ ids: uuid[] }` (1–200) | `{ deleted }` |
+| `DELETE /api/monitoring/alerts/events/:id` | — | `{ deleted: 0 \| 1 }` |
+
+400 on invalid/empty/too-many ids, 404 when the dashboard is disabled, 503 when Supabase is
+unconfigured, 500 with `{ detail }` on an RPC error. Backed by `monitoring_delete_traces` /
+`monitoring_delete_alert_events` (`supabase/migrations/20260915000400_monitoring_delete.sql`) and
+`lib/monitoring/delete.ts`.
 
 **Alert scheduler (Supabase `pg_cron`)** — full detail in `docs/MONITORING-ALERTING.md` §
 "Supabase rules": `select jobname from cron.job;` lists the active jobs. To unschedule/reschedule
