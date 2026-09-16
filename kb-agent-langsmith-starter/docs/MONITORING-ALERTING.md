@@ -576,6 +576,17 @@ A `status_code = 200` with a JSON body containing `"ok":true` is the honest proo
 was reached and evaluated; a `pg_cron` "succeeded" row alone only proves the SQL function
 didn't raise.
 
+**Housekeeping (2026-09-16).** `pg_cron` never prunes `cron.job_run_details` (the 5-minute test
+cadence alone added ~288 rows/day). Migration `20260916000100_cron_history_cleanup.sql`
+(applied 2026-09-16) schedules `navio-cron-history-cleanup` — Sundays 03:00 UTC, deletes rows
+older than 30 days. `net._http_response` needs nothing: pg_net expires it after `pg_net.ttl`
+(6 h), which is also why only ~72 responses are ever visible for the 5-minute job.
+
+**Go-live state (2026-09-16).** `ALERT_EVALUATE_SECRET` is set on `navio-widget` for
+Production and for Preview (branch `alerting`), equal to the Vault secret (verified by sha256,
+never by value). The route reaches production with PR #2 (`alerting` → `main`). The Vault URL
+was verified to be exactly the production evaluate URL.
+
 ### Env / Vault summary
 
 | Name | Where | Purpose |
