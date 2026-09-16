@@ -17,7 +17,8 @@ export async function reformulate(input: { query: string }, ctx: StageContext): 
   const warnings: string[] = [];
   try {
     const signal = AbortSignal.any([ctx.signal, timeoutSignal(ctx.config.modelTimeoutMs)]);
-    let text = (await ctx.deps.llm.reformulate(input.query, { maxChars: ctx.config.maxRetrievalQueryChars, signal })).trim();
+    const r = await ctx.deps.llm.reformulate(input.query, { maxChars: ctx.config.maxRetrievalQueryChars, signal });
+    let text = r.text.trim();
     if (!text) {
       warnings.push("Reformulation returned an empty query; using the original question.");
       return { output: identity, config, warnings };
@@ -31,6 +32,8 @@ export async function reformulate(input: { query: string }, ctx: StageContext): 
       config,
       counts: { originalChars: input.query.length, retrievalChars: text.length },
       warnings,
+      ...(r.usage ? { usage: r.usage } : {}),
+      model: ctx.deps.llm.modelName,
     };
   } catch (e) {
     warnings.push(`Reformulation failed (${(e as Error).message}); using the original question.`);

@@ -89,6 +89,15 @@ describe("cross-channel consistency", () => {
     expect(subject).toContain(msg.severityLabel);
   });
 
+  it("keeps the English relay chrome: ISO footer last, no technical block", () => {
+    const card = formatTeamsCard(msg) as { attachments: { content: { body: { type: string; text?: string }[] } }[] };
+    const body = card.attachments[0].content.body;
+    const last = body[body.length - 1];
+    expect(last.text).toBe(`${msg.timestampIso} · window ${msg.window}`);
+    expect(body.some((b) => b.text === "Für das Technik-Team")).toBe(false);
+    expect(formatEmailText(msg)).not.toContain("Für das Technik-Team");
+  });
+
   it("HTML output escapes untrusted text from the Langfuse payload", () => {
     const hostile = toAlertMessage(
       LangfuseWebhookSchema.parse({
@@ -102,5 +111,12 @@ describe("cross-channel consistency", () => {
     );
     expect(formatEmailHtml(hostile)).not.toContain("<img");
     expect(formatEmailHtml(hostile)).toContain("&lt;img");
+  });
+
+  it("renders facts as a FactSet and a custom link label", () => {
+    const card = formatTeamsCard({ ...msg, facts: [{ title: "Wert", value: "15 %" }], linkLabel: "Dashboard öffnen" }) as { attachments: { content: { body: Record<string, unknown>[] } }[] };
+    const body = card.attachments[0].content.body;
+    expect(body.find((b) => b.type === "FactSet")).toMatchObject({ facts: [{ title: "Wert", value: "15 %" }] });
+    expect(JSON.stringify(body)).toContain("[Dashboard öffnen](");
   });
 });

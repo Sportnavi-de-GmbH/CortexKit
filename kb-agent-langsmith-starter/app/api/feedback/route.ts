@@ -23,6 +23,7 @@ import {
   type FeedbackTarget,
 } from "@/lib/feedback";
 import { feedbackRefs } from "@/lib/langfuse";
+import { noteEvent, recordFeedback } from "@/lib/monitoring/feedback";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,10 +85,11 @@ async function resolveTarget(sessionId: string, turnId: string): Promise<Feedbac
  * talks to the partner agent through this app's proxy, so the session and turn
  * it reports are already the partner service's own.
  */
-async function forwardToPartner(body: unknown): Promise<Response> {
+async function forwardToPartner(body: FeedbackRequest): Promise<Response> {
   const raw = process.env.PARTNER_AGENT_HOST?.trim();
   if (!raw) {
     // Same posture as the proxy: unconfigured partner host is a 503, not a crash.
+    await noteEvent("feedback.partner_forward_failed", { reason: "unconfigured" }, body.sessionId);
     return Response.json({ detail: "Partner agent not configured." }, { status: 503 });
   }
   const host = (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).replace(/\/+$/, "");
@@ -104,6 +106,7 @@ async function forwardToPartner(body: unknown): Promise<Response> {
     });
     if (!res.ok) {
       console.error("FEEDBACK forward failed:", { status: res.status });
+      await noteEvent("feedback.partner_forward_failed", { status: res.status, turn_id: body.turnId }, body.sessionId);
       return Response.json({ detail: "Feedback could not be recorded." }, { status: 502 });
     }
     return Response.json(await res.json(), { status: 200 });
@@ -111,6 +114,7 @@ async function forwardToPartner(body: unknown): Promise<Response> {
     console.error("FEEDBACK forward failed:", {
       detail: err instanceof Error ? err.message : String(err),
     });
+    await noteEvent("feedback.partner_forward_failed", { reason: "fetch", turn_id: body.turnId }, body.sessionId);
     return Response.json({ detail: "Feedback could not be recorded." }, { status: 502 });
   }
 }
@@ -129,6 +133,12 @@ export async function POST(req: Request): Promise<Response> {
   if (rateLimited(parsed.sessionId)) {
     return Response.json({ detail: "Too many feedback submissions." }, { status: 429 });
   }
+
+  // Supabase monitoring (both surfaces) — additive, never throws, never changes
+  // the response. This is the first place a vote on a V3 partner answer is
+  // persisted at all: the Langfuse forward below has no V3 counterpart.
+  const monitored = await recordFeedback(parsed);
+  if (monitored) console.info("MONITORING feedback:", { linked: monitored.linked, surface: parsed.surface ?? "faq" });
 
   // Partner answers are traced by service 2, in its own Langfuse project, and
   // only it can resolve their trace ids — see forwardToPartner().

@@ -37,6 +37,24 @@ export interface WorkflowForwardDeps {
   fetchImpl?: typeof fetch;
   /** Upstream deadline; a V3 run is 10–45 s. */
   timeoutMs?: number;
+  /** Monitoring observer (lib/monitoring/partner-capture.ts). Awaited, but a
+   *  throw or a slow write never changes the response. */
+  observe?: (o: WorkflowObservation) => Promise<void> | void;
+}
+
+/** Everything the monitoring layer needs about one adapter round-trip. */
+export interface WorkflowObservation {
+  sessionId?: string;
+  turnId?: string;
+  message: string;
+  origin: string | null;
+  startedAt: string;
+  /** Upstream HTTP status; 0 when the fetch itself failed. */
+  status: number;
+  /** The FULL WorkflowTrace when upstream returned parseable JSON. */
+  trace?: unknown;
+  /** Short diagnostic when there is no trace (fetch error, non-JSON body). */
+  detail?: string;
 }
 
 const UNAVAILABLE = "Partner agent unavailable.";
@@ -111,7 +129,7 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
     return json({ detail: "Partner agent misconfigured." }, 503);
   }
 
-  let body: { message?: unknown; resume?: unknown };
+  let body: { message?: unknown; resume?: unknown; sessionId?: unknown; turnId?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -119,6 +137,19 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
   }
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (!message) return json({ detail: "message is required." }, 400);
+  // Monitoring ids from the widget. Read here, NEVER forwarded — V3's request
+  // schema stays untouched.
+  const sessionId = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim().slice(0, 200) : undefined;
+  const turnId = typeof body.turnId === "string" && /^turn_\d+$/.test(body.turnId) ? body.turnId : undefined;
+  const startedAt = new Date().toISOString();
+  const observe = async (o: Pick<WorkflowObservation, "status" | "trace" | "detail">): Promise<void> => {
+    if (!deps.observe) return;
+    try {
+      await deps.observe({ sessionId, turnId, message, origin: req.headers.get("origin"), startedAt, ...o });
+    } catch (e) {
+      console.error("[partner-workflow] observer failed:", { error: e instanceof Error ? e.name : "unknown" });
+    }
+  };
 
   const headers = new Headers({ "content-type": "application/json" });
   const secret = (deps.workflowSecret ?? process.env.PARTNER_WORKFLOW_SECRET ?? deps.secret ?? process.env.PARTNER_PROXY_SECRET)?.trim();
@@ -137,11 +168,13 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
     const cause = (e as Error & { cause?: Error & { code?: string } }).cause;
     const causeText = cause ? ` (${cause.code ?? ""} ${cause.message})`.trimEnd() : "";
     console.error(`[partner-workflow] fetch to ${target} failed: ${(e as Error).message}${causeText}`);
+    await observe({ status: 0, detail: `fetch failed: ${(e as Error).message}${causeText}` });
     return json({ detail: UNAVAILABLE }, 502);
   }
 
   if (!upstream.ok) {
     console.error(`[partner-workflow] upstream ${upstream.status} from ${target}`);
+    await observe({ status: upstream.status, detail: (await upstream.text().catch(() => "")).slice(0, 500) });
     return json({ detail: UNAVAILABLE }, 502);
   }
   let parsed: unknown;
@@ -149,16 +182,19 @@ export async function forwardToWorkflow(req: Request, deps: WorkflowForwardDeps 
     parsed = await upstream.json();
   } catch {
     console.error(`[partner-workflow] upstream returned non-JSON from ${target}`);
+    await observe({ status: upstream.status, detail: "upstream returned non-JSON" });
     return json({ detail: UNAVAILABLE }, 502);
   }
   const lite = projectTrace(parsed);
   if (!lite) {
     console.error(`[partner-workflow] upstream JSON is not a WorkflowTrace`);
+    await observe({ status: upstream.status, detail: "upstream JSON is not a WorkflowTrace" });
     return json({ detail: UNAVAILABLE }, 502);
   }
   if (lite.status === "failed" || lite.status === "partial") {
     const msg = isRec(parsed) && isRec(parsed.error) ? String(parsed.error.message) : "(no message)";
     console.error(`[partner-workflow] run ${lite.runId} ${lite.status}: ${msg}`);
   }
+  await observe({ status: upstream.status, trace: parsed });
   return json(lite, 200);
 }

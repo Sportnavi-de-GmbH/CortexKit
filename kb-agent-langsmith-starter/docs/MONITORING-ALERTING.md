@@ -301,9 +301,362 @@ whole chain, not just the relay)
 6. **Immediately restore the recorded threshold.** Repeat once per project (FAQ, Partner,
    Orchestrator) after that project's Monitors + Automation are configured.
 
+## Supabase rules (2026-09-15)
+
+A **second, independent alerting path** lives next to the Langfuse-Monitors relay above.
+Spec: `docs/superpowers/specs/2026-09-15-navio-alerting-design.md`. It does not read Langfuse
+at all — it evaluates threshold rules directly against the monitoring Supabase project's own
+`traces` / `errors` / `feedback` data (the tables behind `/monitoring`, spec
+`2026-09-14-navio-monitoring-design.md`), on a schedule, and pushes the result to the same
+Teams channel and the same Microsoft Graph mailbox. The two paths can coexist: this one covers
+Navio's two Supabase-backed agents (FAQ, Partner); the Langfuse relay above still covers all
+three Langfuse projects including the Orchestrator, which this path cannot see (it never
+writes to the monitoring Supabase).
+
+### What runs where
+
+```
+Supabase (monitoring project)
+  pg_cron  'navio-alerts-morning' / 'navio-alerts-afternoon'  (05:00 / 13:00 UTC)
+       │  select monitoring_call_evaluate('scheduled')
+       ▼
+  monitoring_call_evaluate()  — reads Vault secrets alert_evaluate_url / alert_evaluate_secret
+       │  pg_net.http_post(url, body={slot}, Authorization: Bearer <secret>)
+       ▼
+navio-widget (Vercel)
+  POST /api/monitoring/alerts/evaluate   (bearer auth; unset secret ⇒ 404, wrong ⇒ 401)
+       │  lib/monitoring/alerts/evaluate.ts
+       ├─ rules.ts     — PURE: decides ok/breached/skipped per rule from the metrics. No I/O,
+       │                 no LLM. This is the only place that decides anything.
+       ├─ state.ts     — diffs against alert_state → transitions (fired/recovered) + run_slot
+       ├─ narrate.ts   — LLM (Azure, 8 s timeout) phrases the decision in German; on any
+       │                 failure/timeout/empty/>1200 chars, a deterministic template is used
+       │                 instead (narrative_source records which)
+       └─ deliver.ts   — builds the Adaptive Card / email from the SAME AlertMessage shape as
+                          the Langfuse relay (`lib/monitoring/format-alert.ts`), sends via the
+                          EXISTING senders `lib/monitoring/teams.ts` and
+                          `lib/monitoring/graph-mail.ts` — no Resend, no SMTP; email is
+                          Microsoft Graph `sendMail`, same `navio-chatbot` Azure AD app as above.
+```
+
+**Rules decide, the LLM only phrases.** `rules.ts` is pure and untouched by the model; the
+honesty invariant that keeps the message text from ever inventing a number lives there, not
+in the prompt. `narrate.ts`'s system prompt explicitly forbids using any number not present in
+the JSON it's given, but the belt-and-braces guarantee is structural: the technical fact list
+(`Regel` / `Agent` / `Wert` / `Grenze` / `Fenster` / `Turns`) is built directly from the
+observation in `deliver.ts`, never from the narrative text — a bad sentence can never hide the
+real value. **A dry run (`dryRun:true`) still calls the LLM** — narration happens before the
+dry-run branch returns, so a `/monitoring/alerts` preview shows the real wording, not a
+placeholder; it just skips writing `alert_state`/`alert_events` and skips delivery.
+
+### What a message says — the 4-part contract (2026-09-15)
+
+The readers are the Sportnavi team, not engineers. **Every text a human reads — Teams card,
+email, feed row, run report — states four things in this order, in plain German, with no rule
+key, agent id, error code, stack trace or metric abbreviation:**
+
+1. **Was ist passiert** — what happened, with the numbers already formatted.
+2. **Warum** — only when the data supports it. `causeOfErrorType()` knows exactly three, and
+   these are the sentences it writes, verbatim:
+   * rate limit / overload / `429` → "Die meisten Fehler kamen vom KI-Anbieter, der Anfragen
+     abgewiesen hat, weil er zeitweise überlastet war."
+   * timeout → "Die Antworten kamen zu spät: der Dienst hat länger gebraucht, als er darf."
+   * unavailable / upstream → "Die Partner-Suche war in dieser Zeit nicht erreichbar." **only
+     when the observation is the partner agent's**; for the FAQ agent or for both at once the
+     data does not say which service it was, so it reads "Ein benötigter Dienst war in dieser
+     Zeit nicht erreichbar."
+
+   `partner_upstream` always states "Der Dienst hinter der Partner-Suche hat in dieser Zeit
+   nicht geantwortet." Otherwise the sentence is literally "Die Ursache ist noch nicht bekannt."
+3. **Was es für die Nutzer bedeutet** — or, for a recovery, that it works again.
+4. **Was jetzt zu tun ist** — one step a non-technical person can do, always the last
+   sentence; a recovery ends with "Keine Aktion nötig."
+
+The wording per rule lives in `lib/monitoring/alerts/copy.ts` (`HUMAN[key].what/why/impact/
+next/recovered` plus the card headlines); `narrate.ts` joins those four sentences into the
+deterministic template **and** hands them to the model as `draft`, so the LLM rephrases a
+correct text instead of inventing one. `humanRuleName()` gives "Fehlerrate des FAQ-Assistenten"
+and `humanErrored()` turns `failure_rate·faq` into "Fehlerrate (FAQ-Assistent)".
+
+**The technical detail is not deleted, it is moved.** The Teams card and the email carry a
+second FactSet under a small **"Für das Technik-Team"** label (`AlertMessage.techFacts` /
+`techLabel`, rendered by `lib/monitoring/format-alert.ts`) with rule key, agent, raw value,
+threshold, window and sample count. In the dashboard the same data sits behind a collapsed
+**"Technische Details"** toggle on each feed row (plus run slot, narrative source and the raw
+delivery strings such as `failed: HTTP 403: …`); the visible delivery chips say
+"Zugestellt" / "Nicht gesendet (nicht eingerichtet)" / "Nicht gesendet (Zeit abgelaufen)" /
+"Zustellung fehlgeschlagen" (`humanDelivery()` in `components/monitoring/alerts-format.ts`).
+The Regeln tab's observation table stays technical on purpose — it *is* the technical view —
+but its rows are labelled with the human rule name.
+
+**No number the data does not support, and no engineer note.** `rules.ts` writes diagnostic
+notes ("zu wenig Daten (0 < 10)", "Aufwärmphase (warmup): 0/7 Tage Basis", "Fenster nicht
+geladen", "24h 3.20 $ vs Basis 1.00 $/Tag"); `humanNote()` in `copy.ts` translates those four
+into plain German ("Zu wenige Anfragen im Zeitraum, um das zuverlässig zu beurteilen", "Noch
+nicht genug Vergleichstage gesammelt (0 von 7)", "Die Daten konnten nicht geladen werden",
+"Heute 3,20 $, an einem normalen Tag 1,00 $") and returns `null` for anything it does not
+recognise — an unknown note is dropped, never leaked. Only the humanised note goes into the
+digest line and into the model's JSON; the raw one stays in the technical view (the Regeln
+tab's "Hinweis" column). The `cost_spike` multiplier is phrased "3,2-mal so hoch wie an einem
+normalen Tag" everywhere a human reads it (`times()`), never "3,2× Basis"; the **999
+sentinel** (baseline was zero) becomes "deutlich mehr als an einem normalen Tag" and is never
+printed as a number, and a skipped rule reads "nicht gemessen" instead of a value it never
+measured. Verbs agree with the subject, so an `agent: "total"` observation reads "Beide
+Assistenten haben … liegen …", not "hat … liegt". And because a prompt is not a guarantee,
+`narrate.ts` runs the model's answer through a jargon regex (rule keys, `p95`, `HTTP 4xx`,
+`warmup`, `a·faq`, `0 < 10`) and falls back to the template with `source: "template"` if any
+of it appears.
+
+One real card, `failure_rate` breaching for the FAQ agent (template wording; the LLM only
+rephrases it):
+
+> 🔴 Alarm — Navio Monitoring
+>
+> **FAQ-Assistent: viele Anfragen ohne Antwort**
+>
+> Der FAQ-Assistent hat in den letzten 24 Stunden bei 15 % der Anfragen keine Antwort
+> geliefert; normal wären höchstens 10 %. Die Ursache ist noch nicht bekannt. Betroffene
+> Nutzer haben keine brauchbare Antwort bekommen. Bitte im Monitoring unter
+> 'Neueste Fehler' nachsehen und, falls es weiter auftritt, das Technik-Team informieren.
+>
+> *Für das Technik-Team* — Regel `failure_rate·faq` · Agent `faq` · Wert 15 % · Grenze 10 % ·
+> Fenster 24 h · Turns 20 · Zeitpunkt `2026-09-15T10:44:53.448Z`
+>
+> 15.09. 12:44
+
+The card chrome is German too: the header reads "🔴 Alarm — Navio Monitoring" (not `ALERT`),
+the email subject is `[Navio] Alarm: FAQ-Assistent: viele Anfragen ohne Antwort`, and the ISO
+timestamp moved into the technical block — the visible footer is "15.09. 12:44". This applies
+to the monitoring messages only: they carry `AlertMessage.humanSeverity` (`ALERT` → "Alarm",
+`WARNING` → "Warnung", `OK` → "Entwarnung / alles in Ordnung", `NO_DATA` → "Keine Daten",
+`PAUSED` → "Pausiert", `UNKNOWN` → "Unbekannt"), which every renderer prefers when present.
+The Langfuse relay leaves the field undefined and keeps its byte-identical English chrome.
+
+Its recovery, here for `agent: "total"` — *"Entwarnung: Beide Assistenten antworten wieder"*:
+
+> Beide Assistenten haben in den letzten 24 Stunden nur noch bei 2 % der Anfragen nicht
+> geantwortet und liegen damit wieder im normalen Bereich. Die Nutzer bekommen wieder ihre
+> Antworten. Keine Aktion nötig.
+
+The digest card header and email subject carry the severity word ("Statusbericht", or "Alarm"
+when something breached), so the title itself is just "Alles in Ordnung" / "Keine Probleme
+gefunden" (nothing breached, but a rule was skipped or could not be evaluated) / "1 Problem" /
+"N Probleme" (no "(e)"). Its first line is "Achtung: 1 Problem gefunden." / "Achtung: N Probleme gefunden."
+when something breached, "Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft
+werden." when nothing breached but a rule was skipped or could not be evaluated, and only
+otherwise "Alles in Ordnung: beide Assistenten laufen normal, die Kosten sind im Rahmen."
+Then one plain line per rule, then any rule that could not be evaluated as "Nicht prüfbar:
+<human name> (die Daten konnten nicht geladen werden)". A real one with a warming-up rule:
+
+> Keine Probleme gefunden — einzelne Werte konnten aber nicht geprüft werden.
+> 🟢 Fehlerrate des FAQ-Assistenten: 1 % (erlaubt bis 10 %)
+> ⚪ Kostenanstieg beider Assistenten: nicht gemessen – Noch nicht genug Vergleichstage
+> gesammelt (0 von 7)
+
+A measured cost spike reads "3,2-mal so hoch wie an einem normalen Tag (erlaubt: bis 3-mal)":
+the short limit form is used only there, because the value right before it already carries
+the unit; recoveries say "… nur noch 4-mal aufgetreten; gemeldet wird ab 5-mal."
+
+The test alarm reads "Dies ist ein Testalarm. Alles funktioniert. Keine Aktion nötig."
+
+### The 7 rules
+
+Seeded once, editable per row in `/monitoring/alerts` → Regeln (`alert_rules`, unique on
+`key, agent`; re-applying the migration's seed is `on conflict do nothing`, so edited
+thresholds are never reset):
+
+| key | agent | severity | threshold | window | min_samples | notes |
+|---|---|---|---|---|---|---|
+| `cost_daily` | all | alert | 2.00 $ total (1.50 $ per agent) | since Berlin midnight | 0 | `params.per_agent_usd` overrides the total for `faq`/`partner` |
+| `cost_spike` | all | warning | 3.0× the 7-day baseline | 24 h | 0 | skipped ("Aufwärmphase") until 7 full baseline days exist; never fires below `min_abs_usd` (0.5 $) |
+| `failure_rate` | all | alert | 10 % | 24 h | 10 | `failed` + abandoned (`running` older than 5 min) over all traces |
+| `latency_p95` | faq | warning | 8000 ms | 24 h | 10 | |
+| `latency_p95` | partner | warning | 60000 ms | 24 h | 10 | |
+| `negative_feedback` | all | warning | 30 % | 168 h | 5 | 👎 over rated turns |
+| `error_repeat` | all | warning | 5 (count) | 24 h | 0 | per `errors.type`, each type its own `alert_state` row (`subkey`); excludes `upstream_unavailable` (owned by `partner_upstream`) |
+| `partner_upstream` | partner | alert | 3 (count) | 24 h | 0 | `errors.type = upstream_unavailable` on partner traces |
+
+`agent = 'all'` rules evaluate once per `faq`, `partner` **and** `total`, each its own
+`alert_state` row — so `cost_daily` can fire for the total while both agents individually stay
+under their per-agent figure, or vice versa. Rules are always evaluated **production traffic
+only** (`traces.metadata->>'env' = 'production'`); local/preview traffic never triggers a rule.
+
+### Notify policy
+
+**On transition only, never while steady.** A rule fires a Teams card + email the moment it
+crosses `ok → breached`, and again the moment it crosses `breached → ok` (`recovered`). While
+it stays breached across runs, nothing is sent again — `alert_state` is the memory that makes
+this idempotent; only `state.ts`'s diff decides whether an observation is a transition.
+
+**A state row whose observation disappears is treated as `ok`.** `error_repeat` emits one
+observation per error type actually present in the window, so a breached `azure_429` row would
+otherwise stay breached forever once that error stops occurring — no recovery message, a
+permanent banner, and the rule could never fire for that type again. Every row belonging to a
+rule that was evaluated this run but received no observation is therefore written back as `ok`
+(with `observed`/`samples` cleared), and a `recovered` transition is emitted if it had been
+breached. Rows of rules **disabled** in the Regeln tab are deleted on the next evaluation run
+(the PATCH only flips `enabled`), so a disabled rule's banner clears at the next scheduled or
+manual run, not instantly.
+
+**Delivery cannot undo a state write.** State is saved first; the transitions are then
+narrated, inserted and delivered in parallel, each inside its own `try/catch`, so one failing
+Teams/Graph call or one failing `alert_events` insert only marks that transition
+`failed: …` in the run report. The whole delivery phase runs under a soft deadline
+(`ALERT_DELIVERY_DEADLINE_MS`, default 40 s, inside the route's `maxDuration = 60`); a
+transition still outstanding when it expires is reported as `skipped: deadline`.
+
+**The digest is written on every run, sent to Teams only on scheduled + enabled.** Every
+evaluation — `scheduled`, `test`, or `manual` (a Regeln-tab "Jetzt auswerten" click) — inserts
+one `alert_events` row of `kind = 'digest'` summarising every rule's status, keyed by
+`run_slot` — at most one digest per slot, enforced by the partial unique index
+`alert_events_digest_slot_idx` (`kind = 'digest'`): a second digest insert for the same slot is
+rejected by Postgres, and `repo.ts` reads error code `23505` as "already sent" rather than as a
+failure. It is only actually
+**delivered** to Teams when `slot = 'scheduled'` **and** `alert_settings.digest_enabled` is
+true — so the 5-minute test cadence, a manual "Jetzt auswerten", or a preview never floods the
+channel, but every run still leaves a row in the Feed tab. The digest never goes to email.
+
+### Vault secrets and `ALERT_EVALUATE_SECRET`
+
+The evaluate URL and its bearer secret are **never in migration text** — they live in Supabase
+Vault, read inside `monitoring_call_evaluate()`:
+
+| Vault secret name | Value |
+|---|---|
+| `alert_evaluate_url` | `https://navio-widget.vercel.app/api/monitoring/alerts/evaluate` |
+| `alert_evaluate_secret` | must equal Vercel's `ALERT_EVALUATE_SECRET` on `navio-widget` |
+
+If either is missing, `monitoring_call_evaluate()` raises a notice and returns without
+calling out — cron calls are harmless, not a hard failure, until both secrets exist. On the
+Vercel side the same value must be set as the env var `ALERT_EVALUATE_SECRET` — **as of this
+task it is set on production but not yet on preview**; the owner adds preview by hand
+(`vercel env add ALERT_EVALUATE_SECRET preview --sensitive`) since sensitive vars can only be
+set interactively, never read back.
+
+### The DST caveat
+
+`pg_cron` runs in UTC with no timezone support, and the two production schedules
+(`0 5 * * *` / `0 13 * * *`) are written for **summer time** — 07:00 / 15:00 CEST (UTC+2).
+Once Central Europe returns to CET (UTC+1) the same UTC crontab lands at 08:00 / 16:00 local,
+one hour late. Wintertime precision is not a requirement (spec: "two digests a day at roughly
+7 and 15 o'clock"), but to keep it accurate, shift both jobs by one hour at the DST boundary:
+
+```sql
+select cron.alter_job(job_id, schedule := '0 6 * * *')   -- navio-alerts-morning, winter
+  from cron.job where jobname = 'navio-alerts-morning';
+select cron.alter_job(job_id, schedule := '0 14 * * *')  -- navio-alerts-afternoon, winter
+  from cron.job where jobname = 'navio-alerts-afternoon';
+```
+
+(and the reverse, back to `0 5` / `0 13`, at the spring boundary). Nothing automates this yet;
+it is a twice-yearly manual step, worth a calendar reminder once this ships.
+
+### Reading the scheduler's own logs
+
+`cron.job_run_details` is the per-run record of the `pg_cron` job itself (start/end time,
+`succeeded`/`failed`, the job's own error if the function raised); `net._http_response` is the
+**separate** async result of the `pg_net.http_post` call the function issued — a `pg_cron` run
+can show `succeeded` (the function returned) while the HTTP call inside it later resolves to a
+non-200 in `net._http_response`, so check both:
+
+```sql
+-- last 5 runs of each alerting job
+select j.jobname, r.status, r.start_time, r.end_time, r.return_message
+from cron.job_run_details r join cron.job j on j.jobid = r.jobid
+where j.jobname like 'navio-alerts-%'
+order by r.start_time desc limit 10;
+
+-- the actual HTTP result the function's net.http_post produced
+select id, status_code, content, created
+from net._http_response
+order by created desc limit 10;
+```
+
+A `status_code = 200` with a JSON body containing `"ok":true` is the honest proof the widget
+was reached and evaluated; a `pg_cron` "succeeded" row alone only proves the SQL function
+didn't raise.
+
+**Housekeeping (2026-09-16).** `pg_cron` never prunes `cron.job_run_details` (the 5-minute test
+cadence alone added ~288 rows/day). Migration `20260916000100_cron_history_cleanup.sql`
+(applied 2026-09-16) schedules `navio-cron-history-cleanup` — Sundays 03:00 UTC, deletes rows
+older than 30 days. `net._http_response` needs nothing: pg_net expires it after `pg_net.ttl`
+(6 h), which is also why only ~72 responses are ever visible for the 5-minute job.
+
+**Go-live state (2026-09-16).** `ALERT_EVALUATE_SECRET` is set on `navio-widget` for
+Production and for Preview (branch `alerting`), equal to the Vault secret (verified by sha256,
+never by value). The route reaches production with PR #2 (`alerting` → `main`). The Vault URL
+was verified to be exactly the production evaluate URL.
+
+### Env / Vault summary
+
+| Name | Where | Purpose |
+|---|---|---|
+| `ALERT_EVALUATE_SECRET` | Vercel `navio-widget` env (production ✅, preview: owner to add) | bearer secret the evaluate route checks; unset ⇒ route returns 404 (feature off) |
+| `alert_evaluate_url` | Supabase Vault (monitoring project) | the evaluate route's URL, read by `monitoring_call_evaluate()` |
+| `alert_evaluate_secret` | Supabase Vault (monitoring project) | must match `ALERT_EVALUATE_SECRET` above |
+| `TEAMS_ALERT_WEBHOOK_URL` | existing (shared with the Langfuse relay) | unset ⇒ Teams delivery skipped, recorded as `skipped` on the event |
+| `MS_GRAPH_*` | existing (shared, `navio-chatbot` app, `Mail.Send`) | unset ⇒ email skipped; this is Microsoft Graph `sendMail`, **not Resend, not SMTP** |
+| `ALERT_EMAIL_TO` | existing | fallback recipients when `alert_settings.email_recipients` is empty |
+| `AZURE_AI_CHATBOT_*` | existing | narration model; unset/timeout/failure ⇒ template fallback, never a thrown error |
+| `ALERT_DELIVERY_DEADLINE_MS` | optional | soft cap for the delivery phase of one run (default 40000); a transition still in flight at the deadline is recorded as `skipped: deadline` |
+
+### Go-live checklist
+
+The test cadence (`navio-alerts-test`, every 5 minutes, migration
+`20260915000200_alerting_cron.sql`) is applied and running today, evaluating against
+`navio-widget`'s **`main`** deployment — which does not yet have the `/api/monitoring/alerts/*`
+routes, since they only exist on this `alerting` branch. **Every step below is therefore for
+the owner to run manually, after this branch merges to `main` and `navio-widget` redeploys —
+none of it was executed as part of this task**, per its scope limits (write the production
+migration, do not apply it; do not unschedule the test job; no Vercel/Vault/Supabase state
+changes).
+
+0. **Before merging**, stop the 5-minute test cadence so that the first unattended production
+   evaluation is the deliberate one in step 2:
+   ```sql
+   select cron.unschedule('navio-alerts-test');
+   ```
+1. Confirm `ALERT_EVALUATE_SECRET` is set on Vercel `navio-widget` for **both** production and
+   preview (sensitive, write-only — rotate rather than "find" it if in doubt), and that it
+   equals the Supabase Vault secret `alert_evaluate_secret`.
+2. Merge `alerting` to `main`; wait for `navio-widget` to redeploy. Confirm the endpoint exists
+   and authenticates:
+   ```
+   curl -X POST https://navio-widget.vercel.app/api/monitoring/alerts/evaluate \
+     -H "Authorization: Bearer <ALERT_EVALUATE_SECRET>" \
+     -d '{"slot":"manual","dryRun":true}'
+   ```
+   expect `ok:true` in the response.
+3. Confirm the cron path itself reaches that deployment — with the test job unscheduled, call
+   it by hand once: `select monitoring_call_evaluate('test');` then read `net._http_response`
+   and expect `status_code = 200` for that call (see the queries above).
+4. Apply `supabase/migrations/20260915000300_alerting_cron_production.sql` (schedules
+   `navio-alerts-morning` / `navio-alerts-afternoon`; its `unschedule` of `navio-alerts-test`
+   is then a no-op, which is fine). Confirm: `select jobname from cron.job;` lists exactly the
+   morning and afternoon jobs, no test job.
+5. Set real recipients in the dashboard: `/monitoring/alerts` → Regeln → Empfänger.
+6. Next morning: confirm the 07:00 digest landed in the Navio Alerts Teams channel and shows
+   in the Feed tab with `run_slot` matching `<date>T07`.
+
+### Verifying the loop live
+
+`npm run alerts:verify` (`scripts/alerts-verify.ts`) proves the whole path against a **running
+widget** and the real monitoring Supabase, without waiting for a scheduled run: it seeds a
+batch of failed, `env: production`-tagged traces under a throwaway session, calls `evaluate`
+(`slot: "manual"`) and asserts a `fired` transition for `failure_rate · faq`, marks the same
+traces `completed` and asserts `recovered`, calls a third time and asserts no further
+transition and that a `manual`/`test` slot never sends the digest, then deletes its throwaway
+session, traces and `alert_state` row. **It intentionally posts one red (breach) and one green
+(recovery) card to the real Navio Alerts Teams channel** — that is the only honest way to
+prove delivery, since a webhook/Graph send has no queryable record the way a trace does — and
+cleans up its own rows afterwards so it leaves no stray data behind.
+
 ## What it answers
 
 Once live: which agent's cost/latency/error rate moved out of range, when, by how much, and
 a direct link to the trace — without anyone needing to be staring at a dashboard. Joined
 against the existing feedback system (`docs/FEEDBACK-SYSTEM.md`): a quality-threshold breach
 and a spike in 👎 votes are two views of the same regression, one automatic, one human-sourced.
+The Supabase-rules path above adds the same answer for FAQ and Partner without depending on
+Langfuse being wired on `navio-widget` at all — which matters today, since (root `CLAUDE.md`
+§16.7) production traffic there still has no `LANGFUSE_*` vars set.

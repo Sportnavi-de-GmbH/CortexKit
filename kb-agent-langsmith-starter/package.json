@@ -24,12 +24,16 @@
     "feedback:promote": "tsx scripts/feedback-promote.ts",
     "alert:test": "tsx scripts/test-alert-webhook.ts",
     "export:csv": "tsx scripts/export-traces-csv.ts",
-    "feedback:backfill": "tsx scripts/backfill-feedback-queues.ts"
+    "feedback:backfill": "tsx scripts/backfill-feedback-queues.ts",
+    "monitoring:verify": "tsx scripts/monitoring-verify.ts",
+    "monitoring:reconcile": "tsx scripts/monitoring-reconcile.ts",
+    "alerts:verify": "tsx scripts/alerts-verify.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@supabase/supabase-js": "^2.116.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@vercel/otel": "^2.1.3",
     "ai": "^7.0.31",

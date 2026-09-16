@@ -7,6 +7,7 @@
 
 import { checkPartnerMessageLength, checkPartnerRequest } from "@/lib/partner-proxy";
 import { forwardToWorkflow } from "@/lib/partner-workflow";
+import { captureWorkflow } from "@/lib/monitoring/partner-capture";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,5 +20,7 @@ export async function POST(req: Request): Promise<Response> {
   if (rejected) return rejected;
   const tooLong = await checkPartnerMessageLength(req);
   if (tooLong) return tooLong;
-  return forwardToWorkflow(req);
+  // Monitoring: the full WorkflowTrace becomes a step-by-step trace in Supabase
+  // (never throws, no-op without credentials, capped so the answer is not delayed).
+  return forwardToWorkflow(req, { observe: captureWorkflow });
 }

@@ -3,7 +3,8 @@
  */
 import type { WorkflowConfig } from "../config/workflow.config";
 import type { SupabaseBackend } from "../lib/reused/supabase";
-import type { LlmPort } from "../lib/llm-port";
+import type { LlmPort, LlmUsage } from "../lib/llm-port";
+export type { LlmUsage };
 
 export interface WorkflowInput {
   query: string;
@@ -60,6 +61,9 @@ export interface StageRecord<I = unknown, O = unknown> {
   counts?: Record<string, number>;
   warnings: string[];
   error?: { message: string };
+  /** Token usage of the model call this stage made, when reported (monitoring only). */
+  usage?: LlmUsage;
+  model?: string;
 }
 
 export interface StageResult<O> {
@@ -68,6 +72,8 @@ export interface StageResult<O> {
   filters?: Record<string, unknown>;
   counts?: Record<string, number>;
   warnings?: string[];
+  usage?: LlmUsage;
+  model?: string;
 }
 
 export interface StageContext {
@@ -223,6 +229,8 @@ export interface TaskRun {
   recommendations?: Recommendation[];
   clarification?: string;
   error?: { message: string };
+  /** Sum of the task's stage usage, when any stage reported it. */
+  usage?: LlmUsage;
 }
 
 export type WorkflowStatus = "ok" | "needs_clarification" | "partial" | "failed";
@@ -246,6 +254,8 @@ export interface WorkflowTrace {
   recommendations?: Recommendation[];
   clarification?: string;
   error?: { message: string };
+  /** Sum over stage 0 and every task, when any model call reported usage. */
+  usage?: LlmUsage;
 }
 
 export type { RawTask } from "../lib/llm-port";

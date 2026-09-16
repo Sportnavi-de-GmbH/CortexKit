@@ -16,7 +16,19 @@ import { nearbyCities } from "./stages/3-nearby-cities";
 import { search } from "./stages/4-search";
 import { rerank } from "./stages/5-rerank";
 import { respond } from "./stages/6-respond";
-import type { StageContext, StageId, StageRecord, StageResult, Task, TaskRun, WorkflowDeps, WorkflowInput, WorkflowStatus, WorkflowTrace } from "./types";
+import type { LlmUsage, StageContext, StageId, StageRecord, StageResult, Task, TaskRun, WorkflowDeps, WorkflowInput, WorkflowStatus, WorkflowTrace } from "./types";
+
+/** Sum reported usage; undefined when nothing reported (so untouched traces stay byte-identical). */
+function sumUsage(items: Array<{ usage?: LlmUsage }>): LlmUsage | undefined {
+  const withUsage = items.filter((i) => i.usage);
+  if (!withUsage.length) return undefined;
+  const cachedSeen = withUsage.some((i) => typeof i.usage!.cached === "number");
+  const s = withUsage.reduce(
+    (a, i) => ({ input: a.input + i.usage!.input, output: a.output + i.usage!.output, cached: (a.cached ?? 0) + (i.usage!.cached ?? 0) }),
+    { input: 0, output: 0, cached: 0 } as LlmUsage,
+  );
+  return cachedSeen ? s : { input: s.input, output: s.output };
+}
 
 export { CLARIFICATION };
 
@@ -40,6 +52,7 @@ async function runStage<I, O>(id: StageId, input: I, fn: () => Promise<StageResu
       record: {
         id, title: TITLES[id], status: warnings.length ? "warning" : "ok", durationMs: Math.round(performance.now() - t0),
         input, output: result.output, config: result.config, ...(result.filters ? { filters: result.filters } : {}), ...(result.counts ? { counts: result.counts } : {}), warnings,
+        ...(result.usage ? { usage: result.usage } : {}), ...(result.model ? { model: result.model } : {}),
       },
       result,
     };
@@ -59,8 +72,10 @@ export async function runTask(task: Task, input: WorkflowInput, ctx: StageContex
   const skipRest = () => { for (const id of TASK_ORDER.slice(stages.length)) stages.push(skipped(id)); };
   const stageError = (record: StageRecord): { message: string } | undefined =>
     record.error && { message: `${record.title}: ${record.error.message}` };
-  const done = (partial: Partial<TaskRun> & { status: TaskRun["status"] }): TaskRun =>
-    ({ task, totalMs: Math.round(performance.now() - t0), stages, ...partial });
+  const done = (partial: Partial<TaskRun> & { status: TaskRun["status"] }): TaskRun => {
+    const usage = sumUsage(stages);
+    return { task, totalMs: Math.round(performance.now() - t0), stages, ...(usage ? { usage } : {}), ...partial };
+  };
   const query = task.query;
 
   // 1
@@ -172,8 +187,10 @@ export async function runWorkflow(input: WorkflowInput, overrides: Partial<Workf
         : { message: failed.map((t) => `${t.task.label}: ${t.error?.message ?? "failed"}`).join("; ") }
       : undefined;
 
+  const usage = sumUsage([s0.record, ...tasks]);
   return done({
     status, config, decompose: decomposeRecord, tasks, deferred, pending: composed.pending,
+    ...(usage ? { usage } : {}),
     stages: tasks.length === 1 ? tasks[0]!.stages : [],
     ...(status !== "failed" && composed.answer !== undefined ? { answer: composed.answer } : {}),
     ...(tasks.length === 1 && tasks[0]!.recommendations ? { recommendations: tasks[0]!.recommendations } : {}),

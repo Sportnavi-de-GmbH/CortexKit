@@ -9,7 +9,7 @@
  */
 import { raceAbort } from "../../lib/abortable";
 import { timeoutSignal } from "../../lib/reused/timeout";
-import type { CityAttempt, CitySource, DetectCityOutput, ResolvedCity, StageContext, StageResult, WorkflowInput } from "../types";
+import type { CityAttempt, CitySource, DetectCityOutput, LlmUsage, ResolvedCity, StageContext, StageResult, WorkflowInput } from "../types";
 
 async function resolve(mention: string, ctx: StageContext): Promise<ResolvedCity | null> {
   const signal = anySignal(ctx, ctx.config.callTimeoutMs);
@@ -27,6 +27,7 @@ export async function detectCity(input: WorkflowInput & { cityMention?: string |
   const candidates: Array<{ source: CitySource; mention: string }> = [];
   let cityMention: string | null = null;
   let cityMentionSource: "override" | "hint" | "model" = "model";
+  let usage: LlmUsage | undefined;
 
   if (ctx.config.targetCity) {
     cityMentionSource = "override";
@@ -39,7 +40,9 @@ export async function detectCity(input: WorkflowInput & { cityMention?: string |
     } else {
       try {
         const signal = anySignal(ctx, ctx.config.modelTimeoutMs);
-        cityMention = (await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity")).cityMention;
+        const r = await raceAbort(ctx.deps.llm.detectCity(input.query, { signal }), signal, "detectCity");
+        cityMention = r.cityMention;
+        usage = r.usage;
       } catch (e) {
         warnings.push(`City detection model call failed (${(e as Error).message}); treating the question as having no city mention.`);
       }
@@ -87,5 +90,6 @@ export async function detectCity(input: WorkflowInput & { cityMention?: string |
     config: { cityConfidenceMin: ctx.config.cityConfidenceMin, targetCity: ctx.config.targetCity, cityMentionSource },
     counts: { attempts: attempts.length },
     warnings,
+    ...(usage ? { usage, model: ctx.deps.llm.modelName } : {}),
   };
 }
