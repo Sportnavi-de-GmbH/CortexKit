@@ -28,7 +28,8 @@
 //   to the session that cleared this gate.
 
 import { type AuthFn, ForbiddenError, localDev } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { defaultEveAuth, eveChannel } from "eve/channels/eve";
+import { replyLanguageHint } from "../../lib/reply-language";
 import {
   TOO_LONG_API_DETAIL,
   extractMessageText,
@@ -267,6 +268,15 @@ export default eveChannel({
   // follows it (never before): it reads the body, which is only safe once the
   // cheap Content-Length check has bounded how much body there can be.
   auth: [requestSizeLimit(), messageLengthLimit(), botCheck(), widgetOrigin(), localDev()],
+  // Language fidelity (lib/reply-language.ts): prepend one short note to every turn, as
+  // context right next to the visitor's message, naming the language to answer in. The
+  // system prompt's own rule was measured to lose against its 22k tokens of German on some
+  // English turns; a note at the point of recency is what the model obeys. Auth is passed
+  // through unchanged (`defaultEveAuth`), and the system prompt is untouched so the
+  // prompt-cache prefix stays byte-identical.
+  onMessage(ctx, message) {
+    return { auth: defaultEveAuth(ctx), context: [replyLanguageHint(message)] };
+  },
   // Same-origin (iframe) calls need no CORS. Configure narrow CORS only if you
   // serve the widget cross-origin via WIDGET_ALLOWED_ORIGINS.
   ...(extraAllowedOrigins().length > 0
