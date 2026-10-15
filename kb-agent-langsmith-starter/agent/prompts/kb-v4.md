@@ -488,7 +488,7 @@ Member requirements:
 Process: The member scans the partner's QR code using the app camera. A green confirmation screen appears, which the member shows to the partner. The partner should verify the member's name. A timer running at the bottom of the screen confirms the check-in is live and not a screenshot.
 #### TOPIC: Check-In – Frequency Limit
 Q: Can members check in multiple times per day?
-A: Yes. A new check-in can be registered every 2 hours.
+A: Yes. The 2-hour waiting period applies only to another check-in at the same partner. You do not have to wait 2 hours to check in at a different partner. For example, you can check in at partner X and then at partner Y 30 minutes later. The 30 minutes are only an example, not a minimum waiting time. The applicable tariff conditions and usage limits still apply.
 #### TOPIC: Check-In – Forgotten Check-In
 Q: A customer forgot to check in — what should the partner do?
 A: The partner is responsible for reviewing their own check-ins. In exceptional cases, the partner can contact Sportnavi, and the visit will be manually added to the system.
@@ -596,7 +596,7 @@ Im Firmenfitness-Tarif gibt es keine beitragsfreie Pause im klassischen Sinne. S
 Bei einer privaten Pause wird nach Ablauf des gewählten Pausenzeitraums der Beitragseinzug fortgesetzt. Eine erneute Anmeldung ist nicht erforderlich. Die private Mitgliedschaft bleibt während der Pause aktiv; nutzt du währenddessen ein Angebot, wird die Pause aufgehoben und der volle Mitgliedsbeitrag für den jeweiligen Monat fällig. Bei einer Stilllegung der Firmenfitness-Mitgliedschaft wird die Mitgliedschaft deaktiviert und zum vorher bestimmten Zeitpunkt oder nach einer Nachricht des Arbeitgebers wieder aktiviert.
 ### 4. Check-In – Technische Grenzfälle
 #### Kann ich mich innerhalb von 2 Stunden bei zwei verschiedenen Partnern einchecken?
-Ein neuer Check-in kann alle 2 Stunden registriert werden. Der laufende Timer des vorherigen Check-ins wird automatisch beendet, wenn ein neuer Check-in erfolgt oder um Mitternacht.
+Ja. Die Wartezeit von 2 Stunden gilt ausschließlich für einen erneuten Check-in beim gleichen Partner. Zwischen Check-ins bei verschiedenen Partnern musst du keine 2 Stunden warten. Du kannst zum Beispiel jetzt bei Partner X einchecken und 30 Minuten später bei Partner Y. Die 30 Minuten sind nur ein Beispiel und keine Mindestwartezeit. Die jeweiligen Tarifbedingungen und Nutzungsbegrenzungen gelten weiterhin.
 #### Mein Handy ist während des Besuchs ausgegangen. Ist mein Check-in noch gültig?
 Ja. Der Check-in wird serverseitig registriert. Sobald die grüne Bestätigung angezeigt wurde, ist der Check-in gespeichert – unabhängig davon, ob das Gerät danach ausgeschaltet wird.
 #### Kann der Partner meinen Check-in ablehnen, obwohl die App eine grüne Bestätigung zeigt?
@@ -735,7 +735,7 @@ Tarifwechsel (Downgrade)
 Gerätewechsel
 Nach 30 Tagen (sofort bei Verlust über Support)
 Check-in-Intervall
-Alle 2 Stunden
+Gleicher Partner: erneuter Check-in nach 2 Stunden. Anderer Partner: keine 2-Stunden-Wartezeit.
 Fitness-Check-Erstattung
 Einmal pro 12 Monate
 Cashback-Gutschrift
@@ -864,7 +864,7 @@ Für konkrete steuerliche Fragen: Bitte das zuständige Steuerbüro konsultieren
 Erlaubt:
 - Alle Partner deines Tarifs nutzen, sofern die Angebotsbeschreibung keine Einschränkungen vorsieht
 - Angebote außerhalb des Tarifs nach vorheriger Klärung mit dem Partner nutzen
-- Einmal alle 2 Stunden einchecken
+- Beim gleichen Partner nach 2 Stunden erneut einchecken; zwischen verschiedenen Partnern gilt keine 2-Stunden-Wartezeit
 - Massagen: 1× pro Monat (beispielhafte Einschränkung)
 - Cashback bei teilnehmenden Partnern nach deren Angebotsbedingungen nutzen
 - Privat im 4/5-Sterne-Tarif bis zu 3 volle Kalendermonate pro Kalenderjahr pausieren, auch einzeln; Antrag bis zum 15. des Vormonats, keine rückwirkende Pause und keine Pause im Schlussmonat. 3 Sterne: Berechtigung durch Support klären.
@@ -1009,7 +1009,7 @@ Die Pausier-Funktion (4/5-Sterne) kann ohne Angabe von Gründen genutzt werden. 
 ### 12. Zusammenfassung: Die wichtigsten Regeln auf einen Blick
 - Ein Gerät, ein Konto – Anmeldung nur auf einem Smartphone gleichzeitig
 - Ausweis mitnehmen – Lichtbildausweis zum Check-in erforderlich
-- 2-Stunden-Regel – Zwischen Check-ins mindestens 2 Stunden warten
+- 2-Stunden-Regel – Gilt nur für erneute Check-ins beim gleichen Partner. Zwischen verschiedenen Partnern gilt keine 2-Stunden-Wartezeit. 30 Minuten sind nur ein Beispiel, keine Mindestwartezeit.
 - Kündigung in Textform – Privat: 1 Monat zum Ende eines Kalendermonats; individuelle Firmenfitness-Mitgliedschaft: 2 Wochen zum Monatsende
 - Tarifwechsel – Upgrade zum nächsten Monatsersten, Antrag systembedingt bis zum 20. empfohlen; später Support kontaktieren. Downgrade: 1 Kalendermonat zum 1. eines Kalendermonats; bestätigten Termin beachten
 - Private Pause – 4/5 Sterne: bis zu 3 volle Kalendermonate pro Kalenderjahr, auch einzeln; Antrag bis zum 15. des Vormonats. Keine rückwirkende Pause und keine Pause im Schlussmonat. 3 Sterne: Berechtigung durch Support klären

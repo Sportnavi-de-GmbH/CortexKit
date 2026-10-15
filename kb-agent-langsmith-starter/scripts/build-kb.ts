@@ -3,7 +3,7 @@
  *
  *   npm run kb:build
  *
- * Reads   agent/kb/Sportnavi_Wissensdatenbank_mit_Quellen.docx   (source of truth, never edited)
+ * Reads   agent/kb/Sportnavi_Knowledge_Base_Checkin_FINAL.docx   (source of truth, never edited)
  * Writes  agent/prompts/kb-v4.md       — the KB as Markdown, embedded verbatim in instructions-v4.md
  *         lib/kb-sources.ts            — every URL the KB cites; the widget shows ONLY these as Quellen
  *
@@ -19,7 +19,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { inflateRawSync } from "node:zlib";
 
-const SOURCE = "agent/kb/Sportnavi_Wissensdatenbank_mit_Quellen.docx";
+const SOURCE = "agent/kb/Sportnavi_Knowledge_Base_Checkin_FINAL.docx";
 const KB_OUT = "agent/prompts/kb-v4.md";
 const SOURCES_OUT = "lib/kb-sources.ts";
 

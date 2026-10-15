@@ -1,5 +1,5 @@
 /**
- * Prompt v4 — the new knowledge base (Sportnavi_Wissensdatenbank_mit_Quellen.docx)
+ * Prompt v4 — the new knowledge base (Sportnavi_Knowledge_Base_Checkin_FINAL.docx)
  * and its contract with the widget.
  *
  * The failures this pins are all silent: a rules edit that drifts from the KB, a
