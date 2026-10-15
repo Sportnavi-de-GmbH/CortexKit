@@ -16,9 +16,7 @@ import { KB_SOURCE_URLS } from "../lib/kb-sources";
 import { docxToMarkdown, extractKbUrls } from "../scripts/build-kb";
 
 // Line endings normalised: a Windows checkout (core.autocrlf) turns these into CRLF.
-const read = (path: string) => readFileSync(path, "utf8").replace(/
-/g, "
-");
+const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 const kb = read("agent/prompts/kb-v4.md");
 const prompt = read("agent/prompts/instructions-v4.md");
 const OPEN = "<<< DOCUMENT: kb-v4.md >>>";
