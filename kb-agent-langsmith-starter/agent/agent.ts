@@ -65,9 +65,10 @@ export default defineAgent({
   modelContextWindowTokens: 128_000,
   model: resolveModel(),
   limits: {
-    // ~250k input tokens ≈ 15 turns of the full ~16.7k prompt — generous for a
-    // real support chat, but bounds a runaway/abusive session to ~$0.50.
-    maxInputTokensPerSession: limitFromEnv("NAVIO_MAX_INPUT_TOKENS_PER_SESSION", 250_000),
+    // ~500k input tokens ≈ 15 turns of the full ~32k prompt v4 (measured with
+    // `npm run cache:check`, ~99% of it cache reads) — generous for a real support
+    // chat, but bounds a runaway/abusive session. Was 250k for the ~16.7k prompt.
+    maxInputTokensPerSession: limitFromEnv("NAVIO_MAX_INPUT_TOKENS_PER_SESSION", 500_000),
     // Hard ceiling on generated tokens per session (default is uncapped).
     maxOutputTokensPerSession: limitFromEnv("NAVIO_MAX_OUTPUT_TOKENS_PER_SESSION", 20_000),
   },

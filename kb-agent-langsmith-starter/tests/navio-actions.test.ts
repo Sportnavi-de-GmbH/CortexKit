@@ -39,7 +39,68 @@ describe("the happy path the prompts actually produce", () => {
 
   it("returns nothing and untouched text when the agent emits no markers", () => {
     const raw = "Kurze Rückfrage: meinst du deinen Tarif oder deinen Arbeitgeber?";
-    expect(parseMessageActions(raw)).toEqual({ text: raw, actions: [], notices: [] });
+    expect(parseMessageActions(raw)).toEqual({ text: raw, actions: [], notices: [], sources: [] });
+  });
+});
+
+describe("Quellen — KB sources cited with [[source:URL]] (prompt v4 §7A)", () => {
+  it("lifts source markers off the marker line, in citation order", () => {
+    const { text, sources, actions } = parseMessageActions(
+      "Scan den QR-Code vor Ort.\n\n" +
+        "[[source:https://www.sportnavi.de/sportnavi-app/]] [[source:https://www.sportnavi.de/kontakt/]] [[action:contact]] [[action:about]]",
+    );
+    expect(text).toBe("Scan den QR-Code vor Ort.");
+    expect(sources).toEqual(["https://www.sportnavi.de/sportnavi-app/", "https://www.sportnavi.de/kontakt/"]);
+    expect(actions).toEqual(["contact", "about"]);
+  });
+
+  it("never shows a URL the knowledge base does not cite", () => {
+    const { text, sources } = parseMessageActions(
+      "Antwort.\n\n[[source:https://www.sportnavi.de/erfunden/]] [[source:https://evil.example/]] [[source:https://www.sportnavi.de/faq/]]",
+    );
+    expect(sources).toEqual(["https://www.sportnavi.de/faq/"]);
+    expect(text).toBe("Antwort.");
+  });
+
+  it("normalises spelling to the KB form and dedupes", () => {
+    const { sources } = parseMessageActions(
+      "x\n\n[[source:http://sportnavi.de/sportnavi-app]] [[source:https://www.sportnavi.de/sportnavi-app/]]",
+    );
+    expect(sources).toEqual(["https://www.sportnavi.de/sportnavi-app/"]);
+  });
+
+  it("supports several sources but caps the block at four", () => {
+    const urls = [
+      "https://www.sportnavi.de/faq/",
+      "https://www.sportnavi.de/studios/",
+      "https://www.sportnavi.de/kontakt/",
+      "https://www.sportnavi.de/agb/",
+      "https://www.sportnavi.de/datenschutz/",
+    ];
+    const { sources } = parseMessageActions("x\n\n" + urls.map((u) => `[[source:${u}]]`).join(" "));
+    expect(sources).toEqual(urls.slice(0, 4));
+  });
+
+  it("moves a Quellen block the model copied into the prose, instead of showing it twice", () => {
+    const { text, sources } = parseMessageActions(
+      "Du kannst bis zu drei Monate pausieren.\n\n**Quellen:**\n" +
+        "- [https://www.sportnavi.de/agb/](https://www.sportnavi.de/agb/)\n" +
+        "- https://www.sportnavi.de/fuer-mitglieder/vertrag-pausieren/\n\nHat dir das geholfen?",
+    );
+    expect(text).toBe("Du kannst bis zu drei Monate pausieren.\n\n\nHat dir das geholfen?");
+    expect(sources).toEqual([
+      "https://www.sportnavi.de/agb/",
+      "https://www.sportnavi.de/fuer-mitglieder/vertrag-pausieren/",
+    ]);
+  });
+
+  it("leaves a sentence that merely starts with the word alone", () => {
+    const raw = "Quelle: deine Personalabteilung weiß mehr.";
+    expect(parseMessageActions(raw)).toEqual({ text: raw, actions: [], notices: [], sources: [] });
+  });
+
+  it("swallows a half-streamed source marker", () => {
+    expect(parseMessageActions("Antwort.\n\n[[source:https://www.sport").text).toBe("Antwort.");
   });
 });
 
@@ -199,6 +260,12 @@ describe("the live FAQ prompt only emits markers this module knows", () => {
     );
     expect(ids.length).toBeGreaterThan(0);
     for (const id of new Set(ids)) expect(NAVIO_ACTION_IDS).toContain(id);
+  });
+
+  it("cites only sources the knowledge base contains in its examples", () => {
+    const urls = [...prompt.matchAll(/\[\[source:([^\]\s]+)\]\]/g)].map((m) => m[1]).filter((u) => u !== "URL");
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) expect(parseMessageActions(`[[source:${url}]]`).sources).toEqual([url]);
   });
 
   it("still asks for the chip the FAQ screen guarantees", () => {

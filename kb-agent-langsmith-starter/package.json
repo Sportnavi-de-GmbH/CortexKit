@@ -27,7 +27,8 @@
     "feedback:backfill": "tsx scripts/backfill-feedback-queues.ts",
     "monitoring:verify": "tsx scripts/monitoring-verify.ts",
     "monitoring:reconcile": "tsx scripts/monitoring-reconcile.ts",
-    "alerts:verify": "tsx scripts/alerts-verify.ts"
+    "alerts:verify": "tsx scripts/alerts-verify.ts",
+    "kb:build": "tsx scripts/build-kb.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.16",

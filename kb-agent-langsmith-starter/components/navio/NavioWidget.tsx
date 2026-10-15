@@ -53,6 +53,8 @@ import { CONTACT_URL, PRIVACY_URL } from "./links";
 import { SportnaviLogo } from "./SportnaviLogo";
 import { NavioLogo } from "./NavioLogo";
 import { KontaktForm } from "./KontaktForm";
+import { SourceList } from "./SourceList";
+import { FAQ_STARTER_QUESTIONS } from "./starter-questions";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
 type Screen = "greeting" | "consent" | "menu" | "chat" | "partner" | "contact" | "info";
@@ -71,12 +73,8 @@ const HEADER: Record<
 };
 
 
-const QUICK_REPLIES = [
-  "Angebote finden",
-  "Wie checke ich ein?",
-  "Partner werden",
-  "Sportnavi für Firmen",
-];
+// Starter questions from the knowledge base — see starter-questions.ts.
+const QUICK_REPLIES = FAQ_STARTER_QUESTIONS;
 
 // Intro copy, split into the three levels the composition needs. The waving-hand
 // emoji is gone: the design system bans emoji as UI furniture, and a brand tile with
@@ -630,7 +628,7 @@ function BotMessage({
 }) {
   const streaming = message.metadata?.status === "streaming";
   const complete = message.metadata?.status === "complete";
-  const { text, actions, notices } = parseMessageActions(messageText(message));
+  const { text, actions, notices, sources } = parseMessageActions(messageText(message));
   // The screen's guaranteed chips ride along even when the agent forgot to ask.
   const chips = resolveActions(actions, surface);
   // The partner agent's structured result travels on a tool part next to the
@@ -654,6 +652,8 @@ function BotMessage({
         <BotBubble>
           <Markdown text={text} />
           {streaming && <Cursor />}
+          {/* The KB sources the answer cites (prompt v4 §7A), under the text they back. */}
+          {complete && <SourceList sources={sources} />}
         </BotBubble>
       )}
       {complete && partnerCards && <PartnerCards groups={partnerCards} />}
