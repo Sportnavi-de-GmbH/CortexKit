@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALWAYS_ACTIONS,
+  HIDDEN_ACTION_IDS,
   NAVIO_ACTION_IDS,
   parseMessageActions,
   resolveActions,
@@ -101,36 +102,34 @@ describe("the chips that are always there", () => {
   // rule alone cannot promise "always" — a model skips an instruction now and then
   // and the miss is invisible.
   it("adds the FAQ screen's about chip when the agent forgot it", () => {
-    expect(resolveActions(["contact", "meeting", "faq"], "faq")).toEqual([
-      "contact",
-      "meeting",
-      "faq",
-      "about",
-    ]);
+    expect(resolveActions(["contact", "faq"], "faq")).toEqual(["contact", "faq", "about"]);
   });
 
   // The partner screen's whole row is guaranteed (the V3 workflow agent emits
   // no markers at all), in a fixed order, so it reads the same under every
-  // answer: FAQ-Agent · Studios durchsuchen · Kontaktformular · Termin buchen · Über uns.
-  const PARTNER_ROW = ["faq-agent", "studios", "contact", "meeting", "about"];
+  // answer: FAQ-Agent · Studios durchsuchen · Kontaktformular · Über uns.
+  const PARTNER_ROW = ["faq-agent", "studios", "contact", "about"];
 
   it("shows the full partner row whatever the agent asked for", () => {
     expect(resolveActions([], "partner")).toEqual(PARTNER_ROW);
     expect(resolveActions(["faq-agent", "contact"], "partner")).toEqual(PARTNER_ROW);
     expect(resolveActions(["studios", "contact"], "partner")).toEqual(PARTNER_ROW);
-    expect(resolveActions(["faq", "meeting"], "partner")).toEqual(PARTNER_ROW);
+    expect(resolveActions(["meeting"], "partner")).toEqual(PARTNER_ROW); // hidden id dropped
   });
 
   it("shows the about chip even on a FAQ answer that asked for nothing", () => {
     expect(resolveActions([], "faq")).toEqual(["about"]);
   });
 
-  it("the FAQ agent's usual four requested chips all survive next to the guaranteed one", () => {
-    // Before the cap was raised to 5, `faq` was silently dropped here.
+  it("never shows the removed Partner-finden and Termin-buchen chips", () => {
+    // The prompt may still emit these markers; they are parsed (so stripped from
+    // the prose) but must never reach the chip row.
+    for (const surface of ["faq", "partner"] as const) {
+      const resolved: string[] = resolveActions(["partner", "contact", "meeting", "faq"], surface);
+      for (const id of HIDDEN_ACTION_IDS) expect(resolved).not.toContain(id);
+    }
     expect(resolveActions(["partner", "contact", "meeting", "faq"], "faq")).toEqual([
-      "partner",
       "contact",
-      "meeting",
       "faq",
       "about",
     ]);

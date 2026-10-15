@@ -46,9 +46,14 @@ describe("PAGE_HELP contract", () => {
 
   it("Menu help names every menu option", () => {
     const text = PAGE_HELP.menu.de.join(" ") + " " + PAGE_HELP.menu.en.join(" ");
-    for (const needle of ["FAQ", "Partner", "Kontaktformular", "Termin", "sportnavi.de"]) {
+    for (const needle of ["FAQ", "Kontaktformular", "sportnavi.de"]) {
       expect(text).toContain(needle);
     }
+  });
+
+  it("Menu help no longer mentions the removed options", () => {
+    const text = PAGE_HELP.menu.de.join(" ") + " " + PAGE_HELP.menu.en.join(" ");
+    expect(text).not.toMatch(/Partner finden|Find partners|Termin buchen|Book appointment/);
   });
 
   it("no manual mentions another page's feature as its own purpose", () => {

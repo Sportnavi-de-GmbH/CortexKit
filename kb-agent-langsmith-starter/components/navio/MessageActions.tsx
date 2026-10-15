@@ -8,34 +8,24 @@
 // green is the AI action, orange is the human hand-off, and a link off to sportnavi.de
 // is neither, so it stays neutral. Do not add a third brand colour here.
 //
-// Presentational only — NavioWidget owns navigation and the booking URL, exactly as
-// it does for NavioMenu.
+// Presentational only — NavioWidget owns navigation, exactly as it does for NavioMenu.
+// The "partner" and "meeting" chips were removed with those features; resolveActions
+// never passes them here (lib/navio-actions.ts HIDDEN_ACTION_IDS).
 
-import { ArrowUpRight, Bot, Calendar, HelpCircle, Info, Mail, MapPin, Search } from "lucide-react";
+import { ArrowUpRight, Bot, HelpCircle, Info, Mail, Search } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import type { NavioActionId } from "../../lib/navio-actions";
-import { ABOUT_URL, FAQ_URL, STUDIOS_URL } from "./links";
+import type { VisibleActionId } from "../../lib/navio-actions";
+import { ABOUT_URL, CONTACT_URL, FAQ_URL, STUDIOS_URL } from "./links";
 
 /** Where a chip goes: back into the widget, or out to sportnavi.de. */
-type Target =
-  | { kind: "screen"; screen: "chat" | "partner" | "contact" }
-  | { kind: "booking" }
-  | { kind: "link"; href: string };
+type Target = { kind: "screen"; screen: "chat" | "partner" | "contact" } | { kind: "link"; href: string };
 
 const ACTIONS: Record<
-  NavioActionId,
+  VisibleActionId,
   { label: string; icon: LucideIcon; accent: "green" | "orange" | "neutral"; target: Target }
 > = {
-  partner: {
-    label: "Partner finden",
-    icon: MapPin,
-    accent: "green",
-    target: { kind: "screen", screen: "partner" },
-  },
-  // The Partner screen's hand-off back to the FAQ agent. Green like "Partner
-  // finden" — both are an AI agent, and the visitor should read them as the same
-  // kind of destination.
+  // The Partner screen's hand-off back to the FAQ agent. Green: it is an AI agent.
   "faq-agent": {
     label: "FAQ-Agent",
     icon: Bot,
@@ -54,9 +44,8 @@ const ACTIONS: Record<
     label: "Kontaktformular",
     icon: Mail,
     accent: "orange",
-    target: { kind: "screen", screen: "contact" },
+    target: { kind: "link", href: CONTACT_URL },
   },
-  meeting: { label: "Termin buchen", icon: Calendar, accent: "orange", target: { kind: "booking" } },
   faq: {
     label: "FAQ",
     icon: HelpCircle,
@@ -98,20 +87,16 @@ const CHIP_BASE =
 export function MessageActions({
   actions,
   onScreen,
-  bookingUrl,
 }: {
-  actions: NavioActionId[];
+  actions: VisibleActionId[];
   onScreen: (screen: "chat" | "partner" | "contact") => void;
-  /** Null when NEXT_PUBLIC_BOOKING_URL is unset — the meeting chip is then dropped, like the menu tile. */
-  bookingUrl: string | null;
 }) {
-  // Drop chips that have nowhere to go, then bail out rather than render an empty row.
-  const usable = actions.filter((id) => ACTIONS[id].target.kind !== "booking" || bookingUrl);
-  if (usable.length === 0) return null;
+  // Bail out rather than render an empty row.
+  if (actions.length === 0) return null;
 
   return (
     <div className="mt-2 flex max-w-[92%] flex-wrap gap-2">
-      {usable.map((id) => {
+      {actions.map((id) => {
         const { label, icon: Icon, accent, target } = ACTIONS[id];
         const { chip, outline } = ACCENT[accent];
         // globals.css carries an UNLAYERED button:focus-visible rule that beats Tailwind
@@ -139,11 +124,7 @@ export function MessageActions({
           <button
             key={id}
             type="button"
-            onClick={() =>
-              target.kind === "booking"
-                ? window.open(bookingUrl!, "_blank", "noopener,noreferrer")
-                : onScreen(target.screen)
-            }
+            onClick={() => onScreen(target.screen)}
             className={`${CHIP_BASE} ${chip}`}
             style={style}
           >

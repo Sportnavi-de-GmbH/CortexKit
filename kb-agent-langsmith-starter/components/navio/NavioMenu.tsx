@@ -16,7 +16,7 @@
 // visitors read English. Compact labels (tier headings, link chips) join both
 // with " · ", the way the footer's "Datenschutz · Privacy Policy" already does.
 
-import { ArrowUpRight, ChevronRight, Bot, Calendar, Mail, MapPin } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Bot, Mail } from "lucide-react";
 import { SITE_LINKS } from "./links";
 
 type Accent = "green" | "orange";
@@ -191,18 +191,14 @@ function TierLabel({ de, en }: { de: string; en: string }) {
   );
 }
 
+// "Partner finden" and "Termin buchen" were removed; the Kontaktformular tile opens
+// sportnavi.de/kontakt/ (NavioWidget's openContactPage) instead of the in-widget form.
 export function NavioMenu({
   onSelectFaq,
-  onSelectPartner,
   onSelectContact,
-  onSelectMeeting,
 }: {
   onSelectFaq: () => void;
-  onSelectPartner: () => void;
   onSelectContact: () => void;
-  // Undefined when NEXT_PUBLIC_BOOKING_URL is unset — the tile is hidden rather
-  // than shown disabled, same as "Partner finden" degrading when its host is unset.
-  onSelectMeeting?: () => void;
 }) {
   return (
     <nav aria-label="Navio Plus Hauptmenü · main menu" className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
@@ -228,21 +224,12 @@ export function NavioMenu({
               accent="green"
               onClick={onSelectFaq}
             />
-            <PrimaryRow
-              icon={<MapPin size={22} strokeWidth={1.75} />}
-              title="Partner finden"
-              titleEn="Find partners"
-              body="Studios & Kurse in deiner Nähe – sag Stadt und Sportart."
-              bodyEn="Studios & classes near you — just name a city and a sport."
-              accent="green"
-              onClick={onSelectPartner}
-            />
           </div>
         </div>
 
         <div className="mt-5">
           <TierLabel de="Direkter Kontakt" en="Direct contact" />
-          <div className={`mt-2 grid gap-2 ${onSelectMeeting ? "grid-cols-2" : "grid-cols-1"}`}>
+          <div className="mt-2 grid grid-cols-1 gap-2">
             <SecondaryTile
               icon={<Mail size={20} strokeWidth={1.75} />}
               title="Kontaktformular"
@@ -250,15 +237,6 @@ export function NavioMenu({
               accent="orange"
               onClick={onSelectContact}
             />
-            {onSelectMeeting && (
-              <SecondaryTile
-                icon={<Calendar size={20} strokeWidth={1.75} />}
-                title="Termin buchen"
-                titleEn="Book a meeting"
-                accent="orange"
-                onClick={onSelectMeeting}
-              />
-            )}
           </div>
         </div>
 

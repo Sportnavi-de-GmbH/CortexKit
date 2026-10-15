@@ -49,7 +49,7 @@ import {
   tooLongParts,
 } from "@/lib/message-limits";
 import { NavioMenu } from "./NavioMenu";
-import { PRIVACY_URL } from "./links";
+import { CONTACT_URL, PRIVACY_URL } from "./links";
 import { SportnaviLogo } from "./SportnaviLogo";
 import { NavioLogo } from "./NavioLogo";
 import { KontaktForm } from "./KontaktForm";
@@ -70,10 +70,6 @@ const HEADER: Record<
   info: { title: "Über Navio Plus", subtitle: null, dot: false },
 };
 
-
-// Public Microsoft Bookings link for the "Termin buchen" menu card. No default —
-// unset means the card is hidden (NavioMenu only renders it when a handler is given).
-const BOOKING_URL = process.env.NEXT_PUBLIC_BOOKING_URL || null;
 
 const QUICK_REPLIES = [
   "Angebote finden",
@@ -121,17 +117,17 @@ const ADVANTAGES: { de: string; en: string }[] = [
   { de: "Schreib in jeder Sprache – Navio antwortet in deiner", en: "Write in any language — Navio replies in yours" },
   { de: "Antwortet nur mit offiziellen Sportnavi-Infos – erfindet nichts", en: "Answers only with official Sportnavi info — never invents" },
   { de: "DSGVO-konform – deine Zustimmung vor jeder Nutzung", en: "GDPR-compliant — your consent before every use" },
-  { de: "FAQ-Agent & Kontaktformular in einem Widget", en: "FAQ agent & contact form in one widget" },
+  { de: "FAQ-Agent & direkter Kontakt in einem Widget", en: "FAQ agent & direct contact in one widget" },
 ];
 
 function closeWidget() {
   window.parent?.postMessage("snv-widget-close", "*");
 }
 
-// Opens the Bookings link in a new tab. Never called with a null URL — NavioMenu
-// only renders the card when onSelectMeeting is defined.
-function openBooking() {
-  if (BOOKING_URL) window.open(BOOKING_URL, "_blank", "noopener,noreferrer");
+// The Kontaktformular tile leaves the widget for sportnavi.de's contact page. A new
+// tab, like every other outbound link: the widget lives in an iframe.
+function openContactPage() {
+  window.open(CONTACT_URL, "_blank", "noopener,noreferrer");
 }
 
 export function NavioWidget({
@@ -252,9 +248,7 @@ export function NavioWidget({
       {screen === "menu" && (
         <NavioMenu
           onSelectFaq={() => setScreen("chat")}
-          onSelectPartner={() => setScreen("partner")}
-          onSelectContact={() => setScreen("contact")}
-          onSelectMeeting={BOOKING_URL ? openBooking : undefined}
+          onSelectContact={openContactPage}
         />
       )}
       {isChatScreen && (
@@ -269,10 +263,9 @@ export function NavioWidget({
           // trace to two DIFFERENT Langfuse projects, so feedback has to say
           // which one it belongs to.
           surface={screen === "partner" ? "partner" : "faq"}
-          // Action chips navigate the widget, so the screen setter and the
-          // booking URL have to come from here — same ownership as NavioMenu.
+          // Action chips navigate the widget, so the screen setter has to come
+          // from here — same ownership as NavioMenu.
           onAction={setScreen}
-          bookingUrl={BOOKING_URL}
         />
       )}
       {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
@@ -511,7 +504,6 @@ function ChatBody({
   quickReplies,
   surface,
   onAction,
-  bookingUrl,
 }: {
   agent: Agent;
   isBusy: boolean;
@@ -521,7 +513,6 @@ function ChatBody({
   quickReplies: readonly string[];
   surface: "faq" | "partner";
   onAction: (screen: "chat" | "partner" | "contact") => void;
-  bookingUrl: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -597,7 +588,6 @@ function ChatBody({
             sessionId={agent.session?.sessionId}
             surface={surface}
             onAction={onAction}
-            bookingUrl={bookingUrl}
           />
         ),
       )}
@@ -632,13 +622,11 @@ function BotMessage({
   sessionId,
   surface,
   onAction,
-  bookingUrl,
 }: {
   message: EveMessageData["messages"][number];
   sessionId: string | undefined;
   surface: "faq" | "partner";
   onAction: (screen: "chat" | "partner" | "contact") => void;
-  bookingUrl: string | null;
 }) {
   const streaming = message.metadata?.status === "streaming";
   const complete = message.metadata?.status === "complete";
@@ -674,7 +662,7 @@ function BotMessage({
           cards carries it by construction — same condition, decided here. */}
       {complete && (notices.includes("data") || !!v3Sections?.some((s) => s.items.length > 0)) && <DataNotice />}
       {complete && (
-        <MessageActions actions={chips} onScreen={onAction} bookingUrl={bookingUrl} />
+        <MessageActions actions={chips} onScreen={onAction} />
       )}
       {/* Only once the answer is finished: rating a half-written reply is
           meaningless, and `turnId` is what ties it to the Langfuse trace. */}

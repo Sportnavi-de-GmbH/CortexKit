@@ -26,6 +26,20 @@ export const NAVIO_ACTION_IDS = [
 
 export type NavioActionId = (typeof NAVIO_ACTION_IDS)[number];
 
+/**
+ * Ids the parser still recognises — so their markers are stripped from the prose —
+ * but the widget never shows: the Partner finder and the booking link were removed
+ * from Navio. The prompts may still emit them, hence parse-but-hide rather than
+ * dropping them from NAVIO_ACTION_IDS.
+ */
+export const HIDDEN_ACTION_IDS = ["partner", "meeting"] as const;
+
+export type VisibleActionId = Exclude<NavioActionId, (typeof HIDDEN_ACTION_IDS)[number]>;
+
+function isVisibleAction(id: NavioActionId): id is VisibleActionId {
+  return !(HIDDEN_ACTION_IDS as readonly string[]).includes(id);
+}
+
 /** Non-button callouts an answer can carry. Currently one: the freshness warning. */
 export const NAVIO_NOTICE_IDS = ["data"] as const;
 
@@ -47,11 +61,11 @@ export type NavioSurface = "faq" | "partner";
  * The partner screen guarantees its WHOLE row, in a fixed order: the V3 workflow
  * agent that answers there emits no markers at all, and the row must read the
  * same under every answer as it does under a FAQ answer (hand-off to the FAQ
- * agent, studio search, the two human contacts, about).
+ * agent, studio search, contact, about).
  */
-export const ALWAYS_ACTIONS: Record<NavioSurface, readonly NavioActionId[]> = {
+export const ALWAYS_ACTIONS: Record<NavioSurface, readonly VisibleActionId[]> = {
   faq: ["about"],
-  partner: ["faq-agent", "studios", "contact", "meeting", "about"],
+  partner: ["faq-agent", "studios", "contact", "about"],
 };
 
 /**
@@ -134,14 +148,15 @@ export function parseMessageActions(raw: string): ParsedMessage {
 export function resolveActions(
   requested: readonly NavioActionId[],
   surface: NavioSurface,
-): NavioActionId[] {
+): VisibleActionId[] {
   const guaranteed = ALWAYS_ACTIONS[surface];
 
   // Pull the guaranteed ids out of the request first, whether or not the agent
   // asked for them. Trimming the rest against `MAX_ACTIONS - guaranteed.length`
   // is then exact — the earlier version reserved room only for the ones the agent
   // had NOT asked for, so an answer that emitted them mid-list overflowed the row.
-  const rest = requested.filter((id) => !guaranteed.includes(id));
+  // Hidden ids (removed features) are dropped before anything else.
+  const rest = requested.filter(isVisibleAction).filter((id) => !guaranteed.includes(id));
   const room = Math.max(0, MAX_ACTIONS - guaranteed.length);
 
   return [...rest.slice(0, room), ...guaranteed];

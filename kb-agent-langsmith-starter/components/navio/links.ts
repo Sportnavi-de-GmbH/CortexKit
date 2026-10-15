@@ -17,6 +17,8 @@ export const FAQ_URL = "https://www.sportnavi.de/faq/";
 export const ABOUT_URL = "https://www.sportnavi.de/ueber-uns/";
 /** The full studio directory — the Partner screen always offers it as a chip. */
 export const STUDIOS_URL = "https://www.sportnavi.de/studios/";
+/** Every "Kontaktformular" button (menu tile + chat chip) opens this page. */
+export const CONTACT_URL = "https://www.sportnavi.de/kontakt/";
 
 /** `en` is omitted when the English label would be identical (e.g. "Studios"). */
 export type SiteLink = { label: string; en?: string; href: string };
@@ -29,7 +31,7 @@ export type SiteLink = { label: string; en?: string; href: string };
 export const SITE_LINKS: SiteLink[] = [
   { label: "FAQ / Hilfe", en: "FAQ / Help", href: FAQ_URL },
   { label: "Studios", href: STUDIOS_URL },
-  { label: "Kontakt", en: "Contact", href: "https://www.sportnavi.de/kontakt/" },
+  { label: "Kontakt", en: "Contact", href: CONTACT_URL },
   { label: "Über uns", en: "About us", href: ABOUT_URL },
   { label: "Datenschutz", en: "Privacy", href: PRIVACY_URL },
 ];
