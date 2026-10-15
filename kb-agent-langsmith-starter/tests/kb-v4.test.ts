@@ -15,8 +15,12 @@ import { FAQ_STARTER_QUESTIONS } from "../components/navio/starter-questions";
 import { KB_SOURCE_URLS } from "../lib/kb-sources";
 import { docxToMarkdown, extractKbUrls } from "../scripts/build-kb";
 
-const kb = readFileSync("agent/prompts/kb-v4.md", "utf8");
-const prompt = readFileSync("agent/prompts/instructions-v4.md", "utf8");
+// Line endings normalised: a Windows checkout (core.autocrlf) turns these into CRLF.
+const read = (path: string) => readFileSync(path, "utf8").replace(/
+/g, "
+");
+const kb = read("agent/prompts/kb-v4.md");
+const prompt = read("agent/prompts/instructions-v4.md");
 const OPEN = "<<< DOCUMENT: kb-v4.md >>>";
 const CLOSE = "<<< END OF kb-v4.md >>>";
 const rules = prompt.slice(0, prompt.indexOf(OPEN)) + prompt.slice(prompt.indexOf(CLOSE));
@@ -34,7 +38,7 @@ describe("the knowledge base inside prompt v4", () => {
   });
 
   it("is the active prompt", () => {
-    expect(readFileSync("agent/instructions.md", "utf8")).toBe(prompt);
+    expect(read("agent/instructions.md")).toBe(prompt);
   });
 });
 
