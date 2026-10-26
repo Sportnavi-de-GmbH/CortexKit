@@ -1,12 +1,13 @@
 "use client";
 
-// Navio Plus widget — the menu-based FAQ + contact bot, built to
+// Navio Plus widget — the FAQ + contact bot, built to
 // docs/design/NAVIO_PLUS_WIDGET_SPEC.md. Screens: launcher (public/launcher.js) →
-// greeting → consent → MENU → FAQ chat | Kontaktformular → success; ⓘ → info.
-// This component is the in-iframe shell (header/body/footer, dark-mode toggle,
-// bilingual DE/EN copy) orchestrating the screens; the FAQ chat lives in ChatBody,
-// the menu in NavioMenu, the contact form in KontaktForm. Business logic (the eve
-// agent) is passed in via `agent`; this file is design + flow only.
+// greeting → consent → FAQ chat (home); ⓘ → page help with the sportnavi.de links
+// → info. The separate menu screen was removed: it only stood between consent and
+// the chat. This component is the in-iframe shell (header/body/footer, dark-mode
+// toggle, bilingual DE/EN copy) orchestrating the screens; the FAQ chat lives in
+// ChatBody, the contact form in KontaktForm. Business logic (the eve agent) is
+// passed in via `agent`; this file is design + flow only.
 
 import { FeedbackControls } from "./FeedbackControls";
 import { useEffect, useRef, useState } from "react";
@@ -48,8 +49,7 @@ import {
   nearLimitParts,
   tooLongParts,
 } from "@/lib/message-limits";
-import { NavioMenu } from "./NavioMenu";
-import { CONTACT_URL, PRIVACY_URL } from "./links";
+import { PRIVACY_URL } from "./links";
 import { SportnaviLogo } from "./SportnaviLogo";
 import { NavioLogo } from "./NavioLogo";
 import { KontaktForm } from "./KontaktForm";
@@ -57,7 +57,7 @@ import { SourceList } from "./SourceList";
 import { FAQ_STARTER_QUESTIONS } from "./starter-questions";
 
 type Agent = UseEveAgentHelpers<EveMessageData>;
-type Screen = "greeting" | "consent" | "menu" | "chat" | "partner" | "contact" | "info";
+type Screen = "greeting" | "consent" | "chat" | "partner" | "contact" | "info";
 
 /** Header title/subtitle per screen (Navio Plus, spec §2). */
 const HEADER: Record<
@@ -65,7 +65,6 @@ const HEADER: Record<
   { title: string; subtitle: string | null; dot: boolean }
 > = {
   consent: { title: "Navio Plus", subtitle: "Online", dot: true },
-  menu: { title: "Navio Plus", subtitle: "Online", dot: true },
   chat: { title: "FAQ-Agent", subtitle: "Online", dot: true },
   partner: { title: "Partner-Finder", subtitle: "Online", dot: true },
   contact: { title: "Kontakt aufnehmen", subtitle: "Antwort in 1–2 Werktagen", dot: false },
@@ -122,12 +121,6 @@ function closeWidget() {
   window.parent?.postMessage("snv-widget-close", "*");
 }
 
-// The Kontaktformular tile leaves the widget for sportnavi.de's contact page. A new
-// tab, like every other outbound link: the widget lives in an iframe.
-function openContactPage() {
-  window.open(CONTACT_URL, "_blank", "noopener,noreferrer");
-}
-
 export function NavioWidget({
   faqAgent,
   partnerAgent,
@@ -176,7 +169,8 @@ export function NavioWidget({
   }
 
   const header = HEADER[screen];
-  const showBack = isChatScreen || screen === "contact" || screen === "info";
+  // The FAQ chat is home, so it has no back arrow; everything else returns to it.
+  const showBack = screen === "partner" || screen === "contact" || screen === "info";
 
   return (
     <div className={root}>
@@ -195,8 +189,8 @@ export function NavioWidget({
           {showBack && (
             <button
               type="button"
-              aria-label="Zurück zum Menü"
-              onClick={() => setScreen("menu")}
+              aria-label="Zurück zum Chat"
+              onClick={() => setScreen("chat")}
               className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-(--border) text-(--fg-muted) transition-colors hover:bg-(--surface-muted) hover:text-(--fg) after:absolute after:top-1/2 after:left-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
             >
               <ArrowLeft size={18} strokeWidth={1.75} />
@@ -216,11 +210,11 @@ export function NavioWidget({
           <HeaderBtn label={theme === "dark" ? "Helles Design" : "Dunkles Design"} onClick={toggle}>
             {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
           </HeaderBtn>
-          {(screen === "menu" || isChatScreen) && (
-            // Page-specific help: the SAME ⓘ on menu, FAQ and Partner, opening
-            // a manual for the current screen only (components/navio/PageHelp).
-            // The menu's old direct jump to "Über Navio Plus" lives on as a
-            // link inside the menu's help panel.
+          {isChatScreen && (
+            // Page-specific help: the SAME ⓘ on FAQ and Partner, opening a manual
+            // for the current screen only (components/navio/PageHelp). On the FAQ
+            // chat it also carries the sportnavi.de links and "Über Navio Plus"
+            // that used to live on the removed menu screen.
             <HeaderBtn
               label="Info zu dieser Seite · About this page"
               onClick={() => setHelpOpen((v) => !v)}
@@ -241,13 +235,7 @@ export function NavioWidget({
 
       {/* Body — the only scroll region */}
       {screen === "consent" && (
-        <ConsentGate declined={declined} onAccept={() => setScreen("menu")} onDecline={() => setDeclined(true)} />
-      )}
-      {screen === "menu" && (
-        <NavioMenu
-          onSelectFaq={() => setScreen("chat")}
-          onSelectContact={openContactPage}
-        />
+        <ConsentGate declined={declined} onAccept={() => setScreen("chat")} onDecline={() => setDeclined(true)} />
       )}
       {isChatScreen && (
         <ChatBody
@@ -262,20 +250,21 @@ export function NavioWidget({
           // which one it belongs to.
           surface={screen === "partner" ? "partner" : "faq"}
           // Action chips navigate the widget, so the screen setter has to come
-          // from here — same ownership as NavioMenu.
+          // from here.
           onAction={setScreen}
         />
       )}
-      {screen === "contact" && <KontaktForm onBack={() => setScreen("menu")} />}
-      {screen === "info" && <InfoPanel onBack={() => setScreen("menu")} />}
+      {screen === "contact" && <KontaktForm onBack={() => setScreen("chat")} />}
+      {screen === "info" && <InfoPanel onBack={() => setScreen("chat")} />}
 
       {/* Page-specific help overlay — only over screens that have a manual. */}
-      {helpOpen && (screen === "menu" || isChatScreen) && (
+      {helpOpen && isChatScreen && (
         <PageHelpOverlay
           screen={screen as HelpScreen}
           onClose={() => setHelpOpen(false)}
+          showSiteLinks={screen === "chat"}
           onOpenAbout={
-            screen === "menu"
+            screen === "chat"
               ? () => {
                   setHelpOpen(false);
                   setScreen("info");

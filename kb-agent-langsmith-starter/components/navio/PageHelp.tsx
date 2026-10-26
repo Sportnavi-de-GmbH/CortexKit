@@ -10,8 +10,9 @@
 // orange for human hand-off (docs/design/WIDGET-DESIGN-GUIDELINES.md).
 
 import { useEffect } from "react";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, X } from "lucide-react";
 
+import { SITE_LINKS } from "./links";
 import { PAGE_HELP, type HelpScreen } from "./pageHelpContent";
 
 export { PAGE_HELP, type HelpScreen, type PageHelpEntry } from "./pageHelpContent";
@@ -24,12 +25,14 @@ export { PAGE_HELP, type HelpScreen, type PageHelpEntry } from "./pageHelpConten
 export function PageHelpOverlay({
   screen,
   onClose,
+  showSiteLinks = false,
   onOpenAbout,
 }: {
   screen: HelpScreen;
   onClose: () => void;
-  /** Menu only: keeps the existing "Über Navio Plus" screen reachable, since
-   *  this overlay replaced the ⓘ that used to navigate straight to it. */
+  /** FAQ chat only: the sportnavi.de links that lived on the removed menu screen. */
+  showSiteLinks?: boolean;
+  /** FAQ chat only: keeps the "Über Navio Plus" screen reachable. */
   onOpenAbout?: () => void;
 }) {
   const help = PAGE_HELP[screen];
@@ -54,7 +57,9 @@ export function PageHelpOverlay({
         aria-modal="true"
         aria-label={help.title}
         onClick={(e) => e.stopPropagation()}
-        className="mx-auto mt-3 w-[calc(100%-24px)] max-w-[452px] rounded-2xl border border-(--border) bg-(--surface) p-4 shadow-lg"
+        // Scrolls inside the panel: with the link row it is taller than the
+        // 560px floating widget, and its last rows must stay reachable.
+        className="mx-auto mt-3 max-h-[calc(100%-24px)] w-[calc(100%-24px)] max-w-[452px] overflow-y-auto overscroll-contain rounded-2xl border border-(--border) bg-(--surface) p-4 shadow-lg"
       >
         <div className="mb-2 flex items-start justify-between gap-3">
           <h3 className="font-headline text-sm font-semibold text-(--fg)">{help.title}</h3>
@@ -79,6 +84,8 @@ export function PageHelpOverlay({
           ))}
         </div>
 
+        {showSiteLinks && <SiteLinkPills />}
+
         {onOpenAbout && (
           <button
             type="button"
@@ -91,5 +98,46 @@ export function PageHelpOverlay({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The general sportnavi.de links (FAQ, Studios, Kontakt, Über uns, Datenschutz).
+ * They LEAVE the widget, so each opens in a new tab — the widget lives in an
+ * iframe, and navigating in place would replace the chat, not the host page.
+ */
+function SiteLinkPills() {
+  return (
+    <nav aria-label="Mehr auf sportnavi.de · More on sportnavi.de" className="mt-3 border-t border-(--border) pt-3">
+      <h4 className="text-[11px] font-semibold tracking-[0.14em] text-(--fg-subtle) uppercase">
+        <span lang="de">Nützliche Links</span>
+        <span aria-hidden="true"> · </span>
+        <span lang="en" className="font-medium opacity-80">
+          Useful links
+        </span>
+      </h4>
+      <ul className="mt-2 flex flex-wrap gap-2">
+        {SITE_LINKS.map((link) => (
+          <li key={link.href}>
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-[32px] items-center gap-1 rounded-full border border-(--border) bg-(--surface) px-3 py-1.5 text-[13px] font-medium text-(--fg-muted) transition-colors hover:border-(--fg)/25 hover:bg-(--surface-muted) hover:text-(--fg) focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              <span lang="de">{link.label}</span>
+              {link.en && (
+                <span lang="en" className="font-normal text-(--fg-subtle)">
+                  <span aria-hidden="true">· </span>
+                  {link.en}
+                </span>
+              )}
+              <ArrowUpRight size={13} strokeWidth={2} className="text-(--fg-subtle)" aria-hidden="true" />
+              <span className="sr-only">(öffnet in neuem Tab · opens in a new tab)</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }

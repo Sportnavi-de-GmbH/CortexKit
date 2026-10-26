@@ -10,7 +10,9 @@
 
 ## 0. What Navio Plus is (design-wise)
 
-Navio Plus is the **menu variant** of the widget. Where the plain Navio bot drops straight into chat after consent, Navio Plus inserts a **menu step** offering two paths — the **FAQ agent** (live chat) and a **Kontaktformular** (contact form) — inside one widget.
+> **Update 2026-10-26 — the menu screen is gone.** After consent the widget opens **directly in the FAQ chat**. The menu's links (FAQ / Hilfe · Studios · Kontakt · Über uns · Datenschutz) moved into the chat's **ⓘ** help panel, which also links to "Über Navio Plus"; context buttons (Kontaktformular, FAQ, Studios, Über uns) still appear under each answer. Sections below that describe the menu (§1 table rows, §6) are historical.
+
+Navio Plus combines the **FAQ agent** (live chat) and the **Kontaktformular** (contact form, sportnavi.de/kontakt) inside one widget.
 
 - **Bot identity:** name `Navio Plus`, icon `Sparkles`, role *"menü · faq + kontakt"*.
 - **Source components:** `ChatWidget` (launcher shell) → `NavioMenuChat` (menu shell) → `NavioMenu`, `NavioChat` (embedded FAQ), `KontaktForm`.
@@ -37,30 +39,27 @@ The widget opens these screens, in this order:
         └─────────┬──────────┘
        Zustimmen  │
         ┌─────────▼──────────┐
-        │  3. Menu           │  [FAQ-Agent]  [Kontaktformular]
-        └────┬──────────┬────┘
-       FAQ   │          │  Kontakt
-   ┌─────────▼───┐  ┌───▼──────────────┐
-   │ 4a. FAQ Chat│  │ 4b. Kontaktform  │
-   └─────────────┘  └───┬──────────────┘
-                    submit│
-                    ┌─────▼──────────┐
-                    │ 4c. Success    │
-                    └────────────────┘
-
-   Any screen (menu) → [ⓘ] → 5. Info panel ("Über Navio Plus")
+        │  3. FAQ Chat (home)│  answers + chips: Kontaktformular · FAQ · Studios · Über uns
+        └─────────┬──────────┘
+             [ⓘ]  │
+        ┌─────────▼──────────┐
+        │  Help panel        │  how to use + links: FAQ · Studios · Kontakt · Über uns · Datenschutz
+        └─────────┬──────────┘
+                  │  "Mehr über Navio Plus"
+        ┌─────────▼──────────┐
+        │  4. Info panel     │  "Über Navio Plus"
+        └────────────────────┘
 ```
 
 **Header navigation rules** (which control appears when):
 
 | Screen | Left slot | Right controls |
 |---|---|---|
-| Menu | bot avatar | 🌙/☀️ theme · ⓘ info · ✕ close |
-| FAQ chat | ← back (to menu) | ↻ reset · ✕ close |
-| Kontaktform | ← back (to menu) | ✕ close |
-| Info panel | ← back | ✕ close |
+| Consent | logo | 🌙/☀️ theme · ✕ close |
+| FAQ chat (home) | logo (no back) | 🌙/☀️ theme · ⓘ help + links · ↻ reset · ✕ close |
+| Info panel | ← back (to chat) | 🌙/☀️ theme · ✕ close |
 
-Back always returns to the **menu**; there is no deep back-stack.
+Back always returns to the **FAQ chat**; there is no deep back-stack.
 
 ---
 

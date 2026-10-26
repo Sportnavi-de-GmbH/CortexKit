@@ -110,6 +110,19 @@ describe("prompt v4 rules — FAQ and support only", () => {
     expect(rules).toContain("=== 7A. QUELLEN");
     expect(rules).toContain("[[source:URL]]");
   });
+
+  // Live answers said "werden nicht in der Wissensdatenbank aufgeführt" — the KB's own
+  // "Hinweis für den Agenten" paraphrased to a visitor. The ban must be global, not
+  // only in the pricing section, and no rule may invite "say it is not documented".
+  it("keeps knowledge-base meta talk out of every answer", () => {
+    expect(rules).toContain("SPRICH WIE NAVIO, NICHT WIE EIN SYSTEM");
+    expect(rules).toContain('"Hinweis für den Agenten"');
+    expect(rules).not.toMatch(/dass es nicht dokumentiert ist/);
+  });
+
+  it("has no menu to send people back to — the widget opens in the chat", () => {
+    expect(rules).not.toMatch(/Navio-Menü bietet/);
+  });
 });
 
 describe("starter questions on the welcome screen", () => {

@@ -1,6 +1,6 @@
-// Outbound links to sportnavi.de, shared by the menu's link row and the widget
+// Outbound links to sportnavi.de, shared by the ⓘ help panel's link row and the widget
 // shell's privacy footer. Kept in one module so the privacy URL — which is a legal
-// requirement and appears in four places (footer, consent gate, info panel, menu) —
+// requirement and appears in four places (footer, consent gate, info panel, ⓘ links) —
 // has exactly one definition and one env override.
 
 /** Point this at the real Sportnavi privacy page (override via env if needed). */
@@ -17,14 +17,14 @@ export const FAQ_URL = "https://www.sportnavi.de/faq/";
 export const ABOUT_URL = "https://www.sportnavi.de/ueber-uns/";
 /** The full studio directory — the Partner screen always offers it as a chip. */
 export const STUDIOS_URL = "https://www.sportnavi.de/studios/";
-/** Every "Kontaktformular" button (menu tile + chat chip) opens this page. */
+/** Every "Kontaktformular" button (chat chip + ⓘ link) opens this page. */
 export const CONTACT_URL = "https://www.sportnavi.de/kontakt/";
 
 /** `en` is omitted when the English label would be identical (e.g. "Studios"). */
 export type SiteLink = { label: string; en?: string; href: string };
 
 /**
- * Deep links shown at the bottom of the menu. These LEAVE the widget, so they open
+ * Deep links shown in the FAQ chat's ⓘ help panel. These LEAVE the widget, so they open
  * in a new tab — the widget lives in an iframe, and navigating in place would
  * replace the chat rather than the host page.
  */

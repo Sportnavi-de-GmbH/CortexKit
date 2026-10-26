@@ -10,10 +10,10 @@ import { describe, expect, it } from "vitest";
 
 import { PAGE_HELP } from "../components/navio/pageHelpContent";
 
-const SCREENS = ["menu", "chat", "partner"] as const;
+const SCREENS = ["chat", "partner"] as const;
 
 describe("PAGE_HELP contract", () => {
-  it("covers exactly the three screens that have a manual", () => {
+  it("covers exactly the two screens that have a manual (the menu screen is gone)", () => {
     expect(Object.keys(PAGE_HELP).sort()).toEqual([...SCREENS].sort());
   });
 
@@ -44,15 +44,11 @@ describe("PAGE_HELP contract", () => {
     expect(en).toMatch(/city-specific/i);
   });
 
-  it("Menu help names every menu option", () => {
-    const text = PAGE_HELP.menu.de.join(" ") + " " + PAGE_HELP.menu.en.join(" ");
-    for (const needle of ["FAQ", "Kontaktformular", "sportnavi.de"]) {
+  it("FAQ help points to the sportnavi.de links that replaced the menu", () => {
+    const text = PAGE_HELP.chat.de.join(" ") + " " + PAGE_HELP.chat.en.join(" ");
+    for (const needle of ["sportnavi.de", "FAQ", "Studios", "Kontakt", "Datenschutz", "privacy"]) {
       expect(text).toContain(needle);
     }
-  });
-
-  it("Menu help no longer mentions the removed options", () => {
-    const text = PAGE_HELP.menu.de.join(" ") + " " + PAGE_HELP.menu.en.join(" ");
     expect(text).not.toMatch(/Partner finden|Find partners|Termin buchen|Book appointment/);
   });
 

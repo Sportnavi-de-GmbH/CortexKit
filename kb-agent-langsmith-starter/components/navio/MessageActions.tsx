@@ -8,7 +8,7 @@
 // green is the AI action, orange is the human hand-off, and a link off to sportnavi.de
 // is neither, so it stays neutral. Do not add a third brand colour here.
 //
-// Presentational only — NavioWidget owns navigation, exactly as it does for NavioMenu.
+// Presentational only — NavioWidget owns navigation.
 // The "partner" and "meeting" chips were removed with those features; resolveActions
 // never passes them here (lib/navio-actions.ts HIDDEN_ACTION_IDS).
 
@@ -61,8 +61,8 @@ const ACTIONS: Record<
 };
 
 // Literal class strings — Tailwind only sees classes it can read statically.
-// Green fills (it is the primary in-widget action); orange is a tint, which is how
-// the menu's human-contact tiles already read; neutral matches the quick-reply pills.
+// Green fills (it is the primary in-widget action); orange is a tint, so the
+// human hand-off stays quiet; neutral matches the quick-reply pills.
 const ACCENT: Record<"green" | "orange" | "neutral", { chip: string; outline: string }> = {
   green: {
     chip: "border-(--brand-green) bg-(--brand-green) text-(--ink) hover:brightness-95",
@@ -100,7 +100,7 @@ export function MessageActions({
         const { label, icon: Icon, accent, target } = ACTIONS[id];
         const { chip, outline } = ACCENT[accent];
         // globals.css carries an UNLAYERED button:focus-visible rule that beats Tailwind
-        // utilities, so the ring colour has to be inline — same reason as NavioMenu.
+        // utilities, so the ring colour has to be inline.
         const style = { outlineColor: outline };
 
         if (target.kind === "link") {

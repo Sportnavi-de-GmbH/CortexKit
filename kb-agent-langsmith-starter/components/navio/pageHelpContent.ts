@@ -3,7 +3,7 @@
 // lives in PageHelp.tsx.
 
 /** Screens that have a manual. Keyed by the widget's `Screen` values. */
-export type HelpScreen = "menu" | "chat" | "partner";
+export type HelpScreen = "chat" | "partner";
 
 export interface PageHelpEntry {
   /** Panel heading, bilingual on one line. */
@@ -19,30 +19,17 @@ export interface PageHelpEntry {
  * to use it. Keep every entry scannable — a visitor reads this mid-task.
  */
 export const PAGE_HELP: Record<HelpScreen, PageHelpEntry> = {
-  menu: {
-    title: "Das Navio Menü · The Navio menu",
-    de: [
-      "Hier wählst du aus, wie Navio dir helfen soll:",
-      "FAQ-Agent — beantwortet allgemeine Fragen zu Sportnavi, sofort.",
-      "Kontaktformular — öffnet unser Kontaktformular auf sportnavi.de in einem neuen Tab.",
-      "Unten findest du außerdem direkte Links zu sportnavi.de.",
-    ],
-    en: [
-      "This menu is where you choose how Navio helps you:",
-      "FAQ agent — instant answers to general Sportnavi questions.",
-      "Contact form — opens our contact form on sportnavi.de in a new tab.",
-      "Below you also find direct links to sportnavi.de.",
-    ],
-  },
   chat: {
     title: "FAQ-Agent · FAQ agent",
     de: [
       "Diese Seite ist für allgemeine Fragen rund um Sportnavi da — z. B. Tarife, Check-in, Cashback oder Verträge. Du bekommst sofort eine Antwort.",
       "Schreib einfach in deiner Sprache — Navio versteht und antwortet in jeder Sprache.",
+      "Unten findest du direkte Links zu sportnavi.de — FAQ, Studios, Kontakt, Über uns und Datenschutz.",
     ],
     en: [
       "This page is for general questions about Sportnavi — e.g. tariffs, check-in, cashback or contracts. You get an answer right away.",
       "Just write in your own language — Navio understands and answers in any language.",
+      "Below you find direct links to sportnavi.de — FAQ, studios, contact, about us and privacy.",
     ],
   },
   partner: {
